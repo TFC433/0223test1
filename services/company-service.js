@@ -1,8 +1,9 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * * @version 7.9.0 (Phase 8: ID-based Operations & SQL Write Authority)
- * @date 2026-02-10
+ * * @version 8.0.6 (Phase 8: ID-based Operations & SQL Write Authority)
+ * @date 2026-02-23
+ * * @changelog Phase 8 Company API: company details eventLogs exclude opportunity-linked events
  * * @description
  * * 1. [Phase 8] Contract Enforcement: companyId is the ONLY valid operation key for Update/Delete/Details.
  * * 2. [Phase 8] Refactor: updateCompany, deleteCompany, getCompanyDetails now accept companyId.
@@ -331,13 +332,14 @@ class CompanyService {
             );
             const relatedOppIds = new Set(opportunities.map(o => o.opportunityId));
             
-            // Interactions & Events: Link by CompanyID or via related OpportunityID
+            // Interactions: Link by CompanyID or via related OpportunityID
             const interactions = allInteractions.filter(i => 
                 i.companyId === companyId || (i.opportunityId && relatedOppIds.has(i.opportunityId))
             ).sort((a, b) => new Date(b.interactionTime || 0) - new Date(a.interactionTime || 0));
 
+            // Events: Only link by CompanyID directly (No mixed Opportunity events)
             const eventLogs = allEventLogs.filter(e => 
-                e.companyId === companyId || (e.opportunityId && relatedOppIds.has(e.opportunityId))
+                e.companyId === companyId
             ).sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
 
             const potentialContacts = allPotentialContacts.filter(pc => 

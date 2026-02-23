@@ -1,3 +1,10 @@
+/*
+ * Project: TFC CRM
+ * File: public/scripts/opportunities/details/opportunity-interactions.js
+ * Version: v8.0.4
+ * Date: 2026-02-23
+ * Changelog: Phase 8 Interaction UI: operation-key rowIndex -> interactionId for edit/delete
+ */
 // public/scripts/opportunities/details/opportunity-interactions.js
 // 職責：專門管理「互動與新增」頁籤的所有 UI 與功能
 
@@ -192,8 +199,10 @@ const OpportunityInteractions = (() => {
         if (!_container) return;
 
         const form = _container.querySelector('#new-interaction-form');
-        const rowIndex = form.querySelector('#interaction-edit-rowIndex').value;
-        const isEditMode = !!rowIndex;
+        
+        // #interaction-edit-rowIndex carries interactionId since Phase 8; legacy name kept for minimal diff.
+        const interactionId = form.querySelector('#interaction-edit-rowIndex').value;
+        const isEditMode = !!interactionId;
 
         showLoading(isEditMode ? '正在更新互動紀錄...' : '正在新增互動紀錄...');
         try {
@@ -213,7 +222,7 @@ const OpportunityInteractions = (() => {
             if (_context.opportunityId) interactionData.opportunityId = _context.opportunityId;
             if (_context.companyId) interactionData.companyId = _context.companyId;
 
-            const url = isEditMode ? `/api/interactions/${rowIndex}` : '/api/interactions';
+            const url = isEditMode ? `/api/interactions/${interactionId}` : '/api/interactions';
             const method = isEditMode ? 'PUT' : 'POST';
 
             if (!isEditMode) interactionData.recorder = getCurrentUser();
@@ -266,7 +275,8 @@ const OpportunityInteractions = (() => {
         const form = _container.querySelector('#new-interaction-form');
         if (!form) return;
 
-        form.querySelector('#interaction-edit-rowIndex').value = item.rowIndex;
+        // #interaction-edit-rowIndex carries interactionId since Phase 8; legacy name kept for minimal diff.
+        form.querySelector('#interaction-edit-rowIndex').value = item.interactionId;
 
         const interactionTime = new Date(item.interactionTime || item.createdTime || new Date().toISOString());
         interactionTime.setMinutes(interactionTime.getMinutes() - interactionTime.getTimezoneOffset());
@@ -313,7 +323,7 @@ const OpportunityInteractions = (() => {
         showConfirmDialog(message, async () => {
             showLoading('正在刪除紀錄...');
             try {
-                await authedFetch(`/api/interactions/${rowIndex}`, { method: 'DELETE' });
+                await authedFetch(`/api/interactions/${interactionId}`, { method: 'DELETE' });
             } catch (error) {
                 if (error.message !== 'Unauthorized') {
                     console.error('刪除互動紀錄失敗:', error);

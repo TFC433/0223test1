@@ -1,9 +1,15 @@
-// public/scripts/opportunities/opportunity-details.js
+/**
+ * Project: TFC CRM
+ * File: public/scripts/opportunities/opportunity-details.js
+ * Version: 8.0.8
+ * Date: 2026-02-23
+ * Changelog: Phase 8 Opportunity UI: Safe module registration and comment corrections
+ */
 // [FINAL FIX] Phase 7 - Controller Flow + Event Binding Alignment
 // 重點：
 // 1. 維持 dashboard-widget / widget-content 視覺殼
 // 2. View 仍為 pure function（只回傳 HTML）
-// 3. 明確將「實際 DOM root」傳給 Events.init，修復編輯無法點擊問題
+// 3. 明確將「實際 DOM root」傳給 InfoCardEvents.init，修復編輯無法點擊問題
 
 window.currentDetailOpportunityId = null;
 window.currentOpportunityData = null; 
@@ -69,29 +75,45 @@ async function loadOpportunityDetailPage(opportunityId) {
         }
 
         // 4. 其他模組初始化（順序不變）
-        OpportunityStepper.init(opportunityInfo);
+        const Stepper = window.OpportunityStepper || (typeof OpportunityStepper !== 'undefined' ? OpportunityStepper : null);
+        if (Stepper && typeof Stepper.init === 'function') {
+            Stepper.init(opportunityInfo);
+        }
         
-        OpportunityEvents.init(eventLogs || [], {
-            opportunityId: opportunityInfo.opportunityId,
-            opportunityName: opportunityInfo.opportunityName,
-            linkedContacts: linkedContacts || []
-        });
+        const Events = window.OpportunityEvents || (typeof OpportunityEvents !== 'undefined' ? OpportunityEvents : null);
+        if (Events && typeof Events.init === 'function') {
+            Events.init(eventLogs || [], {
+                opportunityId: opportunityInfo.opportunityId,
+                opportunityName: opportunityInfo.opportunityName,
+                linkedContacts: linkedContacts || []
+            });
+        }
 
         const interactionContainer = document.getElementById('tab-content-interactions');
         if (interactionContainer) {
-            OpportunityInteractions.init(
-                interactionContainer,
-                { opportunityId: opportunityInfo.opportunityId },
-                interactions || []
-            );
+            const Interactions = window.OpportunityInteractions || (typeof OpportunityInteractions !== 'undefined' ? OpportunityInteractions : null);
+            if (Interactions && typeof Interactions.init === 'function') {
+                Interactions.init(
+                    interactionContainer,
+                    { opportunityId: opportunityInfo.opportunityId },
+                    interactions || []
+                );
+            }
         }
 
-        OpportunityContacts.init(opportunityInfo, linkedContacts || []);
-        OpportunityAssociatedOpps.render({
-            opportunityInfo,
-            parentOpportunity,
-            childOpportunities
-        });
+        const Contacts = window.OpportunityContacts || (typeof OpportunityContacts !== 'undefined' ? OpportunityContacts : null);
+        if (Contacts && typeof Contacts.init === 'function') {
+            Contacts.init(opportunityInfo, linkedContacts || []);
+        }
+
+        const AssocOpps = window.OpportunityAssociatedOpps || (typeof OpportunityAssociatedOpps !== 'undefined' ? OpportunityAssociatedOpps : null);
+        if (AssocOpps && typeof AssocOpps.render === 'function') {
+            AssocOpps.render({
+                opportunityInfo,
+                parentOpportunity,
+                childOpportunities
+            });
+        }
 
         if (window.PotentialContactsManager) {
             PotentialContactsManager.render({
@@ -104,7 +126,10 @@ async function loadOpportunityDetailPage(opportunityId) {
             });
         }
 
-        CRM_APP.updateAllDropdowns();
+        const APP = window.CRM_APP || (typeof CRM_APP !== 'undefined' ? CRM_APP : null);
+        if (APP && typeof APP.updateAllDropdowns === 'function') {
+            APP.updateAllDropdowns();
+        }
 
     } catch (error) {
         if (error.message !== 'Unauthorized') {
@@ -118,7 +143,9 @@ async function loadOpportunityDetailPage(opportunityId) {
     }
 }
 
-// 註冊模組
+// 向主應用程式註冊此模組管理的頁面載入函式
+window.loadOpportunityDetailPage = loadOpportunityDetailPage;
 if (window.CRM_APP) {
+    if (!window.CRM_APP.pageModules) window.CRM_APP.pageModules = {};
     window.CRM_APP.pageModules['opportunity-details'] = loadOpportunityDetailPage;
 }

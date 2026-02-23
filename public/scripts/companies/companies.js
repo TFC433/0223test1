@@ -73,8 +73,9 @@ async function loadCompanyDetailsPage(companyId) {
         
         // 3. 初始化並渲染各個模組
         // 若 OpportunityEvents 存在則初始化
-        if (window.OpportunityEvents) {
-            OpportunityEvents.init(eventLogs, { companyId: companyInfo.companyId, companyName: companyInfo.companyName });
+        const OE = window.OpportunityEvents || (typeof OpportunityEvents !== 'undefined' ? OpportunityEvents : null);
+        if (OE) {
+            OE.init(eventLogs, { companyId: companyInfo.companyId, companyName: companyInfo.companyName });
         }
         
         if (window.PotentialContactsManager) {
