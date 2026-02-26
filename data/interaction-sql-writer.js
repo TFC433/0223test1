@@ -6,7 +6,7 @@
  * - Phase 7: Migrate Interaction Write Authority to SQL
  */
 
-const supabase = require('../config/supabase');
+const { supabase } = require('../config/supabase');
 const { v4: uuidv4 } = require('uuid');
 
 class InteractionSqlWriter {
