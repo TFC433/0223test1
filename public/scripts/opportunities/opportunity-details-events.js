@@ -1,9 +1,11 @@
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details-events.js
- * Version: 8.0.12
+ * Version: 8.0.13
  * Date: 2026-02-26
- * Changelog: "Phase 8 Opportunity UI: guard checkbox/init while keeping immediate re-render on save"
+ * Changelog:
+ *  - Phase 8 Opportunity UI: prevent unintended field wiping on save
+ *  - If an edit DOM field is missing/unset, DO NOT overwrite existing data with empty string
  */
 
 // public/scripts/opportunity-details-events.js
@@ -12,7 +14,7 @@
 
 const OpportunityInfoCardEvents = (() => {
     let _currentOppForEditing = null;
-    let _specQuantities = new Map(); 
+    let _specQuantities = new Map();
 
     function init(opportunityData) {
         _currentOppForEditing = opportunityData;
@@ -45,7 +47,7 @@ const OpportunityInfoCardEvents = (() => {
             editMode.style.display = 'block';
             _bindSpecEvents();
             _initSpecQuantities();
-            
+
             if (_currentOppForEditing.customerCompany) {
                 handleCustomerChange(_currentOppForEditing.customerCompany, _currentOppForEditing.mainContact);
             }
@@ -60,7 +62,7 @@ const OpportunityInfoCardEvents = (() => {
 
     function handleSingleSelectClick(element) {
         const container = element.closest('.single-select-container');
-        const targetId = element.dataset.fieldTarget; 
+        const targetId = element.dataset.fieldTarget;
         const value = element.dataset.value;
 
         container.querySelectorAll('.info-option-pill').forEach(pill => pill.classList.remove('selected'));
@@ -114,17 +116,17 @@ const OpportunityInfoCardEvents = (() => {
         contactSelect.disabled = true;
 
         const contacts = await _getCompanyContacts(customerName);
-        
+
         contactSelect.innerHTML = _generateContactOptions(contacts, defaultContact);
         contactSelect.disabled = false;
 
         const salesModelInput = document.getElementById('edit-sales-model');
         const channelSelect = document.getElementById('edit-channel-details');
-        
+
         if (salesModelInput && salesModelInput.value === '直接販售' && channelSelect) {
             channelSelect.innerHTML = `<option value="${customerName}" selected>${customerName} (直販)</option>`;
-            channelSelect.disabled = true; 
-            
+            channelSelect.disabled = true;
+
             const channelContactSelect = document.getElementById('edit-channel-contact');
             if (channelContactSelect) {
                 channelContactSelect.innerHTML = '<option value="">-- 不適用 --</option>';
@@ -154,6 +156,7 @@ const OpportunityInfoCardEvents = (() => {
 
     function handleManualOverride(checkbox) {
         const input = document.getElementById('edit-opportunity-value');
+        if (!input) return;
         if (checkbox.checked) {
             input.disabled = false;
         } else {
@@ -165,9 +168,9 @@ const OpportunityInfoCardEvents = (() => {
     function _bindSpecEvents() {
         const container = document.getElementById('spec-pills-container');
         if (!container) return;
-        
+
         container.onclick = null;
-        
+
         container.onclick = (e) => {
             const pill = e.target.closest('.info-option-pill');
             const qtySpan = e.target.closest('.pill-quantity');
@@ -183,9 +186,10 @@ const OpportunityInfoCardEvents = (() => {
 
     function _handleSpecAccumulate(pill) {
         const specId = pill.dataset.specId;
-        const systemConfig = window.CRM_APP.systemConfig['可能下單規格'] || [];
+        const systemConfig = (window.CRM_APP && window.CRM_APP.systemConfig && window.CRM_APP.systemConfig['可能下單規格']) || [];
         const config = systemConfig.find(s => s.value === specId);
         const allowQuantity = config && config.value3 === 'allow_quantity';
+
         if (_specQuantities.has(specId)) {
             if (allowQuantity) {
                 const current = _specQuantities.get(specId);
@@ -202,6 +206,7 @@ const OpportunityInfoCardEvents = (() => {
         }
         _calculateTotalValue();
     }
+
     function _handleQuantityChange(span) {
         const specId = span.dataset.specId;
         const current = _specQuantities.get(specId) || 1;
@@ -220,6 +225,7 @@ const OpportunityInfoCardEvents = (() => {
             _calculateTotalValue();
         }
     }
+
     function _addQuantityBadge(pill, qty, specId) {
         let span = pill.querySelector('.pill-quantity');
         if (!span) {
@@ -230,104 +236,160 @@ const OpportunityInfoCardEvents = (() => {
         }
         span.innerText = `(x${qty})`;
     }
+
     function _updatePillUI(pill, qty) {
         let span = pill.querySelector('.pill-quantity');
-        if (span) { span.innerText = `(x${qty})`; }
+        if (span) span.innerText = `(x${qty})`;
     }
+
     function _calculateTotalValue() {
         const manualCheck = document.getElementById('value-manual-override-checkbox');
         if (manualCheck && manualCheck.checked) return;
+
         const input = document.getElementById('edit-opportunity-value');
         if (!input) return;
-        const systemConfig = window.CRM_APP.systemConfig['可能下單規格'] || [];
+
+        const systemConfig = (window.CRM_APP && window.CRM_APP.systemConfig && window.CRM_APP.systemConfig['可能下單規格']) || [];
         let total = 0;
         _specQuantities.forEach((qty, specId) => {
             const config = systemConfig.find(s => s.value === specId);
-            if (config && config.value2) { total += (parseFloat(config.value2) || 0) * qty; }
+            if (config && config.value2) total += (parseFloat(config.value2) || 0) * qty;
         });
-        input.value = total.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).replace(/,/g, '');
+
+        // NOTE: keep raw number (no commas) if your backend expects numeric string
+        input.value = String(Math.round(total));
     }
 
+    // ======= 핵심修補：避免「沒改的欄位」被空字串覆蓋 =======
     async function save() {
         if (!_currentOppForEditing) return;
-        const getValue = (id) => {
+
+        // Return undefined if element doesn't exist (do NOT return '')
+        const getValueMaybe = (id) => {
             const el = document.getElementById(id);
-            return el ? el.value.trim() : '';
+            if (!el) return undefined;
+            const v = (el.value ?? '').toString().trim();
+            return v;
         };
 
-        const oppName = getValue('edit-opportunity-name');
-        if (!oppName) return showNotification('機會名稱必填', 'error');
+        const oppName = getValueMaybe('edit-opportunity-name');
+        const finalOppName = (oppName !== undefined) ? oppName : (_currentOppForEditing.opportunityName || '');
+        if (!finalOppName) return showNotification('機會名稱必填', 'error');
 
         const specData = {};
         _specQuantities.forEach((v, k) => specData[k] = v);
-        
+
         const manualEl = document.getElementById('value-manual-override-checkbox');
-        const isManual = manualEl ? manualEl.checked : false;
+        const isManual = manualEl ? !!manualEl.checked : ((_currentOppForEditing.opportunityValueType || _currentOppForEditing.valueCalcMode) === 'manual');
 
-        const salesModel = getValue('edit-sales-model');
-        let channelDetails = getValue('edit-channel-details');
-        let channelContact = getValue('edit-channel-contact');
+        const salesModel = getValueMaybe('edit-sales-model');
+        const finalSalesModel = (salesModel !== undefined) ? salesModel : (_currentOppForEditing.salesModel || '');
 
-        if (salesModel === '直接販售') {
-            channelDetails = getValue('edit-customer-company'); 
-            channelContact = ''; 
+        let channelDetails = getValueMaybe('edit-channel-details');
+        let channelContact = getValueMaybe('edit-channel-contact');
+
+        // If direct sale, channelDetails should follow customerCompany
+        const customerCompany = getValueMaybe('edit-customer-company');
+        const finalCustomerCompany = (customerCompany !== undefined) ? customerCompany : (_currentOppForEditing.customerCompany || '');
+
+        if (finalSalesModel === '直接販售') {
+            channelDetails = finalCustomerCompany;
+            channelContact = '';
         }
 
+        // For each field: if DOM missing -> keep existing value
+        const pick = (maybe, existingKeys, fallback = '') => {
+            if (maybe !== undefined) return maybe;
+            for (const k of existingKeys) {
+                const v = _currentOppForEditing[k];
+                if (v !== undefined && v !== null) return (typeof v === 'string') ? v : String(v);
+            }
+            return fallback;
+        };
+
+        const finalChannelDetails = pick(channelDetails, ['channelDetails', 'salesChannel'], '');
+        const finalMainContact = pick(getValueMaybe('edit-main-contact'), ['mainContact'], '');
+        const finalChannelContact = pick(channelContact, ['channelContact'], '');
+
+        const finalExpectedCloseDate = pick(getValueMaybe('edit-expected-close-date'), ['expectedCloseDate'], '');
+        const finalCreatedTime = pick(getValueMaybe('edit-created-time'), ['createdTime'], '');
+
+        // These are the legacy keys your frontend uses; backend may map them
+        const finalAssignee = pick(getValueMaybe('edit-assignee'), ['assignee', 'owner'], '');
+        const finalOppSource = pick(getValueMaybe('edit-opportunity-source'), ['opportunitySource', 'source'], '');
+        const finalOppType = pick(getValueMaybe('edit-opportunity-type'), ['opportunityType'], '');
+        const finalStage = pick(getValueMaybe('edit-current-stage'), ['currentStage'], '');
+        const finalProb = pick(getValueMaybe('edit-order-probability'), ['orderProbability', 'winProbability'], '');
+        const finalSalesChannel = pick(getValueMaybe('edit-sales-channel'), ['salesChannel'], '');
+        const finalDeviceScale = pick(getValueMaybe('edit-device-scale'), ['deviceScale', 'equipmentScale'], '');
+        const finalNotes = pick(getValueMaybe('edit-notes'), ['notes'], '');
+
+        // Value
+        const rawValMaybe = getValueMaybe('edit-opportunity-value');
+        const finalValue = (rawValMaybe !== undefined)
+            ? (rawValMaybe.replace(/,/g, '') || '0')
+            : (String(_currentOppForEditing.opportunityValue ?? '0').replace(/,/g, '') || '0');
+
         const updateData = {
-            opportunityName: oppName,
-            customerCompany: getValue('edit-customer-company'),
-            channelDetails: channelDetails,
-            mainContact: getValue('edit-main-contact'),
-            channelContact: channelContact,
-            expectedCloseDate: getValue('edit-expected-close-date'),
-            
-            // 【新增】儲存建立日期
-            createdTime: getValue('edit-created-time'),
+            opportunityName: finalOppName,
+            customerCompany: finalCustomerCompany,
+            channelDetails: finalChannelDetails,
+            mainContact: finalMainContact,
+            channelContact: finalChannelContact,
+            expectedCloseDate: finalExpectedCloseDate,
 
-            salesModel: salesModel,
-            assignee: getValue('edit-assignee'),
-            opportunityType: getValue('edit-opportunity-type'),
-            opportunitySource: getValue('edit-opportunity-source'),
-            currentStage: getValue('edit-current-stage'),
-            orderProbability: getValue('edit-order-probability'),
-            salesChannel: getValue('edit-sales-channel'),
-            deviceScale: getValue('edit-device-scale'),
+            // Created date
+            createdTime: finalCreatedTime,
 
-            opportunityValue: getValue('edit-opportunity-value').replace(/,/g, '') || '0',
+            salesModel: finalSalesModel,
+
+            // Legacy UI keys (compatible with current frontend)
+            assignee: finalAssignee,
+            opportunitySource: finalOppSource,
+            opportunityType: finalOppType,
+            currentStage: finalStage,
+            orderProbability: finalProb,
+            salesChannel: finalSalesChannel,
+            deviceScale: finalDeviceScale,
+
+            opportunityValue: finalValue,
             opportunityValueType: isManual ? 'manual' : 'auto',
             potentialSpecification: JSON.stringify(specData),
-            driveFolderLink: '', 
-            notes: getValue('edit-notes')
+
+            // Keep as-is if you don't use drive link in UI yet
+            driveFolderLink: pick(undefined, ['driveFolderLink', 'driveLink'], ''),
+
+            notes: finalNotes
         };
 
         showLoading('正在儲存...');
         try {
             const result = await authedFetch(`/api/opportunities/${_currentOppForEditing.opportunityId}`, {
                 method: 'PUT',
+                // IMPORTANT: avoid authedFetch "smart refresh" interfering; we handle UI ourselves
+                skipRefresh: true,
                 body: JSON.stringify({ ...updateData, modifier: getCurrentUser() })
             });
 
-            if (result.success) {
+            if (result && result.success) {
                 showNotification('儲存成功', 'success');
-                
+
+                // Update local state without wiping
                 const updatedOpp = { ..._currentOppForEditing, ...updateData };
                 _currentOppForEditing = updatedOpp;
-                
-                if (typeof window !== 'undefined') {
-                    window.currentOpportunityData = updatedOpp;
-                }
-                
+                window.currentOpportunityData = updatedOpp;
+
+                // Re-render info card (display wrappers + view)
                 if (typeof OpportunityInfoCard !== 'undefined' && typeof OpportunityInfoCard.render === 'function') {
                     OpportunityInfoCard.render(updatedOpp);
                 }
-                
-                if (typeof OpportunityInfoCardEvents !== 'undefined' && typeof OpportunityInfoCardEvents.init === 'function') {
-                    OpportunityInfoCardEvents.init(updatedOpp);
-                }
-                
+
+                // Re-init state
+                init(updatedOpp);
+
                 toggleEditMode(false);
             } else {
-                throw new Error(result.error || '儲存失敗');
+                throw new Error((result && result.error) || '儲存失敗');
             }
         } catch (e) {
             showNotification(e.message, 'error');

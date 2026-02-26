@@ -421,15 +421,40 @@ const OpportunityInfoView = (() => {
     function render(opp) {
         _injectStyles();
 
+        // Phase 8 Compatibility Helper: read first available key (new DTO vs legacy UI)
+        const getFirst = (obj, keys, fallback = '') => {
+            const source = obj || {};
+            for (const k of keys || []) {
+                const v = source[k];
+                if (v === null || v === undefined) continue;
+                if (typeof v === 'string') {
+                    const t = v.trim();
+                    if (t !== '') return t;
+                    continue;
+                }
+                return v;
+            }
+            return fallback;
+        };
+
         // 1. 商流邏輯
-        const salesModel = opp.salesModel || '直接販售';
+        const salesModel = getFirst(opp, ['salesModel'], '直接販售') || '直接販售';
         const isDirect = salesModel === '直接販售';
         
-        const targetName = isDirect ? (opp.customerCompany || '未指定客戶') : (opp.channelDetails || opp.salesChannel || '未指定通路');
-        const targetContactName = isDirect ? opp.mainContact : opp.channelContact;
+        const customerCompany = getFirst(opp, ['customerCompany'], '');
+        const channelDetails = getFirst(opp, ['channelDetails'], '');
+        const salesChannel = getFirst(opp, ['salesChannel'], '');
+
+        const targetName = isDirect
+            ? (customerCompany || '未指定客戶')
+            : (channelDetails || salesChannel || '未指定通路');
+
+        const mainContact = getFirst(opp, ['mainContact'], '');
+        const channelContact = getFirst(opp, ['channelContact'], '');
+        const targetContactName = isDirect ? mainContact : channelContact;
 
         // 【修改】直接從 opp 物件中獲取職稱，無需前端複雜查找
-        const targetTitle = opp.mainContactJobTitle || '';
+        const targetTitle = getFirst(opp, ['mainContactJobTitle'], '');
         const titleHtml = targetTitle ? `<span class="job-title-badge">${targetTitle}</span>` : '';
 
         // 2. 規格 Tags 生成
@@ -483,7 +508,15 @@ const OpportunityInfoView = (() => {
         const notesContent = opp.notes || '<span style="color:var(--text-muted);">(無備註內容)</span>';
 
         // [PATCH] Support multiple field names for Probability (SQL vs Sheet)
-        const displayProbability = opp.orderProbability || opp.winProbability || opp.win_probability || '-';
+        const displayProbability = getFirst(opp, ['orderProbability', 'winProbability', 'win_probability'], '-') || '-';
+
+        // Compatibility mappings (new DTO vs legacy UI)
+        const displayAssignee = getFirst(opp, ['assignee', 'owner'], '-') || '-';
+        const displaySource = getFirst(opp, ['opportunitySource', 'source'], '-') || '-';
+        // (These two are not directly rendered here but kept as compatible reads when needed)
+        const _compatEquipmentScale = getFirst(opp, ['deviceScale', 'equipmentScale'], '');
+        const _compatValueCalcMode = getFirst(opp, ['opportunityValueType', 'valueCalcMode'], '');
+        const _compatDriveLink = getFirst(opp, ['driveFolderLink', 'driveLink'], '');
 
         return `
             <div class="opp-view-container">
@@ -498,12 +531,12 @@ const OpportunityInfoView = (() => {
                     
                     <div class="header-card-mini">
                         <span class="unified-label">負責業務</span>
-                        <span class="mini-header-value">${opp.assignee || '-'}</span>
+                        <span class="mini-header-value">${displayAssignee}</span>
                     </div>
 
                     <div class="header-card-mini">
                         <span class="unified-label">機會來源</span>
-                        <span class="mini-header-value">${opp.opportunitySource || '-'}</span>
+                        <span class="mini-header-value">${displaySource}</span>
                     </div>
 
                     <div class="header-card-action-btn" onclick="OpportunityInfoCardEvents.toggleEditMode(true)" title="編輯機會資訊">
@@ -520,7 +553,7 @@ const OpportunityInfoView = (() => {
                 <div class="stats-grid-row">
                     <div class="big-stat-card">
                         <span class="unified-label">終端客戶</span>
-                        <span class="stat-value" title="${opp.customerCompany}">${opp.customerCompany || '-'}</span>
+                        <span class="stat-value" title="${customerCompany}">${customerCompany || '-'}</span>
                     </div>
                     <div class="big-stat-card">
                         <span class="unified-label">機會種類</span>
