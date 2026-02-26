@@ -1,3 +1,11 @@
+/**
+ * Project: TFC CRM
+ * File: public/scripts/opportunities/opportunity-details-events.js
+ * Version: 8.0.12
+ * Date: 2026-02-26
+ * Changelog: "Phase 8 Opportunity UI: guard checkbox/init while keeping immediate re-render on save"
+ */
+
 // public/scripts/opportunity-details-events.js
 // 職責：處理「機會資訊卡」的使用者互動事件 (編輯切換、資料驗證、儲存)
 // (V-Layout: 包含建立日期儲存)
@@ -252,7 +260,9 @@ const OpportunityInfoCardEvents = (() => {
 
         const specData = {};
         _specQuantities.forEach((v, k) => specData[k] = v);
-        const isManual = document.getElementById('value-manual-override-checkbox').checked;
+        
+        const manualEl = document.getElementById('value-manual-override-checkbox');
+        const isManual = manualEl ? manualEl.checked : false;
 
         const salesModel = getValue('edit-sales-model');
         let channelDetails = getValue('edit-channel-details');
@@ -299,12 +309,23 @@ const OpportunityInfoCardEvents = (() => {
 
             if (result.success) {
                 showNotification('儲存成功', 'success');
-                toggleEditMode(false);
-                if (window.CRM_APP && window.CRM_APP.loadPage) {
-                    window.CRM_APP.loadPage('opportunity-details', { opportunityId: _currentOppForEditing.opportunityId });
-                } else {
-                    location.reload();
+                
+                const updatedOpp = { ..._currentOppForEditing, ...updateData };
+                _currentOppForEditing = updatedOpp;
+                
+                if (typeof window !== 'undefined') {
+                    window.currentOpportunityData = updatedOpp;
                 }
+                
+                if (typeof OpportunityInfoCard !== 'undefined' && typeof OpportunityInfoCard.render === 'function') {
+                    OpportunityInfoCard.render(updatedOpp);
+                }
+                
+                if (typeof OpportunityInfoCardEvents !== 'undefined' && typeof OpportunityInfoCardEvents.init === 'function') {
+                    OpportunityInfoCardEvents.init(updatedOpp);
+                }
+                
+                toggleEditMode(false);
             } else {
                 throw new Error(result.error || '儲存失敗');
             }
