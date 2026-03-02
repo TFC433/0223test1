@@ -1,13 +1,69 @@
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details.js
- * Version: 8.0.10
+ * Version: 8.0.11
  * Date: 2026-02-26
- * Changelog: remove risky id transfer; keep minimal wiring restoration
+ * Changelog:
+ *  - Phase 8 Opportunity UI: normalize SQL DTO keys to legacy UI keys for display+edit consistency
+ *  - Keep minimal wiring restoration: OpportunityInfoCard.render() priority, View fallback
  */
 
 window.currentDetailOpportunityId = null;
 window.currentOpportunityData = null;
+
+/**
+ * Phase 8: normalize DTO (SQL) keys <-> legacy UI keys
+ * Ensures BOTH display view and edit form can read values after hard refresh.
+ */
+function normalizeOppForUi(opp) {
+    const o = opp || {};
+
+    const pick = (keys, fallback = '') => {
+        for (const k of keys) {
+            const v = o[k];
+            if (v === null || v === undefined) continue;
+            if (typeof v === 'string') {
+                const t = v.trim();
+                if (t !== '') return t;
+                continue;
+            }
+            return v;
+        }
+        return fallback;
+    };
+
+    // Canonical DTO keys (from SQL reader) + legacy keys (used by UI/edit form)
+    const normalized = { ...o };
+
+    // owner <-> assignee
+    normalized.owner = pick(['owner', 'assignee'], normalized.owner);
+    normalized.assignee = pick(['assignee', 'owner'], normalized.assignee);
+
+    // source <-> opportunitySource
+    normalized.source = pick(['source', 'opportunitySource'], normalized.source);
+    normalized.opportunitySource = pick(['opportunitySource', 'source'], normalized.opportunitySource);
+
+    // equipmentScale <-> deviceScale
+    normalized.equipmentScale = pick(['equipmentScale', 'deviceScale'], normalized.equipmentScale);
+    normalized.deviceScale = pick(['deviceScale', 'equipmentScale'], normalized.deviceScale);
+
+    // winProbability <-> orderProbability
+    normalized.winProbability = pick(['winProbability', 'orderProbability'], normalized.winProbability);
+    normalized.orderProbability = pick(['orderProbability', 'winProbability'], normalized.orderProbability);
+
+    // valueCalcMode <-> opportunityValueType
+    normalized.valueCalcMode = pick(['valueCalcMode', 'opportunityValueType'], normalized.valueCalcMode);
+    normalized.opportunityValueType = pick(['opportunityValueType', 'valueCalcMode'], normalized.opportunityValueType);
+
+    // driveLink <-> driveFolderLink
+    normalized.driveLink = pick(['driveLink', 'driveFolderLink'], normalized.driveLink);
+    normalized.driveFolderLink = pick(['driveFolderLink', 'driveLink'], normalized.driveFolderLink);
+
+    // notes (ensure string-ish)
+    if (normalized.notes === null || normalized.notes === undefined) normalized.notes = '';
+
+    return normalized;
+}
 
 /**
  * 載入並渲染機會詳細頁面的主函式
@@ -41,46 +97,48 @@ async function loadOpportunityDetailPage(opportunityId) {
             childOpportunities
         } = result.data;
 
-        window.currentOpportunityData = opportunityInfo;
+        // ✅ Phase 8: normalize DTO->UI keys so edit mode can show SQL data after refresh
+        const normalizedOpp = normalizeOppForUi(opportunityInfo);
+
+        window.currentOpportunityData = normalizedOpp;
 
         // 1. 注入主模板
         container.innerHTML = opportunityDetailPageTemplate;
         document.getElementById('page-title').textContent = '機會案件管理 - 機會詳細';
         document.getElementById('page-subtitle').textContent = '機會詳細資料與關聯活動';
 
-        // 2. 注入資訊卡（接回 OpportunityInfoCard.render 以恢復 inline edit wrappers）
+        // 2. 注入資訊卡
         const infoCardContainer = document.getElementById('opportunity-info-card-container');
         if (infoCardContainer) {
             if (typeof OpportunityInfoCard !== 'undefined' && typeof OpportunityInfoCard.render === 'function') {
-                OpportunityInfoCard.render(opportunityInfo);
+                OpportunityInfoCard.render(normalizedOpp);
             } else if (typeof OpportunityInfoView !== 'undefined' && typeof OpportunityInfoView.render === 'function') {
-                // Fallback：若 InfoCard module 未載入，至少維持可讀的 view
                 infoCardContainer.innerHTML = `
                     <div class="dashboard-widget">
                         <div class="widget-content">
-                            ${OpportunityInfoView.render(opportunityInfo)}
+                            ${OpportunityInfoView.render(normalizedOpp)}
                         </div>
                     </div>
                 `;
             }
         }
 
-        // 3. 初始化資訊卡事件（render 後）
+        // 3. 初始化資訊卡事件（用 normalizedOpp，讓 state 也帶雙 key）
         if (typeof OpportunityInfoCardEvents !== 'undefined' && typeof OpportunityInfoCardEvents.init === 'function') {
-            OpportunityInfoCardEvents.init(opportunityInfo);
+            OpportunityInfoCardEvents.init(normalizedOpp);
         }
 
         // 4. 其他模組初始化（順序不變）
         const Stepper = window.OpportunityStepper || (typeof OpportunityStepper !== 'undefined' ? OpportunityStepper : null);
         if (Stepper && typeof Stepper.init === 'function') {
-            Stepper.init(opportunityInfo);
+            Stepper.init(normalizedOpp);
         }
 
         const Events = window.OpportunityEvents || (typeof OpportunityEvents !== 'undefined' ? OpportunityEvents : null);
         if (Events && typeof Events.init === 'function') {
             Events.init(eventLogs || [], {
-                opportunityId: opportunityInfo.opportunityId,
-                opportunityName: opportunityInfo.opportunityName,
+                opportunityId: normalizedOpp.opportunityId,
+                opportunityName: normalizedOpp.opportunityName,
                 linkedContacts: linkedContacts || []
             });
         }
@@ -91,7 +149,7 @@ async function loadOpportunityDetailPage(opportunityId) {
             if (Interactions && typeof Interactions.init === 'function') {
                 Interactions.init(
                     interactionContainer,
-                    { opportunityId: opportunityInfo.opportunityId },
+                    { opportunityId: normalizedOpp.opportunityId },
                     interactions || []
                 );
             }
@@ -99,13 +157,13 @@ async function loadOpportunityDetailPage(opportunityId) {
 
         const Contacts = window.OpportunityContacts || (typeof OpportunityContacts !== 'undefined' ? OpportunityContacts : null);
         if (Contacts && typeof Contacts.init === 'function') {
-            Contacts.init(opportunityInfo, linkedContacts || []);
+            Contacts.init(normalizedOpp, linkedContacts || []);
         }
 
         const AssocOpps = window.OpportunityAssociatedOpps || (typeof OpportunityAssociatedOpps !== 'undefined' ? OpportunityAssociatedOpps : null);
         if (AssocOpps && typeof AssocOpps.render === 'function') {
             AssocOpps.render({
-                opportunityInfo,
+                opportunityInfo: normalizedOpp,
                 parentOpportunity,
                 childOpportunities
             });
@@ -118,7 +176,7 @@ async function loadOpportunityDetailPage(opportunityId) {
                 comparisonList: linkedContacts || [],
                 comparisonKey: 'name',
                 context: 'opportunity',
-                opportunityId: opportunityInfo.opportunityId
+                opportunityId: normalizedOpp.opportunityId
             });
         }
 
