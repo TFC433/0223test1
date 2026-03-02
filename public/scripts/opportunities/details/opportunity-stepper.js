@@ -1,8 +1,8 @@
-// views/scripts/opportunity-details/stepper.js
+// public/scripts/opportunities/details/opportunity-stepper.js
 // 職責：專門管理「機會進程」區塊的所有 UI 渲染與互動邏輯
-// * @version 2.1.0 (Phase 7 SQL Type Compatibility Fix)
-// * @date 2026-02-04
-// (V2 - 修正：相容新舊兩種 stageHistory 格式)
+// * @version 2.2.0 (Phase 8 ID Fix)
+// * @date 2026-03-02
+// (V2.2 - 修正：_saveChanges 使用正確的 opportunityId 取代 rowIndex)
 
 const OpportunityStepper = (() => {
     // 模組內的私有變數
@@ -10,7 +10,6 @@ const OpportunityStepper = (() => {
 
     // 處理圓圈點擊（三態循環）
     function _handleCircleClick(step) {
-        // Remove direct reliance on event target, pass step element
         const iconEl = step.querySelector('.step-circle');
         const allSteps = Array.from(step.parentElement.children);
         const index = allSteps.indexOf(step);
@@ -38,7 +37,6 @@ const OpportunityStepper = (() => {
 
     // 處理階段名稱點擊（設定為目前）
     function _handleNameClick(step) {
-        // Remove direct reliance on event target, pass step element
         document.querySelectorAll('.stage-stepper-container .stage-step').forEach(s => s.classList.remove('current'));
         step.classList.add('current');
     }
@@ -47,6 +45,18 @@ const OpportunityStepper = (() => {
     async function _saveChanges() {
         const stepperContainer = document.querySelector('.stage-stepper-container');
         if (!stepperContainer) return;
+
+        // [FIX] 優先序：Global Data -> Global ID -> Local Prop
+        const targetId = (window.currentOpportunityData && window.currentOpportunityData.opportunityId) 
+                      || window.currentDetailOpportunityId 
+                      || (_opportunityInfo && _opportunityInfo.opportunityId);
+
+        // [FIX] Guard Clause: 絕對防止打出 undefined
+        if (!targetId) {
+            console.error('[OpportunityStepper] Critical: No opportunityId found for save.');
+            showNotification('無法儲存：找不到機會 ID (System Error)', 'error');
+            return;
+        }
 
         const historyItems = [];
         stepperContainer.querySelectorAll('.stage-step').forEach(step => {
@@ -62,24 +72,19 @@ const OpportunityStepper = (() => {
         const currentStep = stepperContainer.querySelector('.stage-step.current');
         const newCurrentStage = currentStep ? currentStep.dataset.stageId : _opportunityInfo.currentStage;
         
-        // --- 【*** 關鍵修正：確保儲存時，目前階段一定在歷程中 ***】 ---
-        // 建立一個 Set 來儲存所有 "C:" 狀態的
+        // --- 確保儲存時，目前階段一定在歷程中 ---
         const historySet = new Set(historyItems.filter(item => item.startsWith('C:')));
-        // 把 "X:" 狀態的也加進去
         historyItems.filter(item => item.startsWith('X:')).forEach(item => historySet.add(item));
         
-        // 確保目前階段 (newCurrentStage) 一定在 "C:" 歷程中
         historySet.add(`C:${newCurrentStage}`);
-        // 如果 "X:" 歷程中包含了目前階段，要把它移除
         historySet.delete(`X:${newCurrentStage}`);
         
         const newStageHistory = Array.from(historySet).join(',');
-        // --- 【*** 修正結束 ***】 ---
-
 
         showLoading('正在儲存階段歷程...');
         try {
-            const result = await authedFetch(`/api/opportunities/${_opportunityInfo.rowIndex}`, {
+            // [FIX] 使用鑑識出的 targetId，不再使用 rowIndex
+            const result = await authedFetch(`/api/opportunities/${targetId}`, {
                 method: 'PUT',
                 body: JSON.stringify({
                     currentStage: newCurrentStage,
@@ -105,73 +110,58 @@ const OpportunityStepper = (() => {
     
     // 渲染檢視模式
     function _renderViewMode() {
+        // 安全檢查，避免 DOM 未就緒
+        const wrapper = document.getElementById('opportunity-stage-stepper-container');
+        if (!wrapper) return;
+
         const container = document.getElementById('opportunity-stage-stepper');
-        const header = document.querySelector('#opportunity-stage-stepper-container .widget-header');
-        const allStages = CRM_APP.systemConfig['機會階段'] || [];
+        const header = wrapper.querySelector('.widget-header');
+        const allStages = (window.CRM_APP && window.CRM_APP.systemConfig && window.CRM_APP.systemConfig['機會階段']) || [];
 
         header.innerHTML = `
             <h2 class="widget-title">機會進程</h2>
             <button class="action-btn small secondary" id="edit-stepper-btn">✏️ 編輯歷程</button>
         `;
         
-        // Ensure old listeners are removed or element is fresh. 
-        // header.innerHTML replaces content so it's fine.
         header.querySelector('#edit-stepper-btn').addEventListener('click', () => _renderEditMode());
 
         const stageStatusMap = new Map();
-        if (_opportunityInfo.stageHistory) {
-            
-            // --- 【*** 關鍵修正：相容新舊格式 ***】 ---
-            // [Phase 7 SQL Type Compatibility Fix] Support Array (SQL) or String (Sheet)
+        if (_opportunityInfo && _opportunityInfo.stageHistory) {
             const historyList = Array.isArray(_opportunityInfo.stageHistory) 
                 ? _opportunityInfo.stageHistory 
                 : String(_opportunityInfo.stageHistory).split(',');
 
-            // 這段邏輯現在可以同時處理 "C:01_..." 和 "01_..." 兩種格式
             historyList.forEach(item => {
-                if (!item) return; // 忽略空字串
-                
+                if (!item) return;
                 if(item.includes(':')) {
-                    // 新格式: "C:01_..." 或 "X:02_..."
                     const [status, stageId] = item.split(':');
                     stageStatusMap.set(stageId, status);
                 } else {
-                    // 舊格式 (無前綴): "01_..."
-                    // 我們假設所有舊格式的資料都是 'Completed' (C)
                     stageStatusMap.set(item, 'C'); 
                 }
             });
-            // --- 【*** 修正結束 ***】 ---
         }
 
+        const currentStageVal = _opportunityInfo ? _opportunityInfo.currentStage : '';
+
         let stepsHtml = allStages.map((stage, index) => {
-            
-            // --- 【*** 關鍵修正：重新定義顯示邏輯 (C 或 Current 都打勾) ***】 ---
             let statusClass = 'pending';
             let icon = index + 1;
             
-            const status = stageStatusMap.get(stage.value); // 'C' 或 'X'
-            const isCurrent = (stage.value === _opportunityInfo.currentStage);
+            const status = stageStatusMap.get(stage.value);
+            const isCurrent = (stage.value === currentStageVal);
 
-            // 1. 判斷是否為「已完成」(打勾)
-            // 您的需求：(歷程中有 'C') 或者 (這就是目前階段)，都要打勾
             if (status === 'C' || isCurrent) {
-                statusClass = 'completed'; // 設為 'completed' (綠色勾)
+                statusClass = 'completed';
                 icon = '✓';
-            } 
-            // 2. 判斷是否為「已跳過」(打叉)
-            else if (status === 'X') {
+            } else if (status === 'X') {
                 statusClass = 'skipped';
                 icon = '✕';
             }
             
-            // 3. 判斷是否為「目前階段」(高亮)
-            // 您的需求：目前階段要高亮 (藍色)
-            // 這會附加到 'completed' 後面，變成 'completed current'
             if (isCurrent) {
                 statusClass += ' current';
             }
-            // --- 【*** 修正結束 ***】 ---
 
             return `
                 <div class="stage-step ${statusClass.trim()}" data-stage-id="${stage.value}" title="${stage.note || stage.value}">
@@ -190,9 +180,8 @@ const OpportunityStepper = (() => {
         const header = document.querySelector('#opportunity-stage-stepper-container .widget-header');
         const stepperContainer = container.querySelector('.stage-stepper-container');
 
-        if (!stepperContainer) return; // 如果還沒有渲染，則不執行
+        if (!stepperContainer) return;
         
-        // 顯示提示文字
         let hintContainer = document.getElementById('stepper-edit-hint');
         if (!hintContainer) {
             hintContainer = document.createElement('div');
@@ -216,42 +205,24 @@ const OpportunityStepper = (() => {
         });
         header.querySelector('#save-stepper-btn').addEventListener('click', _saveChanges);
 
-        // 直接在現有的 stepperContainer 上增加 class 和事件監聽
         stepperContainer.classList.add('edit-mode');
         
-        // --- Static Binding Fix: Delegation ---
-        // 移除舊的 delegated listener (如果有) - 雖然這裡是 init 邏輯，但為了安全
         stepperContainer.removeEventListener('click', _handleStepperClick);
         stepperContainer.addEventListener('click', _handleStepperClick);
 
         stepperContainer.querySelectorAll('.stage-step').forEach(step => {
             let status = 'pending';
-            
-            // --- 【*** 關鍵修正：確保編輯時 'current' 也被視為 'completed' ***】 ---
             if (step.classList.contains('current') || step.classList.contains('completed')) {
                 status = 'completed';
             }
             if (step.classList.contains('skipped')) {
                 status = 'skipped';
             }
-            // --- 【*** 修正結束 ***】 ---
-            
             step.dataset.status = status;
-
-            // Remove previous static listeners if any (though innerHTML wasn't reset, so maybe needed if reusing elements)
-            // But we are using delegation now, so we don't attach new ones.
         });
     }
 
-    // New Delegated Handler
     function _handleStepperClick(e) {
-        // Only active in edit mode? The listener is added in _renderEditMode.
-        // But _renderViewMode replaces innerHTML of container's parent? No, container.innerHTML.
-        // Wait, stepperContainer is inside container. 
-        // _renderViewMode rewrites container.innerHTML, so stepperContainer is destroyed.
-        // Thus, the listener attached in _renderEditMode is destroyed when switching back.
-        // This is safe.
-        
         const circle = e.target.closest('.step-circle');
         const name = e.target.closest('.step-name');
         
@@ -264,7 +235,6 @@ const OpportunityStepper = (() => {
         }
     }
 
-    // 動態注入樣式
     function _injectStyles() {
         const styleId = 'stepper-dynamic-styles';
         if (document.getElementById(styleId)) return;
@@ -301,9 +271,8 @@ const OpportunityStepper = (() => {
         document.head.appendChild(style);
     }
     
-    // 公開的初始化方法
     function init(opportunityInfo) {
-        _opportunityInfo = opportunityInfo;
+        _opportunityInfo = opportunityInfo || {};
         const container = document.getElementById('opportunity-stage-stepper-container');
         if (!container) return;
         
@@ -311,7 +280,6 @@ const OpportunityStepper = (() => {
         _renderViewMode();
     }
 
-    // 返回公開的 API
     return {
         init: init
     };

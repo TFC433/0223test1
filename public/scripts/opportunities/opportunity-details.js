@@ -1,11 +1,11 @@
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details.js
- * Version: 8.0.11
- * Date: 2026-02-26
+ * Version: 8.1.0 (Phase 8 - Forensics Fix)
+ * Date: 2026-03-02
  * Changelog:
- *  - Phase 8 Opportunity UI: normalize SQL DTO keys to legacy UI keys for display+edit consistency
- *  - Keep minimal wiring restoration: OpportunityInfoCard.render() priority, View fallback
+ * - [FIX] Explicitly map SQL 'productDetails' to UI 'potentialSpecification' to fix edit mode data loss.
+ * - [FIX] Sync 'salesChannel' and 'channelDetails' to prevent writer conflicts.
  */
 
 window.currentDetailOpportunityId = null;
@@ -35,6 +35,9 @@ function normalizeOppForUi(opp) {
     // Canonical DTO keys (from SQL reader) + legacy keys (used by UI/edit form)
     const normalized = { ...o };
 
+    // Identity & Core
+    normalized.opportunityId = o.opportunityId; // Ensure ID exists
+
     // owner <-> assignee
     normalized.owner = pick(['owner', 'assignee'], normalized.owner);
     normalized.assignee = pick(['assignee', 'owner'], normalized.assignee);
@@ -58,6 +61,16 @@ function normalizeOppForUi(opp) {
     // driveLink <-> driveFolderLink
     normalized.driveLink = pick(['driveLink', 'driveFolderLink'], normalized.driveLink);
     normalized.driveFolderLink = pick(['driveFolderLink', 'driveLink'], normalized.driveFolderLink);
+
+    // [FORENSICS FIX] productDetails (SQL) <-> potentialSpecification (UI)
+    // SQL Reader gives 'productDetails'. UI expects 'potentialSpecification'.
+    normalized.productDetails = pick(['productDetails', 'potentialSpecification'], normalized.productDetails);
+    normalized.potentialSpecification = pick(['potentialSpecification', 'productDetails'], normalized.potentialSpecification);
+
+    // [FORENSICS FIX] salesChannel (SQL) <-> channelDetails (UI)
+    // SQL Writer creates conflict if these differ. We sync them here.
+    normalized.salesChannel = pick(['salesChannel', 'channelDetails'], normalized.salesChannel);
+    normalized.channelDetails = pick(['channelDetails', 'salesChannel'], normalized.channelDetails);
 
     // notes (ensure string-ish)
     if (normalized.notes === null || normalized.notes === undefined) normalized.notes = '';

@@ -1,7 +1,7 @@
 // public/scripts/opportunity-details/opportunity-details-components.js
 // 職責：整合機會詳細頁面組件，處理編輯邏輯與資料存取
-// * @version 1.1.0 (Phase 7 SQL Type Compatibility Fix)
-// * @date 2026-02-04
+// * @version 1.1.1 (Phase 8 Forensics Fix)
+// * @date 2026-03-02
 // (依賴 OpportunityInfoView 進行顯示模式渲染)
 
 function _injectStylesForOppInfoCard() {
@@ -116,7 +116,7 @@ const OpportunityInfoCard = (() => {
         });
     }
 
-    // ================== 以下為編輯模式邏輯 (保持原樣或微調) ==================
+    // ================== 以下為編輯模式邏輯 ==================
 
     function _renderPillsGroup(configKey, currentValue, fieldId) {
         const systemConfig = window.CRM_APP ? window.CRM_APP.systemConfig : {};
@@ -171,6 +171,8 @@ const OpportunityInfoCard = (() => {
         
         let specQuantities = new Map();
         try {
+            // [FORENSICS FIX] Use potentialSpecification which is now normalized in opportunity-details.js
+            // This prevents edit mode from wiping data due to missing 'productDetails' map.
             const parsed = JSON.parse(opp.potentialSpecification);
             if (parsed && typeof parsed === 'object') specQuantities = new Map(Object.entries(parsed));
         } catch (e) {}
@@ -225,6 +227,9 @@ const OpportunityInfoCard = (() => {
         const createdDate = opp.createdTime ? opp.createdTime.split('T')[0] : '';
         const expectedDate = opp.expectedCloseDate ? opp.expectedCloseDate.split('T')[0] : '';
 
+        // [FORENSICS FIX] Ensure initial value for hidden sales-channel is set
+        const initSalesChannel = opp.salesChannel || opp.channelDetails || '';
+
         return `
             <div class="info-card-header">
                 <h2 class="widget-title" style="margin: 0;">編輯核心資訊</h2>
@@ -265,7 +270,7 @@ const OpportunityInfoCard = (() => {
                         <select id="edit-channel-details" class="form-select" onchange="OpportunityInfoCardEvents.handleChannelChange(this.value)">
                             <option value="">載入中...</option>
                         </select>
-                        <input type="hidden" id="edit-sales-channel" value="${opp.salesChannel || ''}">
+                        <input type="hidden" id="edit-sales-channel" value="${initSalesChannel}">
                     </div>
 
                     <div class="form-group">

@@ -2,10 +2,9 @@
 // -------------------------------------------------------------------------
 // 檔案職責：專門負責「機會核心資訊」的純顯示模式 (Read-Only UI)
 // UI 風格：Final Polish + Bento Grid Optimization
-// 修改紀錄：[2026-02-06] Phase 7 Patch: 
-// 1. Added SQL JSONB Object support (no double parsing)
-// 2. Added Probability field fallback
-// 3. [FIX] Reverted responsibility boundary: Removed Edit Mode containers.
+// 修改紀錄：[2026-03-02] Phase 8 Patch: 
+// 1. Safe JSON parsing for specifications to prevent console warnings
+// 2. Support both Object and String formats for potentialSpecification
 // -------------------------------------------------------------------------
 
 const OpportunityInfoView = (() => {
@@ -459,40 +458,42 @@ const OpportunityInfoView = (() => {
 
         // 2. 規格 Tags 生成
         let specsContent = '<span style="color:var(--text-muted); font-style:italic; padding:4px;">(尚未指定規格)</span>';
-        try {
-            // [PATCH] Handle BOTH SQL JSONB (Object) and Legacy String
-            const rawSpec = opp.potentialSpecification;
-            let parsed = null;
+        
+        let parsed = {};
+        const rawSpec = opp.potentialSpecification;
 
-            if (typeof rawSpec === 'object' && rawSpec !== null) {
+        // [Forensics Fix] Robust Type Check & Parse for Specs
+        // Rule: Object -> use; String -> parse; Error/Empty -> {}
+        if (rawSpec) {
+            if (typeof rawSpec === 'object') {
                 parsed = rawSpec;
             } else if (typeof rawSpec === 'string') {
-                try {
-                    parsed = JSON.parse(rawSpec);
-                } catch(e) {
-                    // Fallback if parsing fails, but don't crash
-                    console.warn('[OpportunityInfoView] Spec parse error:', e);
+                const trimmed = rawSpec.trim();
+                if (trimmed) {
+                    try {
+                        parsed = JSON.parse(trimmed);
+                    } catch (e) {
+                        // Silent failure for invalid JSON to prevent console spam
+                    }
                 }
             }
+        }
 
-            if (parsed && typeof parsed === 'object') {
-                const entries = Object.entries(parsed);
-                if (entries.length > 0) {
-                    specsContent = entries.map(([name, qty]) => {
-                        const configItem = _getSpecConfig(name);
-                        const isCountable = configItem && configItem.value3 === 'allow_quantity';
-                        
-                        let displayHtml = name;
-                        if (isCountable && qty && qty > 0) {
-                            displayHtml += `<span class="spec-qty-text">(${qty})</span>`;
-                        }
-                        
-                        return `<div class="spec-tag">${displayHtml}</div>`;
-                    }).join('');
-                }
+        if (parsed && typeof parsed === 'object') {
+            const entries = Object.entries(parsed);
+            if (entries.length > 0) {
+                specsContent = entries.map(([name, qty]) => {
+                    const configItem = _getSpecConfig(name);
+                    const isCountable = configItem && configItem.value3 === 'allow_quantity';
+                    
+                    let displayHtml = name;
+                    if (isCountable && qty && qty > 0) {
+                        displayHtml += `<span class="spec-qty-text">(${qty})</span>`;
+                    }
+                    
+                    return `<div class="spec-tag">${displayHtml}</div>`;
+                }).join('');
             }
-        } catch (e) {
-             console.error('[OpportunityInfoView] Spec render error', e);
         }
 
         // 3. 數值與日期
@@ -513,10 +514,6 @@ const OpportunityInfoView = (() => {
         // Compatibility mappings (new DTO vs legacy UI)
         const displayAssignee = getFirst(opp, ['assignee', 'owner'], '-') || '-';
         const displaySource = getFirst(opp, ['opportunitySource', 'source'], '-') || '-';
-        // (These two are not directly rendered here but kept as compatible reads when needed)
-        const _compatEquipmentScale = getFirst(opp, ['deviceScale', 'equipmentScale'], '');
-        const _compatValueCalcMode = getFirst(opp, ['opportunityValueType', 'valueCalcMode'], '');
-        const _compatDriveLink = getFirst(opp, ['driveFolderLink', 'driveLink'], '');
 
         return `
             <div class="opp-view-container">

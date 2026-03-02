@@ -1,11 +1,12 @@
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details-events.js
- * Version: 8.0.13
- * Date: 2026-02-26
+ * Version: 8.1.1
+ * Date: 2026-03-02
  * Changelog:
- *  - Phase 8 Opportunity UI: prevent unintended field wiping on save
- *  - If an edit DOM field is missing/unset, DO NOT overwrite existing data with empty string
+ * - [FIX] _initSpecQuantities: Robust handling for JSON string, CSV string, or Object to prevent .split() crash.
+ * - [FIX] salesChannel/channelDetails conflict in save() payload.
+ * - [FIX] Ensure potentialSpecification reads from normalized data.
  */
 
 // public/scripts/opportunity-details-events.js
@@ -24,14 +25,44 @@ const OpportunityInfoCardEvents = (() => {
     function _initSpecQuantities() {
         _specQuantities.clear();
         if (!_currentOppForEditing) return;
-        try {
-            const parsed = JSON.parse(_currentOppForEditing.potentialSpecification);
-            if (parsed && typeof parsed === 'object') {
-                _specQuantities = new Map(Object.entries(parsed));
+
+        const raw = _currentOppForEditing.potentialSpecification;
+
+        // 3) 其他情況 (null, undefined, false...) -> 視為空 (Map已清空)
+        if (!raw) return;
+
+        if (typeof raw === 'string') {
+            // 1) 若為字串
+            let parsed = null;
+            let isJsonSuccess = false;
+
+            try {
+                // 先嘗試 JSON.parse
+                parsed = JSON.parse(raw);
+                // 確保解析出來是物件 (且非 null)
+                if (parsed && typeof parsed === 'object') {
+                    _specQuantities = new Map(Object.entries(parsed));
+                    isJsonSuccess = true;
+                }
+            } catch (e) {
+                // JSON parse 失敗，準備進入 split 回退機制
+                isJsonSuccess = false;
             }
-        } catch (e) {
-            if (_currentOppForEditing.potentialSpecification) {
-                _currentOppForEditing.potentialSpecification.split(',').forEach(s => _specQuantities.set(s.trim(), 1));
+
+            // 若 parse 失敗 (或是 JSON 但不是我們期望的 map 物件)，則用 split(',')
+            if (!isJsonSuccess) {
+                raw.split(',').forEach(s => {
+                    const t = s.trim();
+                    if (t) _specQuantities.set(t, 1);
+                });
+            }
+
+        } else if (typeof raw === 'object') {
+            // 2) 若為物件
+            try {
+                _specQuantities = new Map(Object.entries(raw));
+            } catch (e) {
+                console.error('[OpportunityEvents] Failed to convert object to map:', e);
             }
         }
     }
@@ -320,7 +351,11 @@ const OpportunityInfoCardEvents = (() => {
         const finalOppType = pick(getValueMaybe('edit-opportunity-type'), ['opportunityType'], '');
         const finalStage = pick(getValueMaybe('edit-current-stage'), ['currentStage'], '');
         const finalProb = pick(getValueMaybe('edit-order-probability'), ['orderProbability', 'winProbability'], '');
-        const finalSalesChannel = pick(getValueMaybe('edit-sales-channel'), ['salesChannel'], '');
+        
+        // [FORENSICS FIX] Ignore the hidden 'edit-sales-channel' input which may be stale.
+        // In the writer logic, salesChannel is prioritized. We MUST sync it with channelDetails.
+        const finalSalesChannel = finalChannelDetails;
+
         const finalDeviceScale = pick(getValueMaybe('edit-device-scale'), ['deviceScale', 'equipmentScale'], '');
         const finalNotes = pick(getValueMaybe('edit-notes'), ['notes'], '');
 
@@ -349,7 +384,10 @@ const OpportunityInfoCardEvents = (() => {
             opportunityType: finalOppType,
             currentStage: finalStage,
             orderProbability: finalProb,
+            
+            // [FORENSICS FIX] Send synced salesChannel to satisfy SQL Writer priority
             salesChannel: finalSalesChannel,
+            
             deviceScale: finalDeviceScale,
 
             opportunityValue: finalValue,
