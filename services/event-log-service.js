@@ -1,13 +1,11 @@
 /*
  * FILE: services/event-log-service.js
- * VERSION: 8.3.1
+ * VERSION: 8.3.3
  * DATE: 2026-03-05
  * CHANGELOG:
- * - Phase 8: Align EventLog payload to SQL schema (event_logs).
- * - Remove non-existent columns mapping (content_summary/content/recorder/event_title...).
- * - Always bump last_modified_time and edit_count on update to avoid "no changes made".
- * - Store type-specific fields (iot_*, dt_*, dx_*) into payload (jsonb).
- * - Keep deprecated sheet readers only for optional cache invalidation (no fallback reads/writes).
+ * - Phase 8.3d: Robust SQL-only write mapping for IoT/DT fields.
+ * - Added _mapSpecializedColumns for precise column targeting.
+ * - Added DEBUG_EVENTLOG_WRITE logging.
  */
 
 class EventLogService {
@@ -70,8 +68,6 @@ class EventLogService {
 
   /**
    * Extract type-specific fields into payload jsonb.
-   * We keep keys as-is (iot_xxx / dt_xxx / dx_xxx...) to avoid assumptions.
-   * Also allows future form expansion without DB migration.
    */
   _extractDynamicPayload(data) {
     const payload = {};
@@ -110,10 +106,42 @@ class EventLogService {
   }
 
   /**
+   * [Fix Phase 8.3d] Map Specialized Keys to Physical SQL Columns.
+   * These columns MUST be written for the SQL Reader to see them in Views.
+   */
+  _mapSpecializedColumns(data) {
+    const sql = {};
+    const mapIf = (val, col) => { if (val !== undefined) sql[col] = val; };
+
+    // Device Scale (IoT or DT)
+    if (data.iot_deviceScale !== undefined) sql.device_scale = data.iot_deviceScale;
+    else if (data.dt_deviceScale !== undefined) sql.device_scale = data.dt_deviceScale;
+
+    // IoT Specific
+    mapIf(data.iot_iotStatus, 'iot_status');
+    mapIf(data.iot_lineFeatures, 'line_features');
+    mapIf(data.iot_productionStatus, 'production_status');
+    mapIf(data.iot_systemArchitecture, 'system_architecture');
+    mapIf(data.iot_painPoints, 'pain_category'); // Frontend sends checkbox group string here
+    mapIf(data.iot_painPointDetails, 'pain_description');
+    mapIf(data.iot_painPointAnalysis, 'pain_analysis');
+
+    // DT Specific
+    mapIf(data.dt_industry, 'industry');
+    mapIf(data.dt_processingType, 'processing_type');
+
+    // Summary / Extra (If supported by schema)
+    mapIf(data.winProbability, 'win_probability');
+    mapIf(data.expectedQuantity, 'expected_quantity');
+
+    return sql;
+  }
+
+  /**
    * Map incoming camelCase to SQL column names for event_logs table.
-   * NOTE: We only map to columns that are confirmed to exist in your schema.
    */
   _mapToSqlColumnsForUpsert(data, { creator, createdTime, lastModifiedTime, editCount, payload }) {
+    // 1. Core Fields
     const sql = {
       // Required identity
       event_id: data.eventId || data.id,
@@ -141,6 +169,10 @@ class EventLogService {
 
       payload: payload || {}
     };
+
+    // 2. [Fix] Merge Specialized Columns (Physical Columns)
+    const specialized = this._mapSpecializedColumns(data);
+    Object.assign(sql, specialized);
 
     return sql;
   }
@@ -196,7 +228,7 @@ class EventLogService {
     const result = await this.eventLogSqlWriter.createEventLog(sqlPayload);
     this._invalidateEventCacheSafe();
 
-    // Optional calendar side effect (kept)
+    // Optional calendar side effect
     if (result?.success && data?.syncToCalendar === 'true') {
       try {
         const startIso = new Date(sqlPayload.created_time).toISOString();
@@ -242,17 +274,17 @@ class EventLogService {
       return { success: false, message: `Event not found (event_id=${eventId})` };
     }
 
-    const lastModified = new Date(); // always change something
+    const lastModified = new Date(); 
     const nextEditCount = Number(existing.editCount ?? existing.edit_count ?? 0) + 1;
 
-    // Merge payload (existing.payload + new dynamic fields)
+    // Merge payload
     const existingPayload = existing.payload && typeof existing.payload === 'object' ? existing.payload : {};
     const incomingDynamic = this._extractDynamicPayload(data);
     const mergedPayload = { ...existingPayload, ...incomingDynamic, lastEditor: editor };
 
-    // Build update payload ONLY with existing columns
+    // Build update payload
+    // 1. Map Core Fields
     const updateSql = {
-      // Optional updates (only if provided)
       ...(data?.eventName !== undefined || data?.eventTitle !== undefined
         ? { event_name: data.eventName ?? data.eventTitle ?? null }
         : {}),
@@ -270,13 +302,25 @@ class EventLogService {
       ...(data?.clientIntelligence !== undefined ? { client_intelligence: data.clientIntelligence } : {}),
       ...(data?.eventNotes !== undefined ? { event_notes: data.eventNotes } : {}),
 
-      // ALWAYS bump these to avoid "no changes made"
+      // ALWAYS bump these
       last_modified_time: lastModified,
       edit_count: nextEditCount,
 
       // payload merge
       payload: mergedPayload
     };
+
+    // 2. [Fix] Map Specialized Columns (Physical Columns)
+    const specializedSql = this._mapSpecializedColumns(data);
+    Object.assign(updateSql, specializedSql);
+
+    // [Forensics] Debug Log
+    if (process.env.DEBUG_EVENTLOG_WRITE === '1') {
+        console.log(`[EventLogService] Final SQL Update Payload for ${eventId}:`, Object.keys(updateSql));
+        if (specializedSql.device_scale || specializedSql.iot_status) {
+             console.log(' -> Including Specialized Cols:', specializedSql);
+        }
+    }
 
     const result = await this.eventLogSqlWriter.updateEventLog(eventId, updateSql);
     this._invalidateEventCacheSafe();
@@ -289,8 +333,6 @@ class EventLogService {
       throw new Error('[Phase 8] EventLogSqlWriter not injected (SQL-only required)');
     }
     const modifier = user?.displayName || user?.username || user?.name || user || 'System';
-
-    // (Optional) record deleter in payload is impossible here without schema change; keep simple.
     const result = await this.eventLogSqlWriter.deleteEventLog(eventId, modifier);
     this._invalidateEventCacheSafe();
     return result;

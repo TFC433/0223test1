@@ -1,17 +1,12 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * * @version 8.0.0 (Phase 8: Dashboard KPI Raw Alignment)
- * @date 2026-02-09
+ * * @version 8.3.3 (Phase 8.3d: Strict SQL-Only Events)
+ * @date 2026-03-05
  * @description 負責整合各個模組的數據，計算統計指標、圖表數據與 KPI。
- * * [Forensics Notes]
- * 1. [Direct Read] 本服務直接讀取 Opportunity/Interaction Reader 以優化效能。
- * 2. [Phase 7 Fix] Contact 資料讀取已由 Reader 改為透過 ContactService 取得，以支援 SQL/Sheet 混合模式。
- * 3. [Shadow Logic] 內含 MTU/SI 活躍定義邏輯，未來應遷移至 CompanyService。
- * 4. [Logic Duplication] _getWeekId 為暫時性重複邏輯，Phase 6 應統一注入 DateHelpers。
- * * [Changelog v8.0.0]
- * - Dashboard KPI (getDashboardData) now reads RAW contacts (Potential) via getPotentialContacts(9999) to match Contacts page semantics.
- * - Replaced getAllOfficialContacts() with getPotentialContacts(9999) in Batch 1 fetch.
+ * * [Forensics Fix]
+ * - Enforced eventLogSqlReader injection to strictly bypass Google Sheets for events.
+ * - Removed ambiguous eventLogReader usage.
  */
 
 class DashboardService {
@@ -19,11 +14,11 @@ class DashboardService {
      * 建構子：接收所有必要的資料讀取器與服務
      * @param {Object} config - 系統設定
      * @param {OpportunityReader} opportunityReader - [Direct Read]
-     * @param {ContactService} contactService - [Phase 7 Fix] 取代原有的 ContactReader
+     * @param {ContactService} contactService - [Phase 7 Fix]
      * @param {InteractionReader} interactionReader - [Direct Read]
-     * @param {EventLogReader} eventLogReader - [Direct Read]
+     * @param {EventLogSqlReader} eventLogSqlReader - [Phase 8.3d] Strict SQL Reader
      * @param {SystemReader} systemReader
-     * @param {WeeklyBusinessService} weeklyBusinessService - [Service Integration]
+     * @param {WeeklyBusinessService} weeklyBusinessService
      * @param {CompanyReader} companyReader - [Direct Read]
      * @param {CalendarService} calendarService
      */
@@ -32,22 +27,25 @@ class DashboardService {
         opportunityReader,
         contactService,
         interactionReader,
-        eventLogReader,
+        eventLogSqlReader, // Renamed to enforce SQL usage
         systemReader,
         weeklyBusinessService,
         companyReader,
         calendarService
     ) {
         // 嚴格檢查依賴
-        if (!opportunityReader || !contactService || !interactionReader || !config) {
+        if (!opportunityReader || !contactService || !interactionReader || !config || !eventLogSqlReader) {
             throw new Error('[DashboardService] 初始化失敗：缺少必要的 Reader/Service 或 Config');
         }
 
         this.config = config;
         this.opportunityReader = opportunityReader;
-        this.contactService = contactService; // [Phase 7 Fix] 使用 Service 層
+        this.contactService = contactService;
         this.interactionReader = interactionReader;
-        this.eventLogReader = eventLogReader;
+        
+        // [Phase 8.3d] Explicitly store as SQL reader to avoid confusion
+        this.eventLogSqlReader = eventLogSqlReader;
+        
         this.systemReader = systemReader;
         this.weeklyBusinessService = weeklyBusinessService;
         this.companyReader = companyReader;
@@ -56,9 +54,6 @@ class DashboardService {
 
     /**
      * 【內部輔助】取得週次 ID 
-     * [Logic Duplication] 警告：此邏輯與 DateHelpers 重複。
-     * 原因：目前 DashboardService 未注入 dateHelpers。
-     * TODO: [Phase 6] 修改 DI Container 注入 DateHelpers，並移除此方法。
      */
     _getWeekId(date) {
         const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -74,18 +69,12 @@ class DashboardService {
      * 採用分批請求 (Batching) 以優化效能
      */
     async getDashboardData() {
-        console.log('📊 [DashboardService] 執行主儀表板資料整合 (分批優化模式)...');
+        console.log('📊 [DashboardService] 執行主儀表板資料整合 (SQL-Only Mode)...');
 
         const today = new Date();
         const thisWeekId = this._getWeekId(today);
 
-        // =================================================================
-        // 【Phase 3 核心優化】分批請求機制
-        // 將原本同時發出的 7 個 API 請求拆分為兩批，大幅降低瞬間 429 風險
-        // =================================================================
-
-        // --- Batch 1: 核心業務資料 (優先執行) ---
-        // 預期併發數: 3
+        // --- Batch 1: 核心業務資料 ---
         console.log('   ↳ 正在載入核心資料 (Batch 1)...');
         const [
             opportunitiesRaw,
@@ -93,19 +82,19 @@ class DashboardService {
             interactions
         ] = await Promise.all([
             this.opportunityReader.getOpportunities(),
-            this.contactService.getPotentialContacts(9999), // [Phase 8 Fix] Dashboard KPI uses RAW (Potential)
+            this.contactService.getPotentialContacts(9999),
             this.interactionReader.getInteractions()
         ]);
 
-        // --- Batch 2: 次要/參考資料 (接續執行) ---
-        // 等待 Batch 1 完成後才發起，錯開流量峰值
-        // 預期併發數: 4
+        // --- Batch 2: 次要/參考資料 ---
         console.log('   ↳ 正在載入參考資料 (Batch 2)...');
         
-        // 防呆處理：某些服務可能未初始化
         const calendarPromise = this.calendarService ? this.calendarService.getThisWeekEvents() : Promise.resolve({ todayEvents: [], todayCount: 0, weekCount: 0 });
         const companyPromise = this.companyReader ? this.companyReader.getCompanyList() : Promise.resolve([]);
-        const eventLogPromise = this.eventLogReader ? this.eventLogReader.getEventLogs() : Promise.resolve([]);
+        
+        // [Phase 8.3d] STRICT SQL READ
+        const eventLogPromise = this.eventLogSqlReader.getEventLogs();
+        
         const systemPromise = this.systemReader ? this.systemReader.getSystemConfig() : Promise.resolve({});
 
         const [
@@ -120,24 +109,19 @@ class DashboardService {
             companyPromise
         ]);
 
-        // --- 週間業務資料整合 (關鍵修正) ---
+        // --- 週間業務資料整合 ---
         let thisWeeksEntries = [];
-        let thisWeekDetails = { title: '載入中...', days: [] }; // 預設空結構
+        let thisWeekDetails = { title: '載入中...', days: [] };
 
         if (this.weeklyBusinessService) {
             try {
-                // [Standard A Compliance] 
-                // 正確呼叫 Service 層方法，而非直接讀取 Reader。
-                // 這裡複用了 WeeklyService 的 Join 邏輯 (Calendar + System Config)。
                 const fullDetails = await this.weeklyBusinessService.getWeeklyDetails(thisWeekId);
-                
                 if (fullDetails) {
                     thisWeekDetails = fullDetails;
                     thisWeeksEntries = fullDetails.entries || [];
                 }
             } catch (error) {
                 console.error(`[DashboardService] 週間業務載入失敗 (${thisWeekId}):`, error.message);
-                // 失敗時保持預設值，不中斷整個儀表板
                 thisWeekDetails = {
                     title: `Week ${thisWeekId} (載入失敗)`,
                     days: [],
@@ -149,10 +133,10 @@ class DashboardService {
         }
 
         // =================================================================
-        // 資料處理與統計邏輯 (保持原樣)
+        // 資料處理與統計邏輯
         // =================================================================
 
-        // 1. 計算機會最後活動時間 (用於排序)
+        // 1. 計算機會最後活動時間
         const latestInteractionMap = new Map();
         interactions.forEach(interaction => {
             const existingTimestamp = latestInteractionMap.get(interaction.opportunityId) || 0;
@@ -176,14 +160,9 @@ class DashboardService {
         const opportunitiesCountMonth = opportunities.filter(o => new Date(o.createdTime) >= startOfMonth).length;
         const eventLogsCountMonth = eventLogs.filter(e => new Date(e.createdTime) >= startOfMonth).length;
 
-        // =================================================================
-        // [RISK: Shadow Logic] MTU/SI 活躍與家數統計邏輯
-        // TODO: [Phase 6] 這裡包含了 "Active Company" 的領域定義，
-        // 應遷移至 CompanyService.getCompanyStats() 以避免真值二元性。
-        // =================================================================
+        // MTU/SI 統計邏輯
         const normalize = (name) => (name || '').trim().toLowerCase();
         
-        // 準備工具: Name -> ID 對照表
         const companyNameMap = new Map();
         companies.forEach(c => {
             if (c.companyName) {
@@ -191,13 +170,11 @@ class DashboardService {
             }
         });
 
-        // 找出所有定義上的 MTU 公司 (靜態)
         const isStrictMTU = (type) => normalize(type) === 'mtu';
         const isSI = (type) => /SI|系統整合|System Integrator/i.test(type || '');
         
         const staticMtuList = companies.filter(c => isStrictMTU(c.companyType));
 
-        // 找出所有活躍公司 (動態)
         const activeCompanyIds = new Set();
         const earliestActivityMap = new Map();
 
@@ -221,7 +198,6 @@ class DashboardService {
             if (cId) recordActivity(cId, opp.createdTime);
         });
 
-        // 交叉比對：計算活躍 MTU 與 不活躍 MTU
         let mtuCount = 0;
         let mtuNewMonth = 0;
         let siCount = 0;
@@ -247,7 +223,6 @@ class DashboardService {
             }
         });
 
-        // 計算 SI
         companies.forEach(comp => {
              if (activeCompanyIds.has(comp.companyId) && isSI(comp.companyType)) {
                  siCount++;
@@ -255,10 +230,7 @@ class DashboardService {
                  if (firstTime >= startOfMonth.getTime()) siNewMonth++;
              }
         });
-        // [End of Shadow Logic]
 
-        // 成交案件統計
-        // 寬鬆判斷：包含 '受注', '已成交', '已完成'
         const wonOpportunities = opportunities.filter(o => 
             o.currentStage === '受注' || o.currentStage === '已成交' || o.currentStatus === '已完成'
         );
@@ -304,12 +276,10 @@ class DashboardService {
         const kanbanData = this._prepareKanbanData(opportunities, systemConfig);
         const recentActivity = this._prepareRecentActivity(interactions, contacts, opportunities, companies, 5);
         
-        // 準備回傳給前端的本週資訊物件
-        // 因為 getWeeklyDetails 已經處理好了 days 結構，這裡直接使用
         const thisWeekInfoForDashboard = {
             weekId: thisWeekId,
             title: thisWeekDetails.title || `Week ${thisWeekId}`,
-            days: thisWeekDetails.days || [] // 若這裡為空，前端就會顯示空白
+            days: thisWeekDetails.days || [] 
         };
 
         return {
@@ -339,8 +309,11 @@ class DashboardService {
     }
 
     async getEventsDashboardData() {
-        const [eventLogs, opportunities, companies] = await Promise.all([
-            this.eventLogReader.getEventLogs(),
+        // [Phase 8.3d] STRICT SQL READ
+        const eventLogs = await this.eventLogSqlReader.getEventLogs();
+        
+        // Use Promise.all for others
+        const [opportunities, companies] = await Promise.all([
             this.opportunityReader.getOpportunities(),
             this.companyReader.getCompanyList(),
         ]);
@@ -399,7 +372,6 @@ class DashboardService {
     }
 
     async getContactsDashboardData() {
-        // [Phase 7 Fix] 使用 Service 方法
         const contacts = await this.contactService.getAllOfficialContacts();
         return {
             chartData: {
@@ -427,7 +399,6 @@ class DashboardService {
                 return createdDate < sevenDaysAgo;
             }
             
-            // 找出最後一次互動時間
             const sortedInteractions = oppInteractions.sort((a,b) => 
                 new Date(b.interactionTime || b.createdTime) - new Date(a.interactionTime || a.createdTime)
             );
@@ -441,7 +412,6 @@ class DashboardService {
         const stages = systemConfig['機會階段'] || [];
         const stageGroups = {};
         
-        // 確保所有階段都有 key
         stages.forEach(stage => { 
             stageGroups[stage.value] = { name: stage.note || stage.value, opportunities: [], count: 0 }; 
         });
@@ -449,7 +419,6 @@ class DashboardService {
         opportunities.forEach(opp => {
             if (opp.currentStatus === '進行中') {
                 const stageKey = opp.currentStage;
-                // 如果該階段存在於設定中，才放入
                 if (stageGroups[stageKey]) {
                     stageGroups[stageKey].opportunities.push(opp);
                     stageGroups[stageKey].count++;

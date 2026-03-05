@@ -1,7 +1,7 @@
 /**
- * @version 1.0.8
- * @date 2026-01-27
- * @purpose Hotfix：event-editor pageModules 參數相容，確保 #event-editor 可用
+ * @version Phase 8.1
+ * @date 2026-03-05
+ * @purpose Phase 8 最小修補：save success 後離開 #event-editor 回 #events，避免 router re-entry
  */
 
 // public/scripts/events/event-editor-standalone.js
@@ -489,6 +489,9 @@ const EventEditorStandalone = (() => {
         try {
             const res = await authedFetch(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(data) });
             if (res.success) {
+                // [Phase 8] Fix: Prevent router re-entry loop by resetting hash first
+                window.location.hash = '#events';
+                
                 _close();
                 if (window.CRM_APP && window.CRM_APP.refreshCurrentView) window.CRM_APP.refreshCurrentView('更新成功！');
             } else throw new Error(res.error);

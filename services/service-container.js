@@ -1,11 +1,11 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 8.0.2 (Phase 7: Company/Opportunity Log SQL Fix)
- * @date 2026-02-09
+ * @version 8.0.3 (Phase 8.3d: Dashboard Event SQL Injection)
+ * @date 2026-03-05
  * @description
- * - CompanyService / OpportunityService 的 side-effect logging 改注入 interactionSqlWriter（避免寫回 Sheets）
- * - 其餘維持 v8.0.1
+ * - DashboardService now strictly receives eventLogSqlReader as the 5th argument.
+ * - Confirmed EventLogService injection (retains Sheet reader for cache invalidation, SQL for R/W).
  */
 
 const config = require('../config');
@@ -83,7 +83,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v8.0.2 Phase 7 Log SQL Fix)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v8.0.3 Phase 8.3d)...');
 
     try {
         // 1. Infrastructure
@@ -169,19 +169,17 @@ async function initializeServices() {
             contactSqlWriter
         );
 
-        // ✅ FIX: CompanyService 的 logging writer 改用 interactionSqlWriter（取代 interactionWriter）
         const companyService = new CompanyService(
             companyReader, companyWriter,
             contactCoreReader, contactWriter,
             opportunityReader, opportunityWriter,
-            interactionReader, interactionSqlWriter,   // <-- CHANGED (was interactionWriter)
+            interactionReader, interactionSqlWriter,
             eventLogReader, systemReader,
             companySqlReader,
             contactService,
             companySqlWriter
         );
 
-        // ✅ FIX: OpportunityService 的 logging writer 改用 interactionSqlWriter（取代 interactionWriter）
         const opportunityService = new OpportunityService({
             config,
             opportunityReader,
@@ -191,7 +189,7 @@ async function initializeServices() {
             companyReader,
             companyWriter,
             interactionReader,
-            interactionWriter: interactionSqlWriter,   // <-- CHANGED (was interactionWriter)
+            interactionWriter: interactionSqlWriter,
             eventLogReader,
             systemReader,
             opportunitySqlReader,
@@ -208,13 +206,13 @@ async function initializeServices() {
         );
 
         const eventLogService = new EventLogService(
-            eventLogReader,
+            eventLogReader, // Kept for legacy cache invalidation if needed
             opportunityReader,
             companyReader,
             systemReader,
             calendarService,
-            eventLogSqlReader,
-            eventLogSqlWriter
+            eventLogSqlReader, // Authoritative Reader
+            eventLogSqlWriter  // Authoritative Writer
         );
 
         const weeklyBusinessService = new WeeklyBusinessService({
@@ -236,7 +234,7 @@ async function initializeServices() {
             opportunityReader,
             contactService,
             interactionReader,
-            eventLogSqlReader,
+            eventLogSqlReader, // [CRITICAL FIX] Explicitly injecting SQL Reader for Dashboard
             systemReader,
             weeklyBusinessService,
             companyReader,
@@ -301,7 +299,7 @@ async function initializeServices() {
             weeklyBusinessReader: weeklyReader,
             weeklyBusinessWriter: weeklyWriter,
             systemReader, systemWriter,
-            interactionWriter,          // 保留：若還有 RAW/Legacy 需要，但不應被 CORE side-effect 用到
+            interactionWriter,
             eventLogReader
         };
 
