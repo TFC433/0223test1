@@ -236,7 +236,7 @@ async function initializeServices() {
             opportunityReader,
             contactService,
             interactionReader,
-            eventLogReader,
+            eventLogSqlReader,
             systemReader,
             weeklyBusinessService,
             companyReader,

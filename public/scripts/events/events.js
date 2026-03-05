@@ -23,11 +23,28 @@ async function loadEventLogsPage() {
         const result = await authedFetch('/api/events/dashboard');
         if (!result.success) throw new Error(result.details || '讀取資料失敗');
         
-        eventLogPageData = result.data;
+        // [Phase 8 Fix] Robust Data Normalization
+        // Ensures frontend doesn't crash if backend returns Array or partial Object
+        const rawData = result.data || {};
+        
+        eventLogPageData = {
+            eventList: Array.isArray(rawData) ? rawData : (Array.isArray(rawData.eventList) ? rawData.eventList : []),
+            chartData: rawData.chartData || {}
+        };
 
         // 協調呼叫各個模組進行渲染
-        renderEventsDashboardCharts(dashboardContainer, eventLogPageData.chartData);
-        renderEventLogList(listContainer, eventLogPageData.eventList);
+        // Safe check for render functions presence
+        if (typeof renderEventsDashboardCharts === 'function') {
+            renderEventsDashboardCharts(dashboardContainer, eventLogPageData.chartData);
+        } else if (dashboardContainer) {
+            dashboardContainer.innerHTML = ''; // Clear loading if renderer missing
+        }
+
+        if (typeof renderEventLogList === 'function') {
+            renderEventLogList(listContainer, eventLogPageData.eventList);
+        } else if (listContainer) {
+            listContainer.innerHTML = '<div class="alert alert-error">列表渲染元件遺失</div>';
+        }
 
     } catch (error) {
         if (error.message !== 'Unauthorized') {
@@ -43,11 +60,19 @@ async function loadEventLogsPage() {
 // 為了讓系統中其他地方的按鈕（如頁首）可以呼叫，保留全域函式
 function showEventLogForCreation() {
     // 呼叫彈窗管理模組的函式
-    showEventLogFormModal();
+    if (typeof showEventLogFormModal === 'function') {
+        showEventLogFormModal();
+    } else {
+        console.warn('showEventLogFormModal is not defined');
+    }
 }
 
 function showEventLogModalByOpp(opportunityId, opportunityName) {
-    showEventLogFormModal({ opportunityId, opportunityName });
+    if (typeof showEventLogFormModal === 'function') {
+        showEventLogFormModal({ opportunityId, opportunityName });
+    } else {
+        console.warn('showEventLogFormModal is not defined');
+    }
 }
 
 // 向主應用程式註冊此模組

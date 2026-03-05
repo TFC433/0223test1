@@ -1,11 +1,9 @@
 /**
- * @version 1.0.1
- * @date 2026-01-23
+ * @version 1.2.0
+ * @date 2026-03-03
  * @description
- * [Standard A Fix]
- * - 修正 Controller 直接呼叫 Reader 的違規行為
- * - getEventLogById 改為透過 EventLogService 存取資料
- * - API endpoint / response shape / 前端行為 完全不變
+ * [Phase 8 SQL-Only Fix]
+ * - Added getDashboardData to serve events dashboard via SQL
  */
 
 const { handleApiError } = require('../middleware/error.middleware');
@@ -16,6 +14,26 @@ const getServices = (req) => req.app.get('services');
 // ==========================================
 // Part 1: 事件紀錄 (Event Log) 相關功能
 // ==========================================
+
+// GET /api/events/dashboard
+// [Phase 8 Fix] New endpoint for SQL-based events dashboard
+exports.getDashboardData = async (req, res) => {
+    try {
+        const { dashboardService } = getServices(req);
+        // Uses dashboardService (SQL Reader Injected) to get composite data
+        const data = await dashboardService.getEventsDashboardData();
+        
+        // Ensure strictly matching frontend expectation: { eventList: [], chartData: {} }
+        const safeData = {
+            eventList: Array.isArray(data.eventList) ? data.eventList : [],
+            chartData: data.chartData || {}
+        };
+
+        res.json({ success: true, data: safeData });
+    } catch (error) {
+        handleApiError(res, error, 'Get Events Dashboard');
+    }
+};
 
 // POST /api/events
 exports.createEventLog = async (req, res) => {
