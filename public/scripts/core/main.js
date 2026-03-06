@@ -222,6 +222,65 @@ CRM_APP.loadResources = async function() {
     }
 };
 
+// [ADD-BEGIN] refreshCurrentView
+window.CRM_APP.refreshCurrentView = async function(successMsg) {
+    // 1. Debounce Guard (500ms)
+    const now = Date.now();
+    if (window.CRM_APP._lastRefresh && (now - window.CRM_APP._lastRefresh < 500)) {
+        console.warn('[Main] Refresh skipped (debounced).');
+        return;
+    }
+    window.CRM_APP._lastRefresh = now;
+
+    // 2. Determine Page Name
+    let hash = window.location.hash.substring(1);
+    let [pageName, paramStr] = hash.split('?');
+    
+    if (!pageName) pageName = 'dashboard';
+
+    // 3. Special Handling: Event Editor -> Events List
+    // If we just saved inside the standalone editor, we want to go back to the list and refresh it.
+    if (pageName === 'event-editor' || hash.includes('event-editor')) {
+        console.log('🔄 [Main] Saved in editor -> redirecting to events list.');
+        window.location.hash = '#events';
+        pageName = 'events';
+        paramStr = ''; 
+    }
+
+    // 4. Execute Loader
+    const loader = window.CRM_APP.pageModules && window.CRM_APP.pageModules[pageName];
+    
+    if (loader) {
+        console.log(`🔄 [Main] Soft refreshing: ${pageName}`);
+        try {
+            // Parse params if any
+            let params = {};
+            if (paramStr) {
+                params = Object.fromEntries(new URLSearchParams(paramStr));
+            }
+
+            // Handle Detail Pages vs List Pages signature
+            // Detail pages usually expect an ID string or specific param
+            const isDetailPage = pageName.includes('-details') || pageName === 'weekly-detail';
+            
+            if (isDetailPage) {
+                // Try to guess the ID argument
+                const id = params.weekId || params.opportunityId || params.companyName || Object.values(params)[0];
+                if (id) await loader(id);
+                else await loader(params);
+            } else {
+                // List pages usually take no args or an object
+                await loader(params);
+            }
+        } catch (err) {
+            console.error(`[Main] Soft refresh failed for ${pageName}:`, err);
+        }
+    } else {
+        console.warn(`[Main] No loader found for page: ${pageName}. Soft refresh skipped.`);
+    }
+};
+// [ADD-END] refreshCurrentView
+
 // Global Helpers
 function getCurrentUser() {
     return window.CRM_APP?.currentUser || localStorage.getItem('crmCurrentUserName') || '系統';

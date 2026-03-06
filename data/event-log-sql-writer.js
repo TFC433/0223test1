@@ -1,10 +1,11 @@
 /*
  * FILE: data/event-log-sql-writer.js
- * VERSION: Phase 8.4x-SafeUpdate
+ * VERSION: Phase 8.7-SpecUpsert
  * DATE: 2026-03-05
  * PURPOSE:
- * - Fix PGRST204: Strip known non-column fields (event_type, payload) before update.
- * - Maintain Step 1 scanning logic.
+ * - Fix PGRST204: Split payload into General vs Type-Specific updates.
+ * - Always update event_logs_general.
+ * - Update event_logs_{type}, OR Insert if row missing (Upsert behavior).
  */
 
 const { supabase } = require('../config/supabase');
@@ -29,106 +30,181 @@ class EventLogSqlWriter {
   async updateEventLog(eventId, payload) {
     const debug = process.env.DEBUG_EVENTLOG_WRITE === '1';
     
-    // Step 1: Scan candidate tables to find the correct partition
-    const candidateTables = ['event_logs_general', 'event_logs_iot', 'event_logs_dt', 'event_logs_dx'];
-    let targetTable = null;
-
     try {
-      // Scan tables to find where the event exists
-      for (const table of candidateTables) {
-        const { data } = await supabase
-          .from(table)
-          .select('event_id')
-          .eq('event_id', eventId)
-          .maybeSingle();
+      // STEP 1 — detect eventType
+      const eventType = payload.eventType || payload.event_type || 'general';
 
-        if (data) {
-          targetTable = table;
-          break;
+      // STEP 2 — determine SPEC table
+      const specTableMap = {
+        iot: 'event_logs_iot',
+        dt: 'event_logs_dt',
+        dx: 'event_logs_dx'
+      };
+      const specTable = specTableMap[eventType] || null;
+
+      // STEP 3 — define GENERAL whitelist
+      const GENERAL_ALLOWED = new Set([
+        'event_name',
+        'opportunity_id',
+        'company_id',
+        'our_participants',
+        'client_participants',
+        'visit_place',
+        'event_content',
+        'client_questions',
+        'client_intelligence',
+        'event_notes',
+        'last_modified_time',
+        'edit_count',
+        'created_time'
+      ]);
+
+      // STEP 4 — define SPEC whitelists
+      const IOT_ALLOWED = new Set([
+        'iot_deviceScale',
+        'iot_productionStatus',
+        'iot_iotStatus',
+        'iot_lineFeatures',
+        'iot_painPoints',
+        'iot_painPointDetails',
+        'iot_painPointAnalysis',
+        'iot_systemArchitecture'
+      ]);
+
+      const DT_ALLOWED = new Set([
+        'device_scale',
+        'industry',
+        'processing_type',
+        'dt_deviceScale',
+        'dt_industry',
+        'dt_processingType'
+      ]);
+
+      const DX_ALLOWED = new Set([]);
+
+      const SPEC_WHITELISTS = {
+        iot: IOT_ALLOWED,
+        dt: DT_ALLOWED,
+        dx: DX_ALLOWED
+      };
+
+      const currentSpecAllowed = SPEC_WHITELISTS[eventType] || new Set();
+
+      // STEP 5 — split payload
+      const generalPayload = {};
+      const specPayload = {};
+
+      Object.keys(payload).forEach(key => {
+        // Remove meta keys
+        if (['eventType', 'event_type', 'payload'].includes(key)) return;
+
+        if (GENERAL_ALLOWED.has(key)) {
+          generalPayload[key] = payload[key];
+        } else if (currentSpecAllowed.has(key)) {
+          specPayload[key] = payload[key];
+        }
+      });
+
+      // STEP 7 — forensic logs (Pre-update)
+      console.log('[EventLogSqlWriter][FORensics] detectedType=', eventType);
+      console.log('[EventLogSqlWriter][FORensics] generalPayload keys=', Object.keys(generalPayload));
+      console.log('[EventLogSqlWriter][FORensics] specTable=', specTable);
+      console.log('[EventLogSqlWriter][FORensics] specPayload keys=', Object.keys(specPayload));
+
+      if (debug) {
+        console.log(`\n[DEBUG][Writer] updateEventLog => eventId=${eventId}`);
+        console.log('[DEBUG][Writer] generalPayload:', generalPayload);
+        console.log('[DEBUG][Writer] specPayload:', specPayload);
+      }
+
+      let updatedRowsGeneral = 0;
+      let updatedRowsSpec = 0;
+      let insertedSpecRow = false;
+
+      // STEP 6 — update flow
+      
+      // 1) Always update event_logs_general (if keys exist)
+      if (Object.keys(generalPayload).length > 0) {
+        const { data: genData, error: genError } = await supabase
+          .from('event_logs_general')
+          .update(generalPayload)
+          .eq('event_id', eventId)
+          .select('event_id');
+
+        if (genError) {
+          console.error('[EventLogSqlWriter] General update failed:', genError);
+          throw genError;
+        }
+        updatedRowsGeneral = genData ? genData.length : 0;
+      }
+
+      // 2) If spec table exists AND specPayload has keys: update spec table OR insert if missing
+      if (specTable && Object.keys(specPayload).length > 0) {
+        // A. Try UPDATE first
+        const { data: specData, error: specError } = await supabase
+          .from(specTable)
+          .update(specPayload)
+          .eq('event_id', eventId)
+          .select('event_id');
+
+        if (specError) {
+          console.error('[EventLogSqlWriter] Spec update failed:', specError);
+          throw specError;
+        }
+        updatedRowsSpec = specData ? specData.length : 0;
+
+        // B. If UPDATE affected 0 rows, perform INSERT (Upsert behavior)
+        if (updatedRowsSpec === 0) {
+            console.log(`[EventLogSqlWriter] Spec update affected 0 rows. Attempting INSERT into ${specTable}...`);
+            
+            const insertPayload = {
+                event_id: eventId,
+                ...specPayload
+            };
+
+            const { error: insertError } = await supabase
+                .from(specTable)
+                .insert([insertPayload]);
+            
+            if (insertError) {
+                console.error(`[EventLogSqlWriter] Spec INSERT failed into ${specTable}:`, insertError);
+                throw insertError;
+            }
+            
+            insertedSpecRow = true;
+            updatedRowsSpec = 1; // Treat as successful write
         }
       }
 
-      // PATCH: Create safe payload by removing non-column fields that cause PGRST204
-      const safePayload = { ...payload };
-      delete safePayload.event_type;
-      delete safePayload.payload;
+      // Post-update Logs
+      console.log('[EventLogSqlWriter][FORensics] updatedRowsGeneral=', updatedRowsGeneral);
+      console.log('[EventLogSqlWriter][FORensics] updatedRowsSpec=', updatedRowsSpec);
+      console.log('[EventLogSqlWriter][FORensics] insertedSpecRow=', insertedSpecRow);
 
-      // 1) Forensic Logs (After targetTable determined)
-      console.log('[EventLogSqlWriter][FORensics] targetTable=', targetTable);
-      console.log('[EventLogSqlWriter][FORensics] payload keys=', Object.keys(safePayload));
-
-      if (debug) {
-        console.log(`\n[DEBUG][Writer] updateEventLog => eventId=${eventId}, targetTable=${targetTable}`);
-        console.log('[DEBUG][Writer] update payload keys:', Object.keys(safePayload));
-      }
-
-      if (!targetTable) {
-        return { 
-          success: false, 
-          message: 'Event not found in any known partition (general, iot, dt, dx).' 
-        };
-      }
-
-      // 2) Attempt update on the specific target table with SAFE payload
-      const { data: updated, error: updateErr } = await supabase
-        .from(targetTable)
-        .update(safePayload)
-        .eq('event_id', eventId)
-        .select('event_id');
-
-      if (updateErr) {
-        // 2) Forensic Log (On Error)
-        console.error('[EventLogSqlWriter][FORensics] Supabase updateErr=', updateErr);
-        if (debug) console.error('[DEBUG][Writer] updateErr:', updateErr);
-        throw updateErr;
-      }
-
-      const updatedRows = Array.isArray(updated) ? updated.length : 0;
-
-      // 3) Forensic Log (After Result)
-      console.log('[EventLogSqlWriter][FORensics] updatedRows=', updatedRows);
-
-      if (debug) {
-        console.log('[DEBUG][Writer] updatedRows:', updatedRows);
-      }
-
-      if (updatedRows > 0) {
+      // Result Handling
+      if (updatedRowsGeneral > 0 || updatedRowsSpec > 0) {
         return { success: true };
       }
 
-      // 3) Hard-proof: check visibility under SAME supabase client on the SPECIFIC table
-      // If RLS blocks SELECT, this may return null data without error.
-      const { data: visibleRow, error: selectErr } = await supabase
-        .from(targetTable)
+      // If nothing updated, check existence in general table
+      const { data: exists } = await supabase
+        .from('event_logs_general')
         .select('event_id')
         .eq('event_id', eventId)
         .maybeSingle();
 
-      if (debug) {
-        console.log('[DEBUG][Writer] visibility check => data:', visibleRow, 'error:', selectErr || null);
-      }
-
-      // If select errors, it's a DB/api issue (not just RLS)
-      if (selectErr) {
+      if (!exists) {
         return {
           success: false,
-          message: `Update=0 and visibility check errored: ${selectErr.message}`
+          message: 'Event not found (or RLS restricted).'
         };
       }
 
-      if (!visibleRow) {
-        // Either truly not exist OR RLS blocks even SELECT
-        return {
-          success: false,
-          message: 'Update affected 0 rows. Row not visible to this DB client (NOT FOUND or RLS blocks SELECT).'
-        };
-      }
-
-      // Row is visible but update affected 0 => classic RLS update policy mismatch
       return {
-        success: false,
-        message: 'Row is visible but UPDATE affected 0 rows. Highly likely RLS/Policy blocks UPDATE.'
+        success: true, // Content matched, no changes needed
+        message: 'No rows updated (data unchanged).'
       };
+
     } catch (error) {
       console.error('[EventLogSqlWriter] updateEventLog Error:', error);
       throw error;

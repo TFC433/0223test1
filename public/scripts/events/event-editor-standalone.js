@@ -509,6 +509,8 @@ const EventEditorStandalone = (() => {
         });
         for (let k in multi) data[k] = multi[k].join(', ');
 
+        data.eventType = _inputs.type.value;
+
         _setLoading(true, '儲存中...');
         try {
             const res = await authedFetch(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(data) });
