@@ -1,9 +1,9 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * * @version 8.0.6 (Phase 8: ID-based Operations & SQL Write Authority)
- * @date 2026-02-23
- * * @changelog Phase 8 Company API: company details eventLogs exclude opportunity-linked events
+ * * @version 8.0.7 (Phase 8: ID-based Operations & SQL Write Authority)
+ * @date 2026-03-06
+ * * @changelog Phase 8.0.7: Injected eventLogSqlReader to fix Company Detail event sync
  * * @description
  * * 1. [Phase 8] Contract Enforcement: companyId is the ONLY valid operation key for Update/Delete/Details.
  * * 2. [Phase 8] Refactor: updateCompany, deleteCompany, getCompanyDetails now accept companyId.
@@ -17,7 +17,8 @@ class CompanyService {
         companyReader, companyWriter, contactReader, contactWriter,
         opportunityReader, opportunityWriter, interactionReader, interactionWriter,
         eventLogReader, systemReader, companySqlReader, contactService,
-        companySqlWriter // Inject SQL Writer (Phase 7 Requirement)
+        companySqlWriter, // Inject SQL Writer (Phase 7 Requirement)
+        eventLogSqlReader // Inject SQL Reader (Phase 8 Requirement)
     ) {
         this.companyReader = companyReader;
         this.companyWriter = companyWriter; // Keep for legacy read references if needed
@@ -32,6 +33,7 @@ class CompanyService {
         this.companySqlReader = companySqlReader;
         this.contactService = contactService;
         this.companySqlWriter = companySqlWriter; // Assigned for Phase 7 Writes
+        this.eventLogSqlReader = eventLogSqlReader; // Assigned for Phase 8 Reads
     }
 
     // --- DTO Mapping (SQL-ready) ---
@@ -301,7 +303,7 @@ class CompanyService {
                 this.contactReader.getContactList(),
                 this.opportunityReader.getOpportunities(),
                 this.interactionReader.getInteractions(),
-                this.eventLogReader.getEventLogs(),
+                this.eventLogSqlReader.getEventLogs(), // [Phase 8 Fix] Use SQL Reader for Events
                 this.contactReader.getContacts(3000)
             ]);
 
