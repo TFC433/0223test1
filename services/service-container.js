@@ -1,9 +1,10 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 8.0.3 (Phase 8.3d: Dashboard Event SQL Injection)
- * @date 2026-03-05
+ * @version 8.0.4 (Phase 8.3e: Opportunity Service Event SQL Injection)
+ * @date 2026-03-06
  * @description
+ * - [FIX] Injected eventLogSqlReader into OpportunityService to fix Detail View event loading.
  * - DashboardService now strictly receives eventLogSqlReader as the 5th argument.
  * - Confirmed EventLogService injection (retains Sheet reader for cache invalidation, SQL for R/W).
  */
@@ -83,7 +84,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v8.0.3 Phase 8.3d)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v8.0.4 Phase 8.3e)...');
 
     try {
         // 1. Infrastructure
@@ -194,6 +195,7 @@ async function initializeServices() {
             systemReader,
             opportunitySqlReader,
             opportunitySqlWriter,
+            eventLogSqlReader, // [Phase 8 Fix] Inject SQL Reader
             contactService
         });
 

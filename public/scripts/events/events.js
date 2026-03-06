@@ -1,3 +1,4 @@
+// File: public/scripts/events/events.js
 // views/scripts/events.js (重構後的主控制器)
 
 // 全域變數，用於跨模組共享數據
@@ -67,6 +68,8 @@ function showEventLogForCreation() {
     }
 }
 
+// [Refactor] Restored to minimal responsibility (removed customerCompany)
+// This helper is for simple usages; Opportunity Detail should call Modal Manager directly.
 function showEventLogModalByOpp(opportunityId, opportunityName) {
     if (typeof showEventLogFormModal === 'function') {
         showEventLogFormModal({ opportunityId, opportunityName });

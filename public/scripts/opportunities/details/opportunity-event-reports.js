@@ -1,3 +1,4 @@
+// File: public/scripts/opportunities/details/opportunity-event-reports.js
 // views/scripts/opportunity-details/event-reports.js
 // 職責：專門管理「事件報告」頁籤的 UI 與功能，包含總覽模式與列表模式
 // (V6 - 最終修復版：補回公開方法並整合全域樣式)
@@ -183,11 +184,16 @@ const OpportunityEvents = (() => {
      */
     function showAddEventModal() {
         if (_context.opportunityId) {
-            const oppName = _context.opportunityName ? _context.opportunityName.replace(/'/g, "\\'") : '';
-            if (typeof showEventLogModalByOpp === 'function') {
-                showEventLogModalByOpp(_context.opportunityId, oppName);
+            // [Refactor] Direct call to modal manager to pass full context (including customerCompany)
+            // Bypassing events.js helper to respect module boundaries and ensure proper defaults
+            if (typeof showEventLogFormModal === 'function') {
+                showEventLogFormModal({ 
+                    opportunityId: _context.opportunityId, 
+                    opportunityName: _context.opportunityName || '',
+                    customerCompany: _context.customerCompany || '' 
+                });
             } else {
-                console.error("找不到 showEventLogModalByOpp 函式。");
+                console.error("showEventLogFormModal is not defined");
             }
         } else if (_context.companyId) {
             if (typeof showEventLogFormModal === 'function') {
@@ -270,3 +276,6 @@ const OpportunityEvents = (() => {
         showAddEventModal: showAddEventModal // 修復點：公開此函式以供 onclick 使用
     };
 })();
+
+// [Fix] Explicitly expose to window so inline onclick handlers (e.g., in _render) can access it
+window.OpportunityEvents = OpportunityEvents;

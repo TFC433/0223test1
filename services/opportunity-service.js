@@ -1,13 +1,14 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * * @version 8.2.0 (Phase 7: Contact Linking SQL)
- * @date 2026-02-06
+ * * @version 8.2.1 (Phase 8 Fix: Event Log SQL Reader)
+ * @date 2026-03-06
  * @description 
  * - [FIX-1] Locked _fetchOpportunities to SQL Reader only (No Sheet fallback).
  * - [FIX-2] Enforced hard contract on batchUpdateOpportunities (Throw on missing ID).
  * - [FIX-3] Explicitly marked RAW Contact Upgrade boundary.
  * - [PHASE 7] Migrated Contact Linking (Add/Delete) to SQL Writer.
+ * - [PHASE 8 FIX] Switched getOpportunityDetails to use EventLogSqlReader for events.
  */
 
 class OpportunityService {
@@ -25,6 +26,7 @@ class OpportunityService {
      * @param {SystemReader} systemReader
      * @param {OpportunitySqlReader} opportunitySqlReader
      * @param {OpportunitySqlWriter} opportunitySqlWriter
+     * @param {EventLogSqlReader} eventLogSqlReader
      */
     constructor({
         config,
@@ -39,7 +41,8 @@ class OpportunityService {
         eventLogReader,
         systemReader,
         opportunitySqlReader,
-        opportunitySqlWriter
+        opportunitySqlWriter,
+        eventLogSqlReader // [Phase 8 Fix] Inject SQL Reader
     }) {
         this.config = config;
         
@@ -51,6 +54,7 @@ class OpportunityService {
         this.systemReader = systemReader;
         this.companyReader = companyReader;
         this.opportunitySqlReader = opportunitySqlReader;
+        this.eventLogSqlReader = eventLogSqlReader; // [Phase 8 Fix] Store SQL Reader
 
         // Writers
         this.opportunityWriter = opportunityWriter;
@@ -125,6 +129,12 @@ class OpportunityService {
      */
     async getOpportunityDetails(opportunityId) {
         try {
+            // [Phase 8 Fix] Ensure eventLogSqlReader is available
+            if (!this.eventLogSqlReader) {
+                console.warn('[OpportunityService] EventLogSqlReader missing, falling back to legacy reader (Data may be stale).');
+            }
+            const eventReader = this.eventLogSqlReader || this.eventLogReader;
+
             const [
                 allOpportunities, 
                 interactionsFromCache, 
@@ -135,7 +145,7 @@ class OpportunityService {
             ] = await Promise.all([
                 this._fetchOpportunities(),
                 this.interactionReader.getInteractions(),
-                this.eventLogReader.getEventLogs(),
+                eventReader.getEventLogs(), // [Phase 8 Fix] Use SQL Reader
                 this.contactReader.getAllOppContactLinks(),
                 this.contactReader.getContactList(),
                 this.contactReader.getContacts()
