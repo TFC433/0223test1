@@ -1,8 +1,8 @@
 /**
  * data/event-log-sql-reader.js
- * @version Phase 8.2b
+ * @version Phase 8.4
  * @date 2026-03-05
- * @purpose Phase 8 最小修補：payload key existence override (allow clearing '')
+ * @purpose Phase 8.4 Fix: Add frontend-prefixed aliases to DTO for Editor compatibility
  */
 
 const { supabase } = require('../config/supabase');
@@ -149,30 +149,61 @@ class EventLogSqlReader {
             case 'general':
                 return baseDto;
 
-            case 'iot':
-                return {
-                    ...baseDto,
-                    // [Phase 8.2 Fix] Override specific fields from payload
-                    iotStatus: getVal('iot_iotStatus', row.iot_status),
-                    deviceScale: getVal('iot_deviceScale', row.device_scale),
-                    lineFeatures: getVal('iot_lineFeatures', row.line_features),
-                    painCategory: getVal('iot_painPoints', row.pain_category), // Frontend sends iot_painPoints
-                    
-                    // Additional mappings based on writer logic
-                    painAnalysis: getVal('iot_painPointAnalysis', row.pain_analysis),
-                    painDescription: getVal('iot_painPointDetails', row.pain_description),
-                    productionStatus: getVal('iot_productionStatus', row.production_status),
-                    systemArchitecture: getVal('iot_systemArchitecture', row.system_architecture)
-                };
+            case 'iot': {
+                // Resolve values once
+                const iotStatus = getVal('iot_iotStatus', row.iot_status);
+                const deviceScale = getVal('iot_deviceScale', row.device_scale);
+                const lineFeatures = getVal('iot_lineFeatures', row.line_features);
+                const painCategory = getVal('iot_painPoints', row.pain_category); // Frontend sends iot_painPoints
+                const painAnalysis = getVal('iot_painPointAnalysis', row.pain_analysis);
+                const painDescription = getVal('iot_painPointDetails', row.pain_description);
+                const productionStatus = getVal('iot_productionStatus', row.production_status);
+                const systemArchitecture = getVal('iot_systemArchitecture', row.system_architecture);
 
-            case 'dt':
                 return {
                     ...baseDto,
-                    // [Phase 8.2 Fix] Override specific fields from payload
-                    industry: getVal('dt_industry', row.industry),
-                    deviceScale: getVal('dt_deviceScale', row.device_scale),
-                    processingType: getVal('dt_processingType', row.processing_type)
+                    // Standard keys (Backend logic preferred)
+                    iotStatus,
+                    deviceScale,
+                    lineFeatures,
+                    painCategory,
+                    painAnalysis,
+                    painDescription,
+                    productionStatus,
+                    systemArchitecture,
+
+                    // [Phase 8.4 Fix] Frontend-prefixed aliases for Editor compatibility
+                    // The frontend editor expects keys like 'iot_deviceScale' to populate fields correctly.
+                    iot_iotStatus: iotStatus,
+                    iot_deviceScale: deviceScale,
+                    iot_lineFeatures: lineFeatures,
+                    iot_painPoints: painCategory,
+                    iot_painPointAnalysis: painAnalysis,
+                    iot_painPointDetails: painDescription,
+                    iot_productionStatus: productionStatus,
+                    iot_systemArchitecture: systemArchitecture
                 };
+            }
+
+            case 'dt': {
+                // Resolve values once
+                const industry = getVal('dt_industry', row.industry);
+                const deviceScale = getVal('dt_deviceScale', row.device_scale);
+                const processingType = getVal('dt_processingType', row.processing_type);
+
+                return {
+                    ...baseDto,
+                    // Standard keys
+                    industry,
+                    deviceScale,
+                    processingType,
+
+                    // [Phase 8.4 Fix] Frontend-prefixed aliases for Editor compatibility
+                    dt_industry: industry,
+                    dt_deviceScale: deviceScale,
+                    dt_processingType: processingType
+                };
+            }
 
             case 'dx':
                 return baseDto;

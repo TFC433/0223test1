@@ -15,14 +15,113 @@ const { supabase } = require('../config/supabase');
 class EventLogSqlWriter {
   async createEventLog(payload) {
     try {
+      // STEP 1 — Detect Target Table
+      const eventType = payload.eventType || payload.event_type || 'general';
+      const tableMap = {
+        general: 'event_logs_general',
+        iot: 'event_logs_iot',
+        dt: 'event_logs_dt',
+        dx: 'event_logs_dx'
+      };
+      const targetTable = tableMap[eventType] || 'event_logs_general';
+
+      // STEP 2 — Define Allowed Columns (Schema Enforcement)
+      const COMMON_COLS = [
+        'event_id',
+        'event_name',
+        'opportunity_id',
+        'company_id',
+        'creator',
+        'created_time',
+        'last_modified_time',
+        'our_participants',
+        'client_participants',
+        'visit_place',
+        'event_content',
+        'client_questions',
+        'client_intelligence',
+        'event_notes',
+        'edit_count'
+      ];
+
+      const IOT_COLS = [
+        ...COMMON_COLS,
+        'device_scale',
+        'line_features',
+        'production_status',
+        'iot_status',
+        'pain_category',
+        'pain_description',
+        'pain_analysis',
+        'system_architecture'
+      ];
+
+      const DT_COLS = [
+        ...COMMON_COLS,
+        'device_scale',
+        'processing_type',
+        'industry'
+      ];
+
+      const DX_COLS = [...COMMON_COLS];
+      const GENERAL_COLS = [...COMMON_COLS];
+
+      const colMap = {
+        'event_logs_general': GENERAL_COLS,
+        'event_logs_iot': IOT_COLS,
+        'event_logs_dt': DT_COLS,
+        'event_logs_dx': DX_COLS
+      };
+
+      const targetAllowedCols = new Set(colMap[targetTable] || []);
+
+      // STEP 3 — Normalize & Filter Payload
+      const insertData = {};
+      const keyMap = {
+        'iot_deviceScale': 'device_scale',
+        'iot_lineFeatures': 'line_features',
+        'iot_productionStatus': 'production_status',
+        'iot_iotStatus': 'iot_status',
+        'iot_painPoints': 'pain_category',
+        'iot_painPointDetails': 'pain_description',
+        'iot_painPointAnalysis': 'pain_analysis',
+        'iot_systemArchitecture': 'system_architecture',
+        'dt_deviceScale': 'device_scale',
+        'dt_processingType': 'processing_type',
+        'dt_industry': 'industry'
+      };
+
+      Object.keys(payload).forEach(key => {
+        // Remove meta keys
+        if (['eventType', 'event_type', 'payload'].includes(key)) return;
+
+        // Normalize key
+        const dbKey = keyMap[key] || key;
+
+        // Value normalization
+        let val = payload[key];
+        if (val === "") val = null;
+
+        // Filter by allowed columns & skip undefined
+        if (val !== undefined && targetAllowedCols.has(dbKey)) {
+            insertData[dbKey] = val;
+        }
+      });
+
+      // STEP 4 — Forensic Logs
+      console.log(`[EventLogSqlWriter][FORensics][CREATE] targetTable=${targetTable}`);
+      console.log(`[EventLogSqlWriter][FORensics][CREATE] normalized keys=${Object.keys(insertData).join(',')}`);
+
+      // STEP 5 — Insert
       const { data, error } = await supabase
-        .from('event_logs')
-        .insert([payload])
+        .from(targetTable)
+        .insert([insertData])
         .select('event_id')
         .single();
 
       if (error) throw error;
       return { success: true, id: data.event_id };
+
     } catch (error) {
       console.error('[EventLogSqlWriter] createEventLog Error:', error);
       throw error;
@@ -251,17 +350,36 @@ class EventLogSqlWriter {
 
   async deleteEventLog(eventId) {
     try {
-      const { data, error } = await supabase
-        .from('event_logs')
-        .delete()
-        .eq('event_id', eventId)
-        .select('event_id');
+      // Search tables in order to find where to delete from
+      const tables = ['event_logs_general', 'event_logs_iot', 'event_logs_dt', 'event_logs_dx'];
+      let deleted = false;
 
-      if (error) throw error;
-      if (!data || data.length === 0) {
+      for (const table of tables) {
+        const { data, error } = await supabase
+          .from(table)
+          .delete()
+          .eq('event_id', eventId)
+          .select('event_id');
+
+        if (error) {
+             console.warn(`[EventLogSqlWriter] Delete check on ${table} failed:`, error.message);
+             continue;
+        }
+
+        if (data && data.length > 0) {
+            deleted = true;
+            // Assuming uniqueness across tables, we can stop, 
+            // but for safety in this transition phase, we could check others.
+            // For now, let's assume one hit is enough.
+            break; 
+        }
+      }
+
+      if (!deleted) {
         return { success: false, message: 'Event not found' };
       }
       return { success: true };
+
     } catch (error) {
       console.error('[EventLogSqlWriter] deleteEventLog Error:', error);
       throw error;

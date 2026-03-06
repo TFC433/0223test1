@@ -392,13 +392,15 @@ const EventEditorStandalone = (() => {
         _inputs.specificContainer.innerHTML = html;
     }
 
-    function _createInputHTML(name, label, value = '', placeholder = '') {
-        return `<div class="form-group"><label class="iso-label">${label}</label><input type="text" class="iso-input" name="${name}" value="${value}" placeholder="${placeholder}"></div>`;
+    function _createInputHTML(name, label, value, placeholder = '') {
+        const safeValue = (value === null || value === undefined) ? '' : value;
+        return `<div class="form-group"><label class="iso-label">${label}</label><input type="text" class="iso-input" name="${name}" value="${safeValue}" placeholder="${placeholder}"></div>`;
     }
     
     // 這裡會產生 <textarea class="form-textarea">，搭配 CSS 的 resize: vertical 即可調整
-    function _createTextareaHTML(name, label, value = '', placeholder = '') {
-        return `<div class="form-group"><label class="iso-label">${label}</label><textarea class="form-textarea" name="${name}" rows="1" placeholder="${placeholder}">${value}</textarea></div>`;
+    function _createTextareaHTML(name, label, value, placeholder = '') {
+        const safeValue = (value === null || value === undefined) ? '' : value;
+        return `<div class="form-group"><label class="iso-label">${label}</label><textarea class="form-textarea" name="${name}" rows="1" placeholder="${placeholder}">${safeValue}</textarea></div>`;
     }
     
     function _createCheckboxGroupHTML(name, label, options, selectedValues) {
@@ -513,7 +515,13 @@ const EventEditorStandalone = (() => {
 
         _setLoading(true, '儲存中...');
         try {
-            const res = await authedFetch(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+            // [Phase 8 Fix] Distinguish Create (POST) vs Update (PUT)
+            let res;
+            if (id) {
+                res = await authedFetch(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+            } else {
+                res = await authedFetch(`/api/events`, { method: 'POST', body: JSON.stringify(data) });
+            }
 
             // Production rule: treat explicit success:false as failure; everything else is success.
             if (res && res.success === false) {

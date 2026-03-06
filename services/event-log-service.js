@@ -1,11 +1,11 @@
 /*
  * FILE: services/event-log-service.js
- * VERSION: 8.3.3
- * DATE: 2026-03-05
+ * VERSION: 8.4.1-BackupFix
+ * DATE: 2026-03-06
  * CHANGELOG:
+ * - Phase 8.4.1: Fix Backup logic to use snake_case keys + correct labels.
+ * - Phase 8.4: Implemented Type-Change Backup to Notes (Business Logic).
  * - Phase 8.3d: Robust SQL-only write mapping for IoT/DT fields.
- * - Added _mapSpecializedColumns for precise column targeting.
- * - Added DEBUG_EVENTLOG_WRITE logging.
  */
 
 class EventLogService {
@@ -177,6 +177,61 @@ class EventLogService {
     return sql;
   }
 
+  /**
+   * [Phase 8.4.1] Generate backup block for type changes.
+   * Reads current values using snake_case keys (Real DB columns) with camelCase fallback.
+   */
+  _generateTypeChangeBackup(existing, oldType) {
+    const IOT_FIELDS = [
+      { key: 'device_scale', alt: 'deviceScale', label: '設備規模' },
+      { key: 'line_features', alt: 'lineFeatures', label: '生產線特徵' },
+      { key: 'production_status', alt: 'productionStatus', label: '生產現況' },
+      { key: 'iot_status', alt: 'iotStatus', label: 'IoT現況' },
+      { key: 'pain_category', alt: 'painCategory', label: '痛點分類' },
+      { key: 'pain_description', alt: 'painDescription', label: '客戶痛點說明' },
+      { key: 'pain_analysis', alt: 'painAnalysis', label: '痛點分析與對策' },
+      { key: 'system_architecture', alt: 'systemArchitecture', label: '系統架構' }
+    ];
+
+    const DT_FIELDS = [
+      { key: 'device_scale', alt: 'deviceScale', label: '設備規模' },
+      { key: 'processing_type', alt: 'processingType', label: '加工類型' },
+      { key: 'industry', alt: 'industry', label: '加工產業別' }
+    ];
+
+    let targetFields = [];
+    if (oldType === 'iot') targetFields = IOT_FIELDS;
+    else if (oldType === 'dt') targetFields = DT_FIELDS;
+    else return null;
+
+    const lines = [];
+    for (const field of targetFields) {
+      // Try snake_case first (DB column), then camelCase (Reader DTO)
+      const val = existing[field.key] !== undefined ? existing[field.key] : existing[field.alt];
+      
+      if (val !== undefined && val !== null && val !== '') {
+        const valStr = (typeof val === 'string') ? val.trim() : String(val);
+        if (valStr) {
+           lines.push(`● ${field.label}：${valStr}`);
+        }
+      }
+    }
+
+    if (lines.length === 0) return null;
+
+    const timeStr = new Date().toLocaleString('zh-TW', { hour12: false });
+    
+    // Exact format required
+    return `
+----------------------------------------
+【系統自動備份】 (${timeStr})
+原類型：${oldType}
+
+${lines.join('\n')}
+
+----------------------------------------`;
+  }
+
   // -----------------------------
   // Reads (SQL-only)
   // -----------------------------
@@ -272,6 +327,28 @@ class EventLogService {
     const existing = await this.eventLogSqlReader.getEventLogById(eventId);
     if (!existing) {
       return { success: false, message: `Event not found (event_id=${eventId})` };
+    }
+
+    // [Phase 8.4] Type Change Logic & Backup
+    const oldType = existing.eventType || existing.event_type || 'general';
+    const newType = data.eventType || data.event_type || oldType;
+
+    if (oldType !== newType) {
+        // Generate Backup Block
+        const backupBlock = this._generateTypeChangeBackup(existing, oldType);
+        
+        if (backupBlock) {
+            console.log(`[EventLogService][FORensics] backupGenerated=true oldType=${oldType} newType=${newType}`);
+
+            // Append to existing notes or incoming notes
+            // If data.eventNotes is present, user is editing notes. Append backup.
+            // If data.eventNotes is undefined, preserve existing notes + backup.
+            const baseNotes = data.eventNotes !== undefined ? data.eventNotes : (existing.eventNotes || '');
+            const separator = baseNotes ? '\n' : '';
+            
+            // Mutate data.eventNotes so _mapToSqlColumnsForUpsert picks it up
+            data.eventNotes = baseNotes + separator + backupBlock;
+        }
     }
 
     const lastModified = new Date(); 
