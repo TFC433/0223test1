@@ -1,13 +1,15 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 8.0.5 (Phase 8.3f: Company Service Event SQL Injection)
- * @date 2026-03-06
+ * @version 8.0.9 (Phase 8.9: Dashboard Dependency Injection Fix)
+ * @date 2026-03-10
  * @description
  * - [FIX] Injected eventLogSqlReader into CompanyService to fix Detail View event loading.
  * - [FIX] Injected eventLogSqlReader into OpportunityService to fix Detail View event loading.
  * - DashboardService now strictly receives eventLogSqlReader as the 5th argument.
  * - Confirmed EventLogService injection (retains Sheet reader for cache invalidation, SQL for R/W).
+ * - [FIX] Injected systemService into WeeklyBusinessService replacing systemReader.
+ * - [FIX] Fully aligned DashboardService arguments (14 total) to fix undefined property crash.
  */
 
 const config = require('../config');
@@ -85,7 +87,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v8.0.5 Phase 8.3f)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v8.0.9 Phase 8.9)...');
 
     try {
         // 1. Infrastructure
@@ -225,7 +227,7 @@ async function initializeServices() {
             weeklyBusinessSqlWriter: weeklySqlWriter,
             dateHelpers,
             calendarService,
-            systemReader,
+            systemService, // [Phase 8.5 Fix] Route through SystemService
             opportunityService,
             config
         });
@@ -239,10 +241,15 @@ async function initializeServices() {
             contactService,
             interactionReader,
             eventLogSqlReader, // [CRITICAL FIX] Explicitly injecting SQL Reader for Dashboard
-            systemReader,
+            systemReader, // [Phase 8.9 Fix] Restored to match constructor Arg 6
             weeklyBusinessService,
             companyReader,
-            calendarService
+            calendarService,
+            contactSqlReader,     // [Phase 8.9 Fix] Inject SQL Reader for contacts (Arg 10)
+            interactionSqlReader, // [Phase 8.9 Fix] Inject SQL Reader for interactions (Arg 11)
+            companySqlReader,     // [Phase 8.9 Fix] Inject SQL Reader for companies (Arg 12)
+            opportunitySqlReader, // [Phase 8.9 Fix] Inject SQL Reader for opportunities (Arg 13)
+            systemService         // [Phase 8.9 Fix] Append SystemService at the end (Arg 14)
         );
 
         const workflowService = new WorkflowService(

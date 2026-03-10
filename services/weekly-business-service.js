@@ -1,13 +1,15 @@
-/* [v7.8.0] Weekly Service Phase 7-3 */
+/* [v7.8.1] Weekly Service Phase 7-4 */
 /**
  * services/weekly-business-service.js
  * 週間業務邏輯服務 (Service Layer)
- * * @version 7.8.0 (Phase 7-3: Sheet Retirement)
+ * * @version 7.8.1 (Phase 7-4: SystemService Routing Fix)
  * @description 
  * [Phase 7-3 Refactor]
  * 1. Removed WeeklyBusinessWriter dependency entirely.
  * 2. Create/Update/Delete -> Strict SQL Only.
  * 3. Read -> SQL First + Sheet Fallback (Read-Only).
+ * [Phase 7-4 Fix]
+ * - Replaced deprecated systemReader with systemService for config loading.
  */
 
 class WeeklyBusinessService {
@@ -18,7 +20,7 @@ class WeeklyBusinessService {
         weeklyBusinessSqlWriter,
         dateHelpers, 
         calendarService, 
-        systemReader,
+        systemService, // [Phase 7-4] Changed from systemReader
         opportunityService, 
         config 
     }) {
@@ -28,7 +30,7 @@ class WeeklyBusinessService {
         this.weeklyBusinessSqlWriter = weeklyBusinessSqlWriter;
         this.dateHelpers = dateHelpers;
         this.calendarService = calendarService;
-        this.systemReader = systemReader;
+        this.systemService = systemService; // [Phase 7-4] Changed from systemReader
         this.opportunityService = opportunityService;
         this.config = config;
     }
@@ -206,7 +208,7 @@ class WeeklyBusinessService {
 
         const queries = [
             this.calendarService.getHolidaysForPeriod(firstDay, endQueryDate), 
-            this.systemReader.getSystemConfig() 
+            this.systemService.getSystemConfig() // [Phase 7-4] Routing via SystemService
         ];
 
         if (this.config.PERSONAL_CALENDAR_ID) {

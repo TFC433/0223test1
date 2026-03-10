@@ -1,12 +1,14 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * * @version 8.3.3 (Phase 8.3d: Strict SQL-Only Events)
- * @date 2026-03-05
+ * * @version 8.8.0 (Phase 8.8: SystemService Config Routing)
+ * @date 2026-03-10
  * @description 負責整合各個模組的數據，計算統計指標、圖表數據與 KPI。
  * * [Forensics Fix]
  * - Enforced eventLogSqlReader injection to strictly bypass Google Sheets for events.
  * - Removed ambiguous eventLogReader usage.
+ * - Migrated all remaining Dashboard legacy reads to pure SQL readers.
+ * - [Phase 8.8] Replaced deprecated systemReader calls with systemService.
  */
 
 class DashboardService {
@@ -21,6 +23,11 @@ class DashboardService {
      * @param {WeeklyBusinessService} weeklyBusinessService
      * @param {CompanyReader} companyReader - [Direct Read]
      * @param {CalendarService} calendarService
+     * @param {ContactSqlReader} contactSqlReader - [Phase 8.7] SQL Reader
+     * @param {InteractionSqlReader} interactionSqlReader - [Phase 8.7] SQL Reader
+     * @param {CompanySqlReader} companySqlReader - [Phase 8.7] SQL Reader
+     * @param {OpportunitySqlReader} opportunitySqlReader - [Phase 8.7] SQL Reader
+     * @param {SystemService} systemService - [Phase 8.8] Service Layer
      */
     constructor(
         config,
@@ -31,7 +38,12 @@ class DashboardService {
         systemReader,
         weeklyBusinessService,
         companyReader,
-        calendarService
+        calendarService,
+        contactSqlReader,
+        interactionSqlReader,
+        companySqlReader,
+        opportunitySqlReader,
+        systemService
     ) {
         // 嚴格檢查依賴
         if (!opportunityReader || !contactService || !interactionReader || !config || !eventLogSqlReader) {
@@ -50,6 +62,15 @@ class DashboardService {
         this.weeklyBusinessService = weeklyBusinessService;
         this.companyReader = companyReader;
         this.calendarService = calendarService;
+
+        // [Phase 8.7] SQL Readers
+        this.contactSqlReader = contactSqlReader;
+        this.interactionSqlReader = interactionSqlReader;
+        this.companySqlReader = companySqlReader;
+        this.opportunitySqlReader = opportunitySqlReader;
+        
+        // [Phase 8.8] Service Layer
+        this.systemService = systemService;
     }
 
     /**
@@ -81,21 +102,21 @@ class DashboardService {
             contacts,
             interactions
         ] = await Promise.all([
-            this.opportunityReader.getOpportunities(),
-            this.contactService.getPotentialContacts(9999),
-            this.interactionReader.getInteractions()
+            this.opportunitySqlReader.getOpportunities(),
+            this.contactSqlReader.getContacts(),
+            this.interactionSqlReader.getInteractions()
         ]);
 
         // --- Batch 2: 次要/參考資料 ---
         console.log('   ↳ 正在載入參考資料 (Batch 2)...');
         
         const calendarPromise = this.calendarService ? this.calendarService.getThisWeekEvents() : Promise.resolve({ todayEvents: [], todayCount: 0, weekCount: 0 });
-        const companyPromise = this.companyReader ? this.companyReader.getCompanyList() : Promise.resolve([]);
+        const companyPromise = this.companySqlReader ? this.companySqlReader.getCompanies() : Promise.resolve([]);
         
         // [Phase 8.3d] STRICT SQL READ
         const eventLogPromise = this.eventLogSqlReader.getEventLogs();
         
-        const systemPromise = this.systemReader ? this.systemReader.getSystemConfig() : Promise.resolve({});
+        const systemPromise = this.systemService ? this.systemService.getSystemConfig() : Promise.resolve({});
 
         const [
             calendarData,
@@ -296,7 +317,7 @@ class DashboardService {
     // --- 各個子頁面的 Dashboard Data Getters ---
 
     async getCompaniesDashboardData() {
-        const companies = await this.companyReader.getCompanyList();
+        const companies = await this.companySqlReader.getCompanies();
 
         return {
             chartData: {
@@ -314,8 +335,8 @@ class DashboardService {
         
         // Use Promise.all for others
         const [opportunities, companies] = await Promise.all([
-            this.opportunityReader.getOpportunities(),
-            this.companyReader.getCompanyList(),
+            this.opportunitySqlReader.getOpportunities(),
+            this.companySqlReader.getCompanies(),
         ]);
 
         const opportunityMap = new Map(opportunities.map(opp => [opp.opportunityId, opp]));
@@ -353,8 +374,8 @@ class DashboardService {
 
     async getOpportunitiesDashboardData() {
         const [opportunities, systemConfig] = await Promise.all([
-            this.opportunityReader.getOpportunities(),
-            this.systemReader.getSystemConfig(),
+            this.opportunitySqlReader.getOpportunities(),
+            this.systemService.getSystemConfig(),
         ]);
 
         return {
@@ -372,7 +393,7 @@ class DashboardService {
     }
 
     async getContactsDashboardData() {
-        const contacts = await this.contactService.getAllOfficialContacts();
+        const contacts = await this.contactSqlReader.getContacts();
         return {
             chartData: {
                 trend: this._prepareTrendData(contacts),
