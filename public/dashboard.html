@@ -1,3 +1,24 @@
+<!--
+FILE: public/dashboard.html
+VERSION: 8.0.8
+DATE: 2026-03-10
+
+CHANGELOG
+Phase 8.0.8
+- Replaced Highcharts CDN scripts with local vendor assets.
+- All Highcharts libraries now load from:
+  /assets/vendor/highcharts/
+
+REASON
+Corporate firewall / CSP blocks code.highcharts.com CDN (403).
+Local vendoring ensures stable loading in internal networks
+and Render deployment.
+
+NO BUSINESS LOGIC CHANGES
+Only static script path replacement.
+-->
+
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -10,12 +31,12 @@
     <link rel="stylesheet" href="styles/main.css">
     <link rel="stylesheet" href="styles/user-profile.css">
 
-    <script src="https://code.highcharts.com/maps/highmaps.js"></script>
-    <script src="https://code.highcharts.com/maps/modules/data.js"></script>
-    <script src="https://code.highcharts.com/mapdata/countries/tw/tw-all.js"></script>
-    <script src="https://code.highcharts.com/modules/exporting.js"></script>
-    <script src="https://code.highcharts.com/modules/export-data.js"></script>
-    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <script src="assets/vendor/highcharts/highmaps.js"></script>
+    <script src="assets/vendor/highcharts/data.js"></script>
+    <script src="assets/vendor/highcharts/tw-all.js"></script>
+    <script src="assets/vendor/highcharts/exporting.js"></script>
+    <script src="assets/vendor/highcharts/export-data.js"></script>
+    <script src="assets/vendor/highcharts/accessibility.js"></script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" defer></script>
 </head>
