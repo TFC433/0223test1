@@ -1,14 +1,15 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * * @version 8.2.1 (Phase 8 Fix: Event Log SQL Reader)
- * @date 2026-03-06
+ * * @version 8.4.0 (Phase 8.4 Patch: Dashboard Map SQL)
+ * @date 2026-03-11
  * @description 
  * - [FIX-1] Locked _fetchOpportunities to SQL Reader only (No Sheet fallback).
  * - [FIX-2] Enforced hard contract on batchUpdateOpportunities (Throw on missing ID).
  * - [FIX-3] Explicitly marked RAW Contact Upgrade boundary.
  * - [PHASE 7] Migrated Contact Linking (Add/Delete) to SQL Writer.
  * - [PHASE 8 FIX] Switched getOpportunityDetails to use EventLogSqlReader for events.
+ * - [PHASE 8.4 PATCH] Injected companySqlReader & migrated getOpportunitiesByCounty to strictly use SQL.
  */
 
 class OpportunityService {
@@ -27,6 +28,7 @@ class OpportunityService {
      * @param {OpportunitySqlReader} opportunitySqlReader
      * @param {OpportunitySqlWriter} opportunitySqlWriter
      * @param {EventLogSqlReader} eventLogSqlReader
+     * @param {CompanySqlReader} companySqlReader - [Phase 8.4 Patch] Inject SQL Reader
      */
     constructor({
         config,
@@ -42,7 +44,8 @@ class OpportunityService {
         systemReader,
         opportunitySqlReader,
         opportunitySqlWriter,
-        eventLogSqlReader // [Phase 8 Fix] Inject SQL Reader
+        eventLogSqlReader, // [Phase 8 Fix] Inject SQL Reader
+        companySqlReader   // [Phase 8.4 Patch] Inject SQL Reader
     }) {
         this.config = config;
         
@@ -55,6 +58,7 @@ class OpportunityService {
         this.companyReader = companyReader;
         this.opportunitySqlReader = opportunitySqlReader;
         this.eventLogSqlReader = eventLogSqlReader; // [Phase 8 Fix] Store SQL Reader
+        this.companySqlReader = companySqlReader;   // [Phase 8.4 Patch] Store SQL Reader
 
         // Writers
         this.opportunityWriter = opportunityWriter;
@@ -460,9 +464,10 @@ class OpportunityService {
      */
     async getOpportunitiesByCounty(opportunityType = null) {
         try {
+            // [Phase 8.4 Patch] Fetch completely via SQL Readers
             const [allOpportunities, companies] = await Promise.all([
                 this._fetchOpportunities(),
-                this.companyReader.getCompanyList()
+                this.companySqlReader.getCompanies()
             ]);
 
             const activeOpportunities = allOpportunities.filter(opp => 
@@ -478,7 +483,8 @@ class OpportunityService {
             
             (companies || []).forEach(c => {
                 if (c.companyName) {
-                    companyToCountyMap.set(normalize(c.companyName), c.county);
+                    // Support DTO shapes (county from legacy/hybrid logic, city from raw SQL mapping)
+                    companyToCountyMap.set(normalize(c.companyName), c.county || c.city);
                 }
             });
 
