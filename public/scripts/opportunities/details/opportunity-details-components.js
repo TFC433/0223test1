@@ -1,7 +1,10 @@
+// ============================================================================
+// File: public/scripts/opportunities/details/opportunity-details-components.js
+// ============================================================================
 // public/scripts/opportunity-details/opportunity-details-components.js
 // 職責：整合機會詳細頁面組件，處理編輯邏輯與資料存取
-// * @version 1.1.1 (Phase 8 Forensics Fix)
-// * @date 2026-03-02
+// * @version 1.1.2 (Phase 8.6A Perf Patch)
+// * @date 2026-03-11
 // (依賴 OpportunityInfoView 進行顯示模式渲染)
 
 function _injectStylesForOppInfoCard() {
@@ -74,6 +77,7 @@ function _injectStylesForOppInfoCard() {
 
 const OpportunityInfoCard = (() => {
     let _currentOpp = null;
+    let _isCascadingInitialized = false; // [Phase 8.6A] Lazy Load Tracker
 
     async function _getCompanyList() {
         if (window.CRM_APP && window.CRM_APP.companyList && window.CRM_APP.companyList.length > 0) return window.CRM_APP.companyList;
@@ -89,6 +93,8 @@ const OpportunityInfoCard = (() => {
 
     function render(opp) {
         _currentOpp = opp;
+        _isCascadingInitialized = false; // Reset on re-render
+
         _injectStylesForOppInfoCard();
         const container = document.getElementById('opportunity-info-card-container');
         if (!container) return;
@@ -111,9 +117,16 @@ const OpportunityInfoCard = (() => {
             const editContainer = document.getElementById('opportunity-info-edit-mode');
             if (editContainer) {
                 editContainer.innerHTML = html;
-                _initCascadingLogic(opp);
+                // [Phase 8.6A PERF] Removed eager _initCascadingLogic(opp) to prevent duplicate companyList fetch.
             }
         });
+    }
+
+    // [Phase 8.6A PERF] Lazy Initialization Entry Point
+    async function ensureCascadingLogic(opp) {
+        if (_isCascadingInitialized) return;
+        await _initCascadingLogic(opp);
+        _isCascadingInitialized = true;
     }
 
     // ================== 以下為編輯模式邏輯 ==================
@@ -171,8 +184,6 @@ const OpportunityInfoCard = (() => {
         
         let specQuantities = new Map();
         try {
-            // [FORENSICS FIX] Use potentialSpecification which is now normalized in opportunity-details.js
-            // This prevents edit mode from wiping data due to missing 'productDetails' map.
             const parsed = JSON.parse(opp.potentialSpecification);
             if (parsed && typeof parsed === 'object') specQuantities = new Map(Object.entries(parsed));
         } catch (e) {}
@@ -218,7 +229,6 @@ const OpportunityInfoCard = (() => {
         const salesModel = opp.salesModel || '直接販售';
         const isManualValue = opp.opportunityValueType === 'manual';
         
-        // [Phase 7 SQL Type Compatibility Fix] Ensure value is string before replace
         const rawValue = opp.opportunityValue;
         const formattedValue = String(rawValue !== null && rawValue !== undefined ? rawValue : '0').replace(/,/g, '');
         
@@ -227,7 +237,6 @@ const OpportunityInfoCard = (() => {
         const createdDate = opp.createdTime ? opp.createdTime.split('T')[0] : '';
         const expectedDate = opp.expectedCloseDate ? opp.expectedCloseDate.split('T')[0] : '';
 
-        // [FORENSICS FIX] Ensure initial value for hidden sales-channel is set
         const initSalesChannel = opp.salesChannel || opp.channelDetails || '';
 
         return `
@@ -442,7 +451,7 @@ const OpportunityInfoCard = (() => {
         }
     }
 
-    return { render, handleSalesModelChange };
+    return { render, handleSalesModelChange, ensureCascadingLogic };
 })();
 
 // OpportunityAssociatedOpps 保持不變

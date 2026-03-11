@@ -1,12 +1,16 @@
+// ============================================================================
+// File: public/scripts/opportunities/opportunity-details-events.js
+// ============================================================================
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details-events.js
- * Version: 8.1.1
- * Date: 2026-03-02
+ * Version: 8.1.2
+ * Date: 2026-03-11
  * Changelog:
  * - [FIX] _initSpecQuantities: Robust handling for JSON string, CSV string, or Object to prevent .split() crash.
  * - [FIX] salesChannel/channelDetails conflict in save() payload.
  * - [FIX] Ensure potentialSpecification reads from normalized data.
+ * - [PERF] Made toggleEditMode async to support Lazy Loading of the Edit Mode cascading logic.
  */
 
 // public/scripts/opportunity-details-events.js
@@ -67,23 +71,35 @@ const OpportunityInfoCardEvents = (() => {
         }
     }
 
-    function toggleEditMode(isEditing) {
+    async function toggleEditMode(isEditing) {
         const displayMode = document.getElementById('opportunity-info-display-mode');
         const editMode = document.getElementById('opportunity-info-edit-mode');
         if (!displayMode || !editMode) return;
 
         if (isEditing) {
             if (!_currentOppForEditing) return showNotification('資料未就緒', 'error');
+
+            // [Phase 8.6A Perf] Lazy load the company lists only when User actually enters Edit Mode
+            if (typeof OpportunityInfoCard !== 'undefined' && typeof OpportunityInfoCard.ensureCascadingLogic === 'function') {
+                showLoading('準備編輯環境...');
+                try {
+                    await OpportunityInfoCard.ensureCascadingLogic(_currentOppForEditing);
+                } catch (e) {
+                    console.error('[OpportunityEvents] Error loading cascading logic:', e);
+                }
+                hideLoading();
+            }
+
             displayMode.style.display = 'none';
             editMode.style.display = 'block';
             _bindSpecEvents();
             _initSpecQuantities();
 
             if (_currentOppForEditing.customerCompany) {
-                handleCustomerChange(_currentOppForEditing.customerCompany, _currentOppForEditing.mainContact);
+                await handleCustomerChange(_currentOppForEditing.customerCompany, _currentOppForEditing.mainContact);
             }
             if (_currentOppForEditing.salesModel !== '直接販售' && _currentOppForEditing.channelDetails) {
-                handleChannelChange(_currentOppForEditing.channelDetails, _currentOppForEditing.channelContact);
+                await handleChannelChange(_currentOppForEditing.channelDetails, _currentOppForEditing.channelContact);
             }
         } else {
             editMode.style.display = 'none';

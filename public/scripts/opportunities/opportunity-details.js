@@ -1,11 +1,15 @@
+// ============================================================================
+// File: public/scripts/opportunities/opportunity-details.js
+// ============================================================================
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details.js
- * Version: 8.1.0 (Phase 8 - Forensics Fix)
- * Date: 2026-03-02
+ * Version: 8.1.2 (Phase 8.6A - Perf Patch)
+ * Date: 2026-03-11
  * Changelog:
  * - [FIX] Explicitly map SQL 'productDetails' to UI 'potentialSpecification' to fix edit mode data loss.
  * - [FIX] Sync 'salesChannel' and 'channelDetails' to prevent writer conflicts.
+ * - [PERF] Removed redundant CRM_APP.updateAllDropdowns() to eliminate duplicate companyList fetches.
  */
 
 window.currentDetailOpportunityId = null;
@@ -193,11 +197,8 @@ async function loadOpportunityDetailPage(opportunityId) {
             });
         }
 
-        const APP = window.CRM_APP || (typeof CRM_APP !== 'undefined' ? CRM_APP : null);
-        if (APP && typeof APP.updateAllDropdowns === 'function') {
-            APP.updateAllDropdowns();
-        }
-
+        // [Phase 8.6A PERF] Removed global CRM_APP.updateAllDropdowns() to prevent redundant companyList fetch.
+        
     } catch (error) {
         if (error.message !== 'Unauthorized') {
             console.error('[OpportunityDetails] 載入失敗:', error);

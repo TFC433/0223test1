@@ -1,9 +1,14 @@
+// ============================================================================
+// File: services/opportunity-service.js
+// ============================================================================
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.5.1 (Phase 8.5 Patch: Minimal Reader Purge)
+ * @version 8.6.0 (Phase 8.6B Patch: Scoped Interaction & Safe RAW Contacts)
  * @date 2026-03-11
  * @description 
+ * - [PHASE 8.6B] Migrated interactions read in getOpportunityDetails to scoped InteractionSqlReader.
+ * - [PHASE 8.6B] Wrapped contactReader.getContacts() in catch([]) to prevent Sheet errors from crashing the page.
  * - [PHASE 8.5] Removed dead dependency OpportunityReader.
  * - [PHASE 8.5] Replaced companyReader with companySqlReader in deleteOpportunity.
  * - [FIX-1] Locked _fetchOpportunities to SQL Reader only (No Sheet fallback).
@@ -29,6 +34,7 @@ class OpportunityService {
      * @param {OpportunitySqlWriter} opportunitySqlWriter
      * @param {EventLogSqlReader} eventLogSqlReader
      * @param {CompanySqlReader} companySqlReader
+     * @param {InteractionSqlReader} interactionSqlReader
      */
     constructor({
         config,
@@ -43,7 +49,8 @@ class OpportunityService {
         opportunitySqlReader,
         opportunitySqlWriter,
         eventLogSqlReader, // [Phase 8 Fix] Inject SQL Reader
-        companySqlReader   // [Phase 8.4 Patch] Inject SQL Reader
+        companySqlReader,  // [Phase 8.4 Patch] Inject SQL Reader
+        interactionSqlReader // [Phase 8.6B] Inject Scoped SQL Reader
     }) {
         this.config = config;
         
@@ -55,6 +62,7 @@ class OpportunityService {
         this.opportunitySqlReader = opportunitySqlReader;
         this.eventLogSqlReader = eventLogSqlReader; // [Phase 8 Fix] Store SQL Reader
         this.companySqlReader = companySqlReader;   // [Phase 8.4 Patch] Store SQL Reader
+        this.interactionSqlReader = interactionSqlReader; // [Phase 8.6B] Store SQL Reader
 
         // Writers
         this.opportunityWriter = opportunityWriter;
@@ -135,20 +143,29 @@ class OpportunityService {
             }
             const eventReader = this.eventLogSqlReader || this.eventLogReader;
 
+            // [Phase 8.6B] Use scoped SQL for interactions
+            const interactionPromise = this.interactionSqlReader 
+                ? this.interactionSqlReader.getInteractionsByOpportunityIds([opportunityId])
+                : this.interactionReader.getInteractions().then(all => all.filter(i => i.opportunityId === opportunityId));
+
             const [
                 allOpportunities, 
-                interactionsFromCache, 
+                scopedInteractions, 
                 eventLogsFromCache, 
                 allLinks,
                 allOfficialContacts,
                 allPotentialContacts
             ] = await Promise.all([
                 this._fetchOpportunities(),
-                this.interactionReader.getInteractions(),
+                interactionPromise, // [Phase 8.6B] Scoped SQL Fetch
                 eventReader.getEventLogs(), // [Phase 8 Fix] Use SQL Reader
                 this.contactReader.getAllOppContactLinks(),
                 this.contactReader.getContactList(),
-                this.contactReader.getContacts()
+                // [Phase 8.6B] Isolate RAW contacts fetch failure to prevent page crash
+                this.contactReader.getContacts().catch(e => {
+                    console.warn(`[OpportunityService] Failed to load potential contacts (Sheet error): ${e.message}`);
+                    return [];
+                })
             ]);
             
             const opportunityInfo = allOpportunities.find(opp => opp.opportunityId === opportunityId);
@@ -187,8 +204,8 @@ class OpportunityService {
                 })
                 .filter(Boolean);
             
-            const interactions = interactionsFromCache
-                .filter(i => i.opportunityId === opportunityId)
+            // [Phase 8.6B] Interactions are already scoped, only sorting is required
+            const interactions = (scopedInteractions || [])
                 .sort((a, b) => new Date(b.interactionTime || b.createdTime) - new Date(a.interactionTime || a.createdTime));
 
             const eventLogs = eventLogsFromCache
@@ -197,7 +214,7 @@ class OpportunityService {
 
             const normalizedOppCompany = this._normalizeCompanyName(opportunityInfo.customerCompany);
             
-            const potentialContacts = allPotentialContacts.filter(pc => {
+            const potentialContacts = (allPotentialContacts || []).filter(pc => {
                 const normalizedPcCompany = this._normalizeCompanyName(pc.company);
                 return normalizedPcCompany && normalizedOppCompany && normalizedPcCompany === normalizedOppCompany;
             });
@@ -215,7 +232,7 @@ class OpportunityService {
                     if (potentialMatch && potentialMatch.position) {
                         mainContactJobTitle = potentialMatch.position;
                     } else {
-                        const fallbackMatch = allPotentialContacts.find(pc => 
+                        const fallbackMatch = (allPotentialContacts || []).find(pc => 
                             pc.name === targetName && 
                             this._normalizeCompanyName(pc.company) === normalizedOppCompany
                         );
