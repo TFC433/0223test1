@@ -4,9 +4,10 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.6.0 (Phase 8.6B Patch: Scoped Interaction & Safe RAW Contacts)
+ * @version 8.6.1 (Phase 8.6C Patch: Scoped SQL Opp/Event Fetch)
  * @date 2026-03-11
  * @description 
+ * - [PHASE 8.6C] Removed full-table Opportunity and EventLog fetches in getOpportunityDetails, utilizing scoped SQL reader methods.
  * - [PHASE 8.6B] Migrated interactions read in getOpportunityDetails to scoped InteractionSqlReader.
  * - [PHASE 8.6B] Wrapped contactReader.getContacts() in catch([]) to prevent Sheet errors from crashing the page.
  * - [PHASE 8.5] Removed dead dependency OpportunityReader.
@@ -137,6 +138,12 @@ class OpportunityService {
      */
     async getOpportunityDetails(opportunityId) {
         try {
+            // [Phase 8.6C] Fetch Self Opportunity first to resolve parent ID for scoped queries
+            const opportunityInfo = await this.opportunitySqlReader.getOpportunityById(opportunityId);
+            if (!opportunityInfo) {
+                throw new Error(`找不到機會ID為 ${opportunityId} 的案件`);
+            }
+
             // [Phase 8 Fix] Ensure eventLogSqlReader is available
             if (!this.eventLogSqlReader) {
                 console.warn('[OpportunityService] EventLogSqlReader missing, falling back to legacy reader (Data may be stale).');
@@ -148,17 +155,30 @@ class OpportunityService {
                 ? this.interactionSqlReader.getInteractionsByOpportunityIds([opportunityId])
                 : this.interactionReader.getInteractions().then(all => all.filter(i => i.opportunityId === opportunityId));
 
+            // [Phase 8.6C] Scoped queries for Parent, Children, and Events
+            const parentPromise = opportunityInfo.parentOpportunityId 
+                ? this.opportunitySqlReader.getOpportunityById(opportunityInfo.parentOpportunityId)
+                : Promise.resolve(null);
+            
+            const childPromise = this.opportunitySqlReader.getOpportunitiesByParentId(opportunityId);
+            
+            const eventPromise = this.eventLogSqlReader
+                ? this.eventLogSqlReader.getEventLogsByOpportunityId(opportunityId)
+                : eventReader.getEventLogs().then(all => all.filter(e => e.opportunityId === opportunityId));
+
             const [
-                allOpportunities, 
+                parentOpportunity,
+                childOpportunities,
                 scopedInteractions, 
-                eventLogsFromCache, 
+                scopedEventLogs, 
                 allLinks,
                 allOfficialContacts,
                 allPotentialContacts
             ] = await Promise.all([
-                this._fetchOpportunities(),
+                parentPromise,
+                childPromise,
                 interactionPromise, // [Phase 8.6B] Scoped SQL Fetch
-                eventReader.getEventLogs(), // [Phase 8 Fix] Use SQL Reader
+                eventPromise, // [Phase 8.6C] Scoped SQL Fetch
                 this.contactReader.getAllOppContactLinks(),
                 this.contactReader.getContactList(),
                 // [Phase 8.6B] Isolate RAW contacts fetch failure to prevent page crash
@@ -167,11 +187,6 @@ class OpportunityService {
                     return [];
                 })
             ]);
-            
-            const opportunityInfo = allOpportunities.find(opp => opp.opportunityId === opportunityId);
-            if (!opportunityInfo) {
-                throw new Error(`找不到機會ID為 ${opportunityId} 的案件`);
-            }
 
             const safeGet = (obj, keys) => {
                 for (const k of keys) {
@@ -208,8 +223,8 @@ class OpportunityService {
             const interactions = (scopedInteractions || [])
                 .sort((a, b) => new Date(b.interactionTime || b.createdTime) - new Date(a.interactionTime || a.createdTime));
 
-            const eventLogs = eventLogsFromCache
-                .filter(log => log.opportunityId === opportunityId)
+            // [Phase 8.6C] Events are already scoped, just sort them
+            const eventLogs = (scopedEventLogs || [])
                 .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
 
             const normalizedOppCompany = this._normalizeCompanyName(opportunityInfo.customerCompany);
@@ -243,12 +258,6 @@ class OpportunityService {
                 }
             }
             opportunityInfo.mainContactJobTitle = mainContactJobTitle;
-
-            let parentOpportunity = null;
-            if (opportunityInfo.parentOpportunityId) {
-                parentOpportunity = allOpportunities.find(opp => opp.opportunityId === opportunityInfo.parentOpportunityId) || null;
-            }
-            const childOpportunities = allOpportunities.filter(opp => opp.parentOpportunityId === opportunityId);
 
             return {
                 opportunityInfo,

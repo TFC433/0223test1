@@ -1,8 +1,8 @@
 /**
  * data/event-log-sql-reader.js
- * @version Phase 8.4
- * @date 2026-03-05
- * @purpose Phase 8.4 Fix: Add frontend-prefixed aliases to DTO for Editor compatibility
+ * @version Phase 8.5
+ * @date 2026-03-11
+ * @purpose Phase 8.4 Fix: Add frontend-prefixed aliases to DTO for Editor compatibility. Phase 8.5: Add getEventLogsByOpportunityId for scoped queries.
  */
 
 const { supabase } = require('../config/supabase');
@@ -54,6 +54,40 @@ class EventLogSqlReader {
 
         } catch (error) {
             console.error('[EventLogSqlReader] getEventLogById Error:', error);
+            throw error; // Strict re-throw
+        }
+    }
+
+    /**
+     * Get all events for a specific opportunity
+     * Unions data from all 5 tables filtered by opportunity_id.
+     * @param {string} opportunityId 
+     * @returns {Promise<Array<Object>>} Array of Event DTOs
+     */
+    async getEventLogsByOpportunityId(opportunityId) {
+        if (!opportunityId) throw new Error('EventLogSqlReader: opportunityId is required');
+
+        try {
+            const queries = Object.entries(this.tables).map(async ([type, tableName]) => {
+                const { data, error } = await supabase
+                    .from(tableName)
+                    .select('*')
+                    .eq('opportunity_id', opportunityId);
+
+                if (error) {
+                    throw new Error(`[EventLogSqlReader] DB Error in ${tableName}: ${error.message}`);
+                }
+                
+                return data.map(row => this._mapRowToDto(row, type));
+            });
+
+            const results = await Promise.all(queries);
+            
+            // Flatten results from all tables
+            return results.flat();
+
+        } catch (error) {
+            console.error('[EventLogSqlReader] getEventLogsByOpportunityId Error:', error);
             throw error; // Strict re-throw
         }
     }

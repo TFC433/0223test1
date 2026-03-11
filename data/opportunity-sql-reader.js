@@ -6,9 +6,9 @@
  * - Table: opportunities
  * - Schema: Strict adherence to provided schema list
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.1.0
+ * - Version: 1.2.0
  * - Date: 2026-03-11
- * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries.
+ * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries. Added getOpportunitiesByParentId for scoped child queries.
  */
 
 const { supabase } = require('../config/supabase');
@@ -48,6 +48,32 @@ class OpportunitySqlReader {
 
         } catch (error) {
             console.error('[OpportunitySqlReader] getOpportunityById Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get child opportunities by parent ID
+     * @param {string} parentId 
+     * @returns {Promise<Array<Object>>} Array of Opportunity DTOs
+     */
+    async getOpportunitiesByParentId(parentId) {
+        if (!parentId) throw new Error('OpportunitySqlReader: parentId is required');
+
+        try {
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .eq('parent_opportunity_id', parentId);
+
+            if (error) {
+                throw new Error(`[OpportunitySqlReader] DB Error: ${error.message}`);
+            }
+
+            return data.map(row => this._mapRowToDto(row));
+
+        } catch (error) {
+            console.error('[OpportunitySqlReader] getOpportunitiesByParentId Error:', error);
             throw error;
         }
     }
