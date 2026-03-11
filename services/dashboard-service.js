@@ -1,27 +1,25 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * * @version 8.8.0 (Phase 8.8: SystemService Config Routing)
- * @date 2026-03-10
+ * @version 8.8.1 (Phase 8.3 Task: Strict SQL Readers Only)
+ * @date 2026-03-11
  * @description 負責整合各個模組的數據，計算統計指標、圖表數據與 KPI。
- * * [Forensics Fix]
+ * * [Forensics Fix / Phase 8.3 Task]
  * - Enforced eventLogSqlReader injection to strictly bypass Google Sheets for events.
  * - Removed ambiguous eventLogReader usage.
  * - Migrated all remaining Dashboard legacy reads to pure SQL readers.
  * - [Phase 8.8] Replaced deprecated systemReader calls with systemService.
+ * - [Phase 8.3 Task] COMPLETELY REMOVED companyReader, opportunityReader, interactionReader dependencies.
  */
 
 class DashboardService {
     /**
      * 建構子：接收所有必要的資料讀取器與服務
      * @param {Object} config - 系統設定
-     * @param {OpportunityReader} opportunityReader - [Direct Read]
      * @param {ContactService} contactService - [Phase 7 Fix]
-     * @param {InteractionReader} interactionReader - [Direct Read]
      * @param {EventLogSqlReader} eventLogSqlReader - [Phase 8.3d] Strict SQL Reader
      * @param {SystemReader} systemReader
      * @param {WeeklyBusinessService} weeklyBusinessService
-     * @param {CompanyReader} companyReader - [Direct Read]
      * @param {CalendarService} calendarService
      * @param {ContactSqlReader} contactSqlReader - [Phase 8.7] SQL Reader
      * @param {InteractionSqlReader} interactionSqlReader - [Phase 8.7] SQL Reader
@@ -31,13 +29,10 @@ class DashboardService {
      */
     constructor(
         config,
-        opportunityReader,
         contactService,
-        interactionReader,
         eventLogSqlReader, // Renamed to enforce SQL usage
         systemReader,
         weeklyBusinessService,
-        companyReader,
         calendarService,
         contactSqlReader,
         interactionSqlReader,
@@ -45,22 +40,19 @@ class DashboardService {
         opportunitySqlReader,
         systemService
     ) {
-        // 嚴格檢查依賴
-        if (!opportunityReader || !contactService || !interactionReader || !config || !eventLogSqlReader) {
+        // 嚴格檢查依賴 (移除舊有 Sheet Readers 的檢查)
+        if (!contactService || !config || !eventLogSqlReader) {
             throw new Error('[DashboardService] 初始化失敗：缺少必要的 Reader/Service 或 Config');
         }
 
         this.config = config;
-        this.opportunityReader = opportunityReader;
         this.contactService = contactService;
-        this.interactionReader = interactionReader;
         
         // [Phase 8.3d] Explicitly store as SQL reader to avoid confusion
         this.eventLogSqlReader = eventLogSqlReader;
         
         this.systemReader = systemReader;
         this.weeklyBusinessService = weeklyBusinessService;
-        this.companyReader = companyReader;
         this.calendarService = calendarService;
 
         // [Phase 8.7] SQL Readers
