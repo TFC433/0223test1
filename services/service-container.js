@@ -1,7 +1,7 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 8.1.0 (Phase 8.1: SQL-First Company Details Patch)
+ * @version 8.2.0 (Phase 8.2 Patch)
  * @date 2026-03-11
  * @changelog
  * - [FIX] Injected eventLogSqlReader into CompanyService to fix Detail View event loading.
@@ -11,6 +11,7 @@
  * - [FIX] Injected systemService into WeeklyBusinessService replacing systemReader.
  * - [FIX] Fully aligned DashboardService arguments (14 total) to fix undefined property crash.
  * - [PHASE 8.1 PATCH] Injected contactSqlReader, opportunitySqlReader, and interactionSqlReader into CompanyService.
+ * - [PHASE 8.2 PATCH] InteractionService strictly uses interactionSqlReader, removing interactionReader dependency.
  */
 
 const config = require('../config');
@@ -88,7 +89,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v8.1.0 Phase 8.1)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v8.2.0 Phase 8.2)...');
 
     try {
         // 1. Infrastructure
@@ -207,12 +208,12 @@ async function initializeServices() {
             contactService
         });
 
+        // [Phase 8.2 Patch] Removed interactionReader dependency
         const interactionService = new InteractionService(
-            interactionReader,
+            interactionSqlReader,
             interactionSqlWriter,
             opportunityReader,
-            companyReader,
-            interactionSqlReader
+            companyReader
         );
 
         const eventLogService = new EventLogService(

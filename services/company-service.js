@@ -1,9 +1,10 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * @version 8.1.0 (Phase 8.1: SQL-First Company Details Patch)
+ * @version 8.2.0 (Phase 8.2 Patch)
  * @date 2026-03-11
  * @changelog 
+ * - Phase 8.2.0: Removed InteractionReader dependency, using interactionSqlReader instead.
  * - Phase 8.1.0: Added SQL-first execution path to getCompanyDetails via Promise.all with automatic memory fallback.
  * - Phase 8.0.7: Injected eventLogSqlReader to fix Company Detail event sync
  * @description
@@ -257,7 +258,7 @@ class CompanyService {
 
             // --- Step 2: 計算最後活動時間 ---
             const [interactions, eventLogs] = await Promise.all([
-                this.interactionReader.getInteractions(),
+                this.interactionSqlReader.getInteractions(),
                 this.eventLogReader.getEventLogs()
             ]);
 
@@ -386,7 +387,7 @@ class CompanyService {
                 const [allContacts, allOpportunities, allInteractions, allEventLogs, allPotentialContacts] = await Promise.all([
                     this.contactReader.getContactList(),
                     this.opportunityReader.getOpportunities(),
-                    this.interactionReader.getInteractions(),
+                    this.interactionSqlReader.getInteractions(),
                     this.eventLogSqlReader.getEventLogs(), // [Phase 8 Fix] Use SQL Reader for Events
                     this.contactReader.getContacts(3000)
                 ]);

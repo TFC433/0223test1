@@ -1,51 +1,43 @@
 /*
  * FILE: services/interaction-service.js
- * VERSION: 7.0.0
- * DATE: 2026-02-06
+ * VERSION: 8.2.0 (Phase 8.2 Patch)
+ * DATE: 2026-03-11
  * CHANGELOG:
+ * - Phase 8.2 Patch: Replaced InteractionReader with InteractionSqlReader completely. Removed Sheet fallback.
  * - Phase 7: Migrate Interaction Write Authority to SQL
  */
 
 class InteractionService {
     /**
-     * @param {InteractionReader} interactionReader 
+     * @param {InteractionSqlReader} interactionSqlReader 
      * @param {InteractionSqlWriter} interactionSqlWriter 
      * @param {OpportunityReader} opportunityReader 
      * @param {CompanyReader} companyReader 
-     * @param {Object} [interactionSqlReader=null] Optional SQL Reader for Phase 6-2
      */
-    constructor(interactionReader, interactionSqlWriter, opportunityReader, companyReader, interactionSqlReader = null) {
-        this.interactionReader = interactionReader;
+    constructor(interactionSqlReader, interactionSqlWriter, opportunityReader, companyReader) {
+        this.interactionSqlReader = interactionSqlReader;
         this.interactionSqlWriter = interactionSqlWriter;
         this.opportunityReader = opportunityReader;
         this.companyReader = companyReader;
-        this.interactionSqlReader = interactionSqlReader;
     }
 
     /**
      * 內部私有方法：取得互動紀錄原始資料
-     * 策略：SQL First -> Sheet Fallback
-     * @param {boolean} forceSheet 強制使用 Sheet (用於除錯或特定場景)
+     * 策略：SQL Only (Phase 8.2)
      * @returns {Promise<Array>} 原始互動紀錄陣列
      */
-    async _fetchInteractions(forceSheet = false) {
-        // 1. Try SQL if available and not forced to Sheet
-        if (!forceSheet && this.interactionSqlReader) {
-            try {
-                const rows = await this.interactionSqlReader.getInteractions();
-                if (rows && rows.length > 0) {
-                    console.log('[InteractionService] Read Source: SQL');
-                    return rows;
-                }
-            } catch (error) {
-                console.warn('[InteractionService] SQL Read Failed, falling back to Sheet:', error);
-                // Fallthrough to Sheet
-            }
+    async _fetchInteractions() {
+        if (!this.interactionSqlReader) {
+            throw new Error('[InteractionService] InteractionSqlReader not configured.');
         }
-
-        // 2. Sheet Fallback
-        console.log('[InteractionService] Read Source: Sheet (Fallback)');
-        return this.interactionReader.getInteractions();
+        
+        try {
+            const rows = await this.interactionSqlReader.getInteractions();
+            return rows || [];
+        } catch (error) {
+            console.error('[InteractionService] SQL Read Failed:', error);
+            return [];
+        }
     }
 
     /**
@@ -57,9 +49,9 @@ class InteractionService {
      */
     async searchInteractions(query, page = 1, fetchAll = false) {
         try {
-            // 1. Raw Fetch (Parallel with SQL/Sheet switch)
+            // 1. Raw Fetch (Strict SQL)
             const [interactions, opportunities, companies] = await Promise.all([
-                this._fetchInteractions(), // Switchable Source
+                this._fetchInteractions(), 
                 this.opportunityReader.getOpportunities(), // Raw
                 this.companyReader.getCompanyList() // Raw
             ]);
@@ -109,11 +101,7 @@ class InteractionService {
             });
 
             // 6. Pagination
-            // [Evidence] Reader used: this.config.PAGINATION.INTERACTIONS_PER_PAGE
-            const config = this.interactionReader.config;
-            const pageSize = (config && config.PAGINATION && config.PAGINATION.INTERACTIONS_PER_PAGE) 
-                ? config.PAGINATION.INTERACTIONS_PER_PAGE 
-                : 20; // Fallback
+            const pageSize = 20; // Default fallback since config from InteractionReader is removed
 
             if (fetchAll) {
                 return {
@@ -189,10 +177,6 @@ class InteractionService {
             const safeUser = user || {};
             const newId = await this.interactionSqlWriter.createInteraction(data, safeUser);
             
-            // Invalidate Reader Cache
-            if (this.interactionReader.invalidateCache) {
-                this.interactionReader.invalidateCache('interactions');
-            }
             return { success: true, id: newId };
         } catch (error) {
             console.error('[InteractionService] createInteraction Error:', error);
@@ -212,10 +196,6 @@ class InteractionService {
             const safeUser = user || {};
             await this.interactionSqlWriter.updateInteraction(id, data, safeUser);
             
-            // Invalidate Reader Cache
-            if (this.interactionReader.invalidateCache) {
-                this.interactionReader.invalidateCache('interactions');
-            }
             return { success: true };
         } catch (error) {
             console.error('[InteractionService] updateInteraction Error:', error);
@@ -234,10 +214,6 @@ class InteractionService {
             const safeUser = user || {};
             await this.interactionSqlWriter.deleteInteraction(id, safeUser);
             
-            // Invalidate Reader Cache
-            if (this.interactionReader.invalidateCache) {
-                this.interactionReader.invalidateCache('interactions');
-            }
             return { success: true };
         } catch (error) {
             console.error('[InteractionService] deleteInteraction Error:', error);
