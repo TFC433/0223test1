@@ -242,19 +242,16 @@ async function initializeServices() {
 
         const dashboardService = new DashboardService(
             config,
-            opportunityReader,
             contactService,
-            interactionReader,
-            eventLogSqlReader, // [CRITICAL FIX] Explicitly injecting SQL Reader for Dashboard
-            systemReader, // [Phase 8.9 Fix] Restored to match constructor Arg 6
+            eventLogSqlReader,
+            systemReader,
             weeklyBusinessService,
-            companyReader,
             calendarService,
-            contactSqlReader,     // [Phase 8.9 Fix] Inject SQL Reader for contacts (Arg 10)
-            interactionSqlReader, // [Phase 8.9 Fix] Inject SQL Reader for interactions (Arg 11)
-            companySqlReader,     // [Phase 8.9 Fix] Inject SQL Reader for companies (Arg 12)
-            opportunitySqlReader, // [Phase 8.9 Fix] Inject SQL Reader for opportunities (Arg 13)
-            systemService         // [Phase 8.9 Fix] Append SystemService at the end (Arg 14)
+            contactSqlReader,
+            interactionSqlReader,
+            companySqlReader,
+            opportunitySqlReader,
+            systemService
         );
 
         const workflowService = new WorkflowService(
