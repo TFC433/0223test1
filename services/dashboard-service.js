@@ -1,7 +1,7 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 8.8.2 (Phase 8.3 Task: Strict SQL Readers Only + Debug Logs)
+ * @version 8.9.0 (Phase 1 Task: SQL Aggregation Counts)
  * @date 2026-03-11
  * @description 負責整合各個模組的數據，計算統計指標、圖表數據與 KPI。
  * * [Forensics Fix / Phase 8.3 Task]
@@ -11,6 +11,8 @@
  * - [Phase 8.8] Replaced deprecated systemReader calls with systemService.
  * - [Phase 8.3 Task] COMPLETELY REMOVED companyReader, opportunityReader, interactionReader dependencies.
  * - [Phase 8.3 Task] Added temporary debug logs for getDashboardData payload forensics.
+ * * [Phase 1 SQL Aggregation]
+ * - Replaced in-memory counts with getContactStats, getOpportunityStats, getEventLogStats.
  */
 
 class DashboardService {
@@ -87,6 +89,7 @@ class DashboardService {
 
         const today = new Date();
         const thisWeekId = this._getWeekId(today);
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
         // --- Batch 1: 核心業務資料 ---
         console.log('   ↳ 正在載入核心資料 (Batch 1)...');
@@ -121,6 +124,18 @@ class DashboardService {
             eventLogPromise,
             systemPromise,
             companyPromise
+        ]);
+
+        // --- Batch 3: SQL Aggregation Stats (Phase 1) ---
+        console.log('   ↳ 正在載入統計資料 (Batch 3)...');
+        const [
+            contactStats,
+            opportunityStats,
+            eventStats
+        ] = await Promise.all([
+            this.contactSqlReader.getContactStats(startOfMonth),
+            this.opportunitySqlReader.getOpportunityStats(startOfMonth),
+            this.eventLogSqlReader.getEventLogStats(startOfMonth)
         ]);
 
         // --- 週間業務資料整合 ---
@@ -167,12 +182,6 @@ class DashboardService {
         });
 
         const opportunities = opportunitiesRaw.sort((a, b) => b.effectiveLastActivity - a.effectiveLastActivity);
-
-        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-
-        const contactsCountMonth = contacts.filter(c => new Date(c.createdTime) >= startOfMonth).length;
-        const opportunitiesCountMonth = opportunities.filter(o => new Date(o.createdTime) >= startOfMonth).length;
-        const eventLogsCountMonth = eventLogs.filter(e => new Date(e.createdTime) >= startOfMonth).length;
 
         // MTU/SI 統計邏輯
         const normalize = (name) => (name || '').trim().toLowerCase();
@@ -258,9 +267,9 @@ class DashboardService {
         const followUps = this._getFollowUpOpportunities(opportunities, interactions);
 
         const stats = {
-            contactsCount: contacts.length,
-            opportunitiesCount: opportunities.length,
-            eventLogsCount: eventLogs.length,
+            contactsCount: contactStats.total,
+            opportunitiesCount: opportunityStats.total,
+            eventLogsCount: eventStats.total,
             
             wonCount: wonCount,
             wonCountMonth: wonCountMonth,
@@ -282,9 +291,9 @@ class DashboardService {
             weekEventsCount: calendarData.weekCount || 0,
             followUpCount: followUps.length,
             
-            contactsCountMonth,
-            opportunitiesCountMonth,
-            eventLogsCountMonth,
+            contactsCountMonth: contactStats.month,
+            opportunitiesCountMonth: opportunityStats.month,
+            eventLogsCountMonth: eventStats.month,
         };
 
         const kanbanData = this._prepareKanbanData(opportunities, systemConfig);

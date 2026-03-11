@@ -6,9 +6,9 @@
  * - Table: contacts
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.1.0
+ * - Version: 1.2.0
  * - Date: 2026-03-11
- * - Changelog: Added getContactsByCompanyId for Phase 8.1 SQL-first queries.
+ * - Changelog: Added getContactsByCompanyId for Phase 8.1 SQL-first queries. Phase 1 SQL Aggregation: Added getContactStats.
  */
 
 const { supabase } = require('../config/supabase');
@@ -17,6 +17,36 @@ class ContactSqlReader {
 
     constructor() {
         this.tableName = 'contacts';
+    }
+
+    /**
+     * Get contact statistics (Total and This Month)
+     * Phase 1 SQL Aggregation: Utilizes Supabase exact count avoiding row transmission.
+     * @param {Date} startOfMonth 
+     * @returns {Promise<{total: number, month: number}>}
+     */
+    async getContactStats(startOfMonth) {
+        if (!startOfMonth) throw new Error('ContactSqlReader: startOfMonth is required');
+
+        try {
+            const startIso = startOfMonth.toISOString();
+
+            const [totalRes, monthRes] = await Promise.all([
+                supabase.from(this.tableName).select('*', { count: 'exact', head: true }),
+                supabase.from(this.tableName).select('*', { count: 'exact', head: true }).gte('created_time', startIso)
+            ]);
+
+            if (totalRes.error) throw new Error(`[ContactSqlReader] DB Error (total): ${totalRes.error.message}`);
+            if (monthRes.error) throw new Error(`[ContactSqlReader] DB Error (month): ${monthRes.error.message}`);
+
+            return {
+                total: totalRes.count || 0,
+                month: monthRes.count || 0
+            };
+        } catch (error) {
+            console.error('[ContactSqlReader] getContactStats Error:', error);
+            throw error;
+        }
     }
 
     /**

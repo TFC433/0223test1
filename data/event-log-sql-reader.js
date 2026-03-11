@@ -1,8 +1,8 @@
 /**
  * data/event-log-sql-reader.js
- * @version Phase 8.5
+ * @version Phase 8.6
  * @date 2026-03-11
- * @purpose Phase 8.4 Fix: Add frontend-prefixed aliases to DTO for Editor compatibility. Phase 8.5: Add getEventLogsByOpportunityId for scoped queries.
+ * @purpose Phase 8.4 Fix: Add frontend-prefixed aliases to DTO for Editor compatibility. Phase 8.5: Add getEventLogsByOpportunityId for scoped queries. Phase 1 SQL Aggregation: Added getEventLogStats cross-partition counts.
  */
 
 const { supabase } = require('../config/supabase');
@@ -18,6 +18,43 @@ class EventLogSqlReader {
             dx: 'event_logs_dx',
             summary: 'event_logs_summary'
         };
+    }
+
+    /**
+     * Get event log statistics (Total and This Month) across all partitioned tables
+     * Phase 1 SQL Aggregation: Combines parallel head exact counts to bypass full table download.
+     * @param {Date} startOfMonth 
+     * @returns {Promise<{total: number, month: number}>}
+     */
+    async getEventLogStats(startOfMonth) {
+        if (!startOfMonth) throw new Error('EventLogSqlReader: startOfMonth is required');
+
+        try {
+            const startIso = startOfMonth.toISOString();
+            let total = 0;
+            let month = 0;
+
+            const queries = Object.values(this.tables).map(async (tableName) => {
+                const [totalRes, monthRes] = await Promise.all([
+                    supabase.from(tableName).select('*', { count: 'exact', head: true }),
+                    supabase.from(tableName).select('*', { count: 'exact', head: true }).gte('created_time', startIso)
+                ]);
+
+                if (totalRes.error) throw new Error(`[EventLogSqlReader] DB Error in ${tableName} (total): ${totalRes.error.message}`);
+                if (monthRes.error) throw new Error(`[EventLogSqlReader] DB Error in ${tableName} (month): ${monthRes.error.message}`);
+
+                total += (totalRes.count || 0);
+                month += (monthRes.count || 0);
+            });
+
+            await Promise.all(queries);
+
+            return { total, month };
+
+        } catch (error) {
+            console.error('[EventLogSqlReader] getEventLogStats Error:', error);
+            throw error;
+        }
     }
 
     /**

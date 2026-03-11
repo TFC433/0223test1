@@ -6,9 +6,9 @@
  * - Table: opportunities
  * - Schema: Strict adherence to provided schema list
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.2.0
+ * - Version: 1.3.0
  * - Date: 2026-03-11
- * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries. Added getOpportunitiesByParentId for scoped child queries.
+ * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries. Added getOpportunitiesByParentId for scoped child queries. Phase 1 SQL Aggregation: Added getOpportunityStats.
  */
 
 const { supabase } = require('../config/supabase');
@@ -17,6 +17,36 @@ class OpportunitySqlReader {
 
     constructor() {
         this.tableName = 'opportunities';
+    }
+
+    /**
+     * Get opportunity statistics (Total and This Month)
+     * Phase 1 SQL Aggregation: Utilizes Supabase exact count avoiding row transmission.
+     * @param {Date} startOfMonth 
+     * @returns {Promise<{total: number, month: number}>}
+     */
+    async getOpportunityStats(startOfMonth) {
+        if (!startOfMonth) throw new Error('OpportunitySqlReader: startOfMonth is required');
+
+        try {
+            const startIso = startOfMonth.toISOString();
+
+            const [totalRes, monthRes] = await Promise.all([
+                supabase.from(this.tableName).select('*', { count: 'exact', head: true }),
+                supabase.from(this.tableName).select('*', { count: 'exact', head: true }).gte('created_time', startIso)
+            ]);
+
+            if (totalRes.error) throw new Error(`[OpportunitySqlReader] DB Error (total): ${totalRes.error.message}`);
+            if (monthRes.error) throw new Error(`[OpportunitySqlReader] DB Error (month): ${monthRes.error.message}`);
+
+            return {
+                total: totalRes.count || 0,
+                month: monthRes.count || 0
+            };
+        } catch (error) {
+            console.error('[OpportunitySqlReader] getOpportunityStats Error:', error);
+            throw error;
+        }
     }
 
     /**
