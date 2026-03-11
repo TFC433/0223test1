@@ -6,8 +6,9 @@
  * - Table: contacts
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.0.0
- * - Date: 2026-01-29
+ * - Version: 1.1.0
+ * - Date: 2026-03-11
+ * - Changelog: Added getContactsByCompanyId for Phase 8.1 SQL-first queries.
  */
 
 const { supabase } = require('../config/supabase');
@@ -47,6 +48,32 @@ class ContactSqlReader {
 
         } catch (error) {
             console.error('[ContactSqlReader] getContactById Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get contacts by company ID
+     * @param {string} companyId 
+     * @returns {Promise<Array<Object>>} Array of Contact DTOs
+     */
+    async getContactsByCompanyId(companyId) {
+        if (!companyId) throw new Error('ContactSqlReader: companyId is required');
+
+        try {
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .eq('company_id', companyId);
+
+            if (error) {
+                throw new Error(`[ContactSqlReader] DB Error: ${error.message}`);
+            }
+
+            return data.map(row => this._mapRowToDto(row));
+
+        } catch (error) {
+            console.error('[ContactSqlReader] getContactsByCompanyId Error:', error);
             throw error;
         }
     }

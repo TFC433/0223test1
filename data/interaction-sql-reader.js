@@ -6,8 +6,9 @@
  * - Table: interactions
  * - Schema: Strict adherence to provided schema list
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.0.0
- * - Date: 2026-01-29
+ * - Version: 1.1.0
+ * - Date: 2026-03-11
+ * - Changelog: Added getInteractionsByCompanyId & getInteractionsByOpportunityIds for Phase 8.1
  */
 
 const { supabase } = require('../config/supabase');
@@ -47,6 +48,60 @@ class InteractionSqlReader {
 
         } catch (error) {
             console.error('[InteractionSqlReader] getInteractionById Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get interactions by company ID
+     * @param {string} companyId 
+     * @returns {Promise<Array<Object>>} Array of Interaction DTOs
+     */
+    async getInteractionsByCompanyId(companyId) {
+        if (!companyId) throw new Error('InteractionSqlReader: companyId is required');
+
+        try {
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .eq('company_id', companyId);
+
+            if (error) {
+                throw new Error(`[InteractionSqlReader] DB Error: ${error.message}`);
+            }
+
+            return data.map(row => this._mapRowToDto(row));
+
+        } catch (error) {
+            console.error('[InteractionSqlReader] getInteractionsByCompanyId Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get interactions by multiple opportunity IDs
+     * @param {Array<string>} opportunityIds 
+     * @returns {Promise<Array<Object>>} Array of Interaction DTOs
+     */
+    async getInteractionsByOpportunityIds(opportunityIds) {
+        if (!opportunityIds || !Array.isArray(opportunityIds) || opportunityIds.length === 0) {
+            return [];
+        }
+
+        try {
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .in('opportunity_id', opportunityIds);
+
+            if (error) {
+                throw new Error(`[InteractionSqlReader] DB Error: ${error.message}`);
+            }
+
+            return data.map(row => this._mapRowToDto(row));
+
+        } catch (error) {
+            console.error('[InteractionSqlReader] getInteractionsByOpportunityIds Error:', error);
             throw error;
         }
     }

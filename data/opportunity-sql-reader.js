@@ -6,8 +6,9 @@
  * - Table: opportunities
  * - Schema: Strict adherence to provided schema list
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.0.0
- * - Date: 2026-01-29
+ * - Version: 1.1.0
+ * - Date: 2026-03-11
+ * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries.
  */
 
 const { supabase } = require('../config/supabase');
@@ -47,6 +48,32 @@ class OpportunitySqlReader {
 
         } catch (error) {
             console.error('[OpportunitySqlReader] getOpportunityById Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get opportunities by company name (fuzzy matching)
+     * @param {string} companyName 
+     * @returns {Promise<Array<Object>>} Array of Opportunity DTOs
+     */
+    async getOpportunitiesByCompanyName(companyName) {
+        if (!companyName) throw new Error('OpportunitySqlReader: companyName is required');
+
+        try {
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .ilike('customer_company', `%${companyName}%`);
+
+            if (error) {
+                throw new Error(`[OpportunitySqlReader] DB Error: ${error.message}`);
+            }
+
+            return data.map(row => this._mapRowToDto(row));
+
+        } catch (error) {
+            console.error('[OpportunitySqlReader] getOpportunitiesByCompanyName Error:', error);
             throw error;
         }
     }

@@ -1,15 +1,16 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 8.0.9 (Phase 8.9: Dashboard Dependency Injection Fix)
- * @date 2026-03-10
- * @description
+ * @version 8.1.0 (Phase 8.1: SQL-First Company Details Patch)
+ * @date 2026-03-11
+ * @changelog
  * - [FIX] Injected eventLogSqlReader into CompanyService to fix Detail View event loading.
  * - [FIX] Injected eventLogSqlReader into OpportunityService to fix Detail View event loading.
  * - DashboardService now strictly receives eventLogSqlReader as the 5th argument.
  * - Confirmed EventLogService injection (retains Sheet reader for cache invalidation, SQL for R/W).
  * - [FIX] Injected systemService into WeeklyBusinessService replacing systemReader.
  * - [FIX] Fully aligned DashboardService arguments (14 total) to fix undefined property crash.
+ * - [PHASE 8.1 PATCH] Injected contactSqlReader, opportunitySqlReader, and interactionSqlReader into CompanyService.
  */
 
 const config = require('../config');
@@ -87,7 +88,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v8.0.9 Phase 8.9)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v8.1.0 Phase 8.1)...');
 
     try {
         // 1. Infrastructure
@@ -182,7 +183,10 @@ async function initializeServices() {
             companySqlReader,
             contactService,
             companySqlWriter,
-            eventLogSqlReader // [Phase 8 Fix] Inject SQL Reader
+            eventLogSqlReader, // [Phase 8 Fix] Inject SQL Reader
+            contactSqlReader,       // [Phase 8.1 Patch]
+            opportunitySqlReader,   // [Phase 8.1 Patch]
+            interactionSqlReader    // [Phase 8.1 Patch]
         );
 
         const opportunityService = new OpportunityService({

@@ -1,15 +1,18 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * * @version 8.0.7 (Phase 8: ID-based Operations & SQL Write Authority)
- * @date 2026-03-06
- * * @changelog Phase 8.0.7: Injected eventLogSqlReader to fix Company Detail event sync
- * * @description
- * * 1. [Phase 8] Contract Enforcement: companyId is the ONLY valid operation key for Update/Delete/Details.
- * * 2. [Phase 8] Refactor: updateCompany, deleteCompany, getCompanyDetails now accept companyId.
- * * 3. [Phase 8] Lookup: Added _getCompanyById helper; removed name-based lookups for mutation operations.
- * * 4. [Phase 7] Write Authority: SQL is the exclusive write source (CompanySqlWriter).
- * * 5. [Phase 7] Legacy Removal: No Sheet write logic, no rowIndex usage for operations.
+ * @version 8.1.0 (Phase 8.1: SQL-First Company Details Patch)
+ * @date 2026-03-11
+ * @changelog 
+ * - Phase 8.1.0: Added SQL-first execution path to getCompanyDetails via Promise.all with automatic memory fallback.
+ * - Phase 8.0.7: Injected eventLogSqlReader to fix Company Detail event sync
+ * @description
+ * 1. [Phase 8.1] Detail Loading: Parallelized SQL fetching replacing full-table sequential in-memory filters.
+ * 2. [Phase 8] Contract Enforcement: companyId is the ONLY valid operation key for Update/Delete/Details.
+ * 3. [Phase 8] Refactor: updateCompany, deleteCompany, getCompanyDetails now accept companyId.
+ * 4. [Phase 8] Lookup: Added _getCompanyById helper; removed name-based lookups for mutation operations.
+ * 5. [Phase 7] Write Authority: SQL is the exclusive write source (CompanySqlWriter).
+ * 6. [Phase 7] Legacy Removal: No Sheet write logic, no rowIndex usage for operations.
  */
 
 class CompanyService {
@@ -18,7 +21,10 @@ class CompanyService {
         opportunityReader, opportunityWriter, interactionReader, interactionWriter,
         eventLogReader, systemReader, companySqlReader, contactService,
         companySqlWriter, // Inject SQL Writer (Phase 7 Requirement)
-        eventLogSqlReader // Inject SQL Reader (Phase 8 Requirement)
+        eventLogSqlReader, // Inject SQL Reader (Phase 8 Requirement)
+        contactSqlReader,       // [Phase 8.1 Requirement]
+        opportunitySqlReader,   // [Phase 8.1 Requirement]
+        interactionSqlReader    // [Phase 8.1 Requirement]
     ) {
         this.companyReader = companyReader;
         this.companyWriter = companyWriter; // Keep for legacy read references if needed
@@ -34,6 +40,11 @@ class CompanyService {
         this.contactService = contactService;
         this.companySqlWriter = companySqlWriter; // Assigned for Phase 7 Writes
         this.eventLogSqlReader = eventLogSqlReader; // Assigned for Phase 8 Reads
+        
+        // [Phase 8.1] New SQL Readers for fast detail lookup
+        this.contactSqlReader = contactSqlReader;
+        this.opportunitySqlReader = opportunitySqlReader;
+        this.interactionSqlReader = interactionSqlReader;
     }
 
     // --- DTO Mapping (SQL-ready) ---
@@ -296,19 +307,11 @@ class CompanyService {
 
     // 3. 取得詳細資料
     // [Phase 8] Argument changed from companyName to companyId
+    // [Phase 8.1] Implemented parallel SQL-first fetch path
     async getCompanyDetails(companyId) {
         try {
-            const [allCompanies, allContacts, allOpportunities, allInteractions, allEventLogs, allPotentialContacts] = await Promise.all([
-                this._getAllCompanies(),
-                this.contactReader.getContactList(),
-                this.opportunityReader.getOpportunities(),
-                this.interactionReader.getInteractions(),
-                this.eventLogSqlReader.getEventLogs(), // [Phase 8 Fix] Use SQL Reader for Events
-                this.contactReader.getContacts(3000)
-            ]);
-
             // [Phase 8] Lookup by ID
-            const companyInfo = allCompanies.find(c => c.companyId === companyId);
+            const companyInfo = await this._getCompanyById(companyId);
 
             if (!companyInfo) {
                 return { 
@@ -325,28 +328,92 @@ class CompanyService {
             const companyName = companyInfo.companyName;
             const normalizedTarget = this._normalizeCompanyName(companyName);
 
-            // Filter related data
-            const contacts = allContacts.filter(c => c.companyId === companyId);
-            
-            // Opportunities: Fallback to name matching for legacy data support
-            const opportunities = allOpportunities.filter(o => 
-                this._normalizeCompanyName(o.customerCompany) === normalizedTarget
-            );
-            const relatedOppIds = new Set(opportunities.map(o => o.opportunityId));
-            
-            // Interactions: Link by CompanyID or via related OpportunityID
-            const interactions = allInteractions.filter(i => 
-                i.companyId === companyId || (i.opportunityId && relatedOppIds.has(i.opportunityId))
-            ).sort((a, b) => new Date(b.interactionTime || 0) - new Date(a.interactionTime || 0));
+            let sqlSuccess = false;
+            let contacts = [], opportunities = [], interactions = [], eventLogs = [], potentialContacts = [];
 
-            // Events: Only link by CompanyID directly (No mixed Opportunity events)
-            const eventLogs = allEventLogs.filter(e => 
-                e.companyId === companyId
-            ).sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
+            // --- Phase 8.1: SQL-First Parallel Fetch Path ---
+            if (this.contactSqlReader && this.opportunitySqlReader && this.interactionSqlReader && this.eventLogSqlReader) {
+                try {
+                    // Extract base string for loose ILIKE search in SQL
+                    const baseNormalized = companyName.replace(/股份有限公司|有限公司|公司/g, '').replace(/\(.*\)/g, '').trim();
 
-            const potentialContacts = allPotentialContacts.filter(pc => 
-                this._normalizeCompanyName(pc.company) === normalizedTarget
-            );
+                    const [sqlContacts, sqlOppsRaw, sqlInteractionsComp, sqlEventLogs, allPotentialContacts] = await Promise.all([
+                        this.contactSqlReader.getContactsByCompanyId(companyId),
+                        this.opportunitySqlReader.getOpportunitiesByCompanyName(baseNormalized),
+                        this.interactionSqlReader.getInteractionsByCompanyId(companyId),
+                        this.eventLogSqlReader.getEventLogs(), // Uses existing global fetch 
+                        this.contactReader.getContacts(3000)   // Preserved legacy logic for marketing leads
+                    ]);
+
+                    // Opportunities: Exact precision filter in memory over the SQL subset
+                    opportunities = sqlOppsRaw.filter(o => 
+                        this._normalizeCompanyName(o.customerCompany) === normalizedTarget
+                    );
+                    const relatedOppIds = new Set(opportunities.map(o => o.opportunityId));
+                    const oppIdsArray = Array.from(relatedOppIds);
+                    
+                    // Fetch Interaction by Opps sequentially as it depends on derived Array
+                    const sqlInteractionsOpps = await this.interactionSqlReader.getInteractionsByOpportunityIds(oppIdsArray);
+
+                    // Deduplicate interactions
+                    const interactionMap = new Map();
+                    sqlInteractionsComp.forEach(i => interactionMap.set(i.interactionId, i));
+                    sqlInteractionsOpps.forEach(i => interactionMap.set(i.interactionId, i));
+                    interactions = Array.from(interactionMap.values())
+                        .sort((a, b) => new Date(b.interactionTime || 0) - new Date(a.interactionTime || 0));
+
+                    // Events: Precise filtering
+                    eventLogs = sqlEventLogs.filter(e => 
+                        e.companyId === companyId
+                    ).sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
+
+                    contacts = sqlContacts;
+                    
+                    // Potential Contacts: Exact precision filter
+                    potentialContacts = allPotentialContacts.filter(pc => 
+                        this._normalizeCompanyName(pc.company) === normalizedTarget
+                    );
+
+                    sqlSuccess = true;
+                } catch (sqlError) {
+                    console.warn(`[CompanyService] SQL-first execution failed, triggering fallback: ${sqlError.message}`);
+                    sqlSuccess = false;
+                }
+            }
+
+            // --- Phase 8.1: Legacy In-Memory Fallback Path ---
+            if (!sqlSuccess) {
+                const [allContacts, allOpportunities, allInteractions, allEventLogs, allPotentialContacts] = await Promise.all([
+                    this.contactReader.getContactList(),
+                    this.opportunityReader.getOpportunities(),
+                    this.interactionReader.getInteractions(),
+                    this.eventLogSqlReader.getEventLogs(), // [Phase 8 Fix] Use SQL Reader for Events
+                    this.contactReader.getContacts(3000)
+                ]);
+
+                // Filter related data
+                contacts = allContacts.filter(c => c.companyId === companyId);
+                
+                // Opportunities: Fallback to name matching for legacy data support
+                opportunities = allOpportunities.filter(o => 
+                    this._normalizeCompanyName(o.customerCompany) === normalizedTarget
+                );
+                const relatedOppIds = new Set(opportunities.map(o => o.opportunityId));
+                
+                // Interactions: Link by CompanyID or via related OpportunityID
+                interactions = allInteractions.filter(i => 
+                    i.companyId === companyId || (i.opportunityId && relatedOppIds.has(i.opportunityId))
+                ).sort((a, b) => new Date(b.interactionTime || 0) - new Date(a.interactionTime || 0));
+
+                // Events: Only link by CompanyID directly (No mixed Opportunity events)
+                eventLogs = allEventLogs.filter(e => 
+                    e.companyId === companyId
+                ).sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
+
+                potentialContacts = allPotentialContacts.filter(pc => 
+                    this._normalizeCompanyName(pc.company) === normalizedTarget
+                );
+            }
 
             return { companyInfo, contacts, opportunities, potentialContacts, interactions, eventLogs };
 
