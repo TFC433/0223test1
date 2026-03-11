@@ -1,4 +1,9 @@
-// controllers/system.controller.js
+/**
+ * controllers/system.controller.js
+ * @version 8.8.2 (Phase 8.3 Task: Debug Logs)
+ * @date 2026-03-11
+ * * [Forensics Fix / Phase 8.3 Task] Added temporary debug logs for /api/dashboard handler.
+ */
 const { handleApiError } = require('../middleware/error.middleware');
 // [New] 引入 SystemService 以支援向後相容的內部實例化
 const SystemService = require('../services/system-service');
@@ -61,6 +66,16 @@ class SystemController {
     getDashboardData = async (req, res) => {
         try {
             const data = await this.dashboardService.getDashboardData();
+            
+            // --- TEMPORARY DEBUG LOGS ---
+            console.log(`[SystemController][DEBUG] /api/dashboard data exists=`, !!data);
+            if (data) {
+                console.log(`[SystemController][DEBUG] /api/dashboard keys=`, Object.keys(data));
+                console.log(`[SystemController][DEBUG] /api/dashboard stats=`, JSON.stringify(data.stats));
+                console.log(`[SystemController][DEBUG] /api/dashboard charts exist=`, !!data.chartData);
+            }
+            // --- END DEBUG LOGS ---
+            
             res.json({ success: true, data });
         } catch (error) {
             handleApiError(res, error, 'Get Dashboard');

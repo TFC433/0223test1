@@ -1,7 +1,7 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 8.8.1 (Phase 8.3 Task: Strict SQL Readers Only)
+ * @version 8.8.2 (Phase 8.3 Task: Strict SQL Readers Only + Debug Logs)
  * @date 2026-03-11
  * @description 負責整合各個模組的數據，計算統計指標、圖表數據與 KPI。
  * * [Forensics Fix / Phase 8.3 Task]
@@ -10,6 +10,7 @@
  * - Migrated all remaining Dashboard legacy reads to pure SQL readers.
  * - [Phase 8.8] Replaced deprecated systemReader calls with systemService.
  * - [Phase 8.3 Task] COMPLETELY REMOVED companyReader, opportunityReader, interactionReader dependencies.
+ * - [Phase 8.3 Task] Added temporary debug logs for getDashboardData payload forensics.
  */
 
 class DashboardService {
@@ -294,6 +295,17 @@ class DashboardService {
             title: thisWeekDetails.title || `Week ${thisWeekId}`,
             days: thisWeekDetails.days || [] 
         };
+
+        // --- TEMPORARY DEBUG LOGS ---
+        console.log(`[DashboardService][DEBUG] opportunitiesRaw=${opportunitiesRaw.length}, contacts=${contacts.length}, interactions=${interactions.length}, eventLogs=${eventLogs.length}, companies=${companies.length}`);
+        console.log(`[DashboardService][DEBUG] final stats=`, JSON.stringify(stats));
+        console.log(`[DashboardService][DEBUG] kanban keys=`, Object.keys(kanbanData).length);
+        console.log(`[DashboardService][DEBUG] followUpList length=${followUps.slice(0, 5).length}`);
+        console.log(`[DashboardService][DEBUG] todaysAgenda length=${(calendarData.todayEvents || []).length}`);
+        console.log(`[DashboardService][DEBUG] recentActivity length=${recentActivity.length}`);
+        console.log(`[DashboardService][DEBUG] weeklyBusiness length=${thisWeeksEntries.length}`);
+        console.log(`[DashboardService][DEBUG] thisWeekInfo=`, JSON.stringify(thisWeekInfoForDashboard));
+        // --- END DEBUG LOGS ---
 
         return {
             stats,
