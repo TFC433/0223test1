@@ -1,9 +1,11 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 8.4.0 (Phase 8.4 Patch)
+ * @version 8.5.1 (Phase 8.5 Patch)
  * @date 2026-03-11
  * @changelog
+ * - [PHASE 8.5 PATCH] Removed opportunityReader, companyReader, and contactService from OpportunityService DI.
+ * - [PHASE 8.5 PATCH] Reverted interactionWriter injection back to original interactionWriter instance for OpportunityService.
  * - [FIX] Injected eventLogSqlReader into CompanyService to fix Detail View event loading.
  * - [FIX] Injected eventLogSqlReader into OpportunityService to fix Detail View event loading.
  * - DashboardService now strictly receives eventLogSqlReader as the 5th argument.
@@ -90,7 +92,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v8.4.0 Phase 8.4)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v8.5.1 Phase 8.5)...');
 
     try {
         // 1. Infrastructure
@@ -193,20 +195,17 @@ async function initializeServices() {
 
         const opportunityService = new OpportunityService({
             config,
-            opportunityReader,
             opportunityWriter,
             contactReader: contactCoreReader,
             contactWriter,
-            companyReader,
             companyWriter,
             interactionReader,
-            interactionWriter: interactionSqlWriter,
+            interactionWriter,
             eventLogReader,
             systemReader,
             opportunitySqlReader,
             opportunitySqlWriter,
             eventLogSqlReader, // [Phase 8 Fix] Inject SQL Reader
-            contactService,
             companySqlReader   // [Phase 8.4 Patch] Inject SQL Reader
         });
 

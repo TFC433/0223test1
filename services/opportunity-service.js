@@ -1,9 +1,11 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * * @version 8.4.0 (Phase 8.4 Patch: Dashboard Map SQL)
+ * @version 8.5.1 (Phase 8.5 Patch: Minimal Reader Purge)
  * @date 2026-03-11
  * @description 
+ * - [PHASE 8.5] Removed dead dependency OpportunityReader.
+ * - [PHASE 8.5] Replaced companyReader with companySqlReader in deleteOpportunity.
  * - [FIX-1] Locked _fetchOpportunities to SQL Reader only (No Sheet fallback).
  * - [FIX-2] Enforced hard contract on batchUpdateOpportunities (Throw on missing ID).
  * - [FIX-3] Explicitly marked RAW Contact Upgrade boundary.
@@ -15,11 +17,9 @@
 class OpportunityService {
     /**
      * @param {Object} config - 系統設定
-     * @param {OpportunityReader} opportunityReader
      * @param {OpportunityWriter} opportunityWriter
      * @param {ContactReader} contactReader
      * @param {ContactWriter} contactWriter
-     * @param {CompanyReader} companyReader
      * @param {CompanyWriter} companyWriter
      * @param {InteractionReader} interactionReader
      * @param {InteractionWriter} interactionWriter
@@ -28,15 +28,13 @@ class OpportunityService {
      * @param {OpportunitySqlReader} opportunitySqlReader
      * @param {OpportunitySqlWriter} opportunitySqlWriter
      * @param {EventLogSqlReader} eventLogSqlReader
-     * @param {CompanySqlReader} companySqlReader - [Phase 8.4 Patch] Inject SQL Reader
+     * @param {CompanySqlReader} companySqlReader
      */
     constructor({
         config,
-        opportunityReader,
         opportunityWriter,
         contactReader,
         contactWriter,
-        companyReader,
         companyWriter,
         interactionReader,
         interactionWriter,
@@ -50,12 +48,10 @@ class OpportunityService {
         this.config = config;
         
         // Readers
-        this.opportunityReader = opportunityReader;
         this.interactionReader = interactionReader;
         this.eventLogReader = eventLogReader;
         this.contactReader = contactReader;
         this.systemReader = systemReader;
-        this.companyReader = companyReader;
         this.opportunitySqlReader = opportunitySqlReader;
         this.eventLogSqlReader = eventLogSqlReader; // [Phase 8 Fix] Store SQL Reader
         this.companySqlReader = companySqlReader;   // [Phase 8.4 Patch] Store SQL Reader
@@ -410,7 +406,7 @@ class OpportunityService {
             
             if (deleteResult.success && opportunity.customerCompany) {
                 try {
-                    const allCompanies = await this.companyReader.getCompanyList();
+                    const allCompanies = await this.companySqlReader.getCompanies();
                     const company = allCompanies.find(c => 
                         c.companyName.toLowerCase().trim() === opportunity.customerCompany.toLowerCase().trim()
                     );
