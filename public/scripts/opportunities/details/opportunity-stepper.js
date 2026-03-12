@@ -1,7 +1,7 @@
 // public/scripts/opportunities/details/opportunity-stepper.js
 // 職責：專門管理「機會進程」區塊的所有 UI 渲染與互動邏輯
-// * @version 2.2.0 (Phase 8 ID Fix)
-// * @date 2026-03-02
+// * @version 2.2.1 (Phase 8.10 Stale Refresh Fix)
+// * @date 2026-03-12
 // (V2.2 - 修正：_saveChanges 使用正確的 opportunityId 取代 rowIndex)
 
 const OpportunityStepper = (() => {
@@ -94,6 +94,10 @@ const OpportunityStepper = (() => {
             });
 
             if (result.success) {
+                // [Phase 8.10 Dashboard Refresh Fix] Kanban Data heavily relies on Stage
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
                 // authedFetch 會處理整頁刷新和通知
             } else {
                 throw new Error(result.error || '儲存失敗');

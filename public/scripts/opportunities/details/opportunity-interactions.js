@@ -1,9 +1,11 @@
 /*
  * Project: TFC CRM
  * File: public/scripts/opportunities/details/opportunity-interactions.js
- * Version: v8.0.4
- * Date: 2026-02-23
- * Changelog: Phase 8 Interaction UI: operation-key rowIndex -> interactionId for edit/delete
+ * Version: v8.0.6 (Phase 8.10.2 - Stale Reachability Fix)
+ * Date: 2026-03-12
+ * Changelog: 
+ * - Phase 8 Interaction UI: operation-key rowIndex -> interactionId for edit/delete
+ * - Phase 8.10.2 Fix: Relaxed strict result.success check to prevent unreachable markStale on 204/raw responses
  */
 // public/scripts/opportunities/details/opportunity-interactions.js
 // 職責：專門管理「互動與新增」頁籤的所有 UI 與功能
@@ -229,7 +231,17 @@ const OpportunityInteractions = (() => {
 
             const result = await authedFetch(url, { method, body: JSON.stringify(interactionData) });
 
-            if (!result.success) throw new Error(result.details || '操作失敗');
+            // [Phase 8.10.2 Fix] Production rule: treat explicit success:false as failure.
+            // Bypasses false-positive throws on 204 No Content (null) or raw object returns.
+            if (result && result.success === false) {
+                throw new Error(result.details || '操作失敗');
+            }
+            
+            // [Phase 8.10 Dashboard Refresh Fix] Interaction alters followUp list and recentActivity feed
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
+            
             // 成功後 authedFetch 可能刷新/通知（維持既有行為）
         } catch (error) {
             if (error.message !== 'Unauthorized') showNotification(`操作失敗: ${error.message}`, 'error');
@@ -324,6 +336,11 @@ const OpportunityInteractions = (() => {
             showLoading('正在刪除紀錄...');
             try {
                 await authedFetch(`/api/interactions/${interactionId}`, { method: 'DELETE' });
+                
+                // [Phase 8.10 Dashboard Refresh Fix] 
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
             } catch (error) {
                 if (error.message !== 'Unauthorized') {
                     console.error('刪除互動紀錄失敗:', error);

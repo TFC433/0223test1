@@ -748,6 +748,10 @@ document.addEventListener('submit', async function(e) {
             const result = await authedFetch(url, { method: 'POST', body: JSON.stringify(payload) });
 
             if (result.success) {
+                // [Phase 8.10 Dashboard Refresh Fix]
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
                 closeModal('new-opportunity-modal');
             } else {
                 throw new Error(result.details || result.error || '建立失敗');
@@ -795,6 +799,11 @@ document.addEventListener('submit', async function(e) {
                 promises.push(authedFetch(`/api/companies/${encodedCompanyName}`, { method: 'PUT', body: JSON.stringify({ county: newCounty }) }));
             }
             await Promise.all(promises);
+
+            // [Phase 8.10 Dashboard Refresh Fix]
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
             closeModal('edit-opportunity-modal');
         } catch (error) {
             if (error.message !== 'Unauthorized') showNotification(`更新失敗: ${error.message}`, 'error');
