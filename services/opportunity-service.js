@@ -72,6 +72,7 @@ class OpportunityService {
         if (!this.opportunitySqlReader) {
             throw new Error("[Phase7 Boundary Violation] OpportunitySqlReader is required");
         }
+        console.log('[OpportunityService] Read source=SQL');
         return await this.opportunitySqlReader.getOpportunities();
     }
 
@@ -104,14 +105,12 @@ class OpportunityService {
 
     async getOpportunityDetails(opportunityId) {
         try {
+            console.log(`[OpportunityService] Read source=SQL (OppID: ${opportunityId})`);
             const opportunityInfo = await this.opportunitySqlReader.getOpportunityById(opportunityId);
             if (!opportunityInfo) {
                 throw new Error(`找不到機會ID為 ${opportunityId} 的案件`);
             }
 
-            if (!this.eventLogSqlReader) {
-                console.warn('[OpportunityService] EventLogSqlReader missing, falling back to legacy reader (Data may be stale).');
-            }
             const eventReader = this.eventLogSqlReader || this.eventLogReader;
 
             const interactionPromise = this.interactionSqlReader 

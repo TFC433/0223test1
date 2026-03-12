@@ -1,3 +1,6 @@
+// ============================================================================
+// File: services/weekly-business-service.js
+// ============================================================================
 /* [v7.8.1] Weekly Service Phase 7-4 */
 /**
  * services/weekly-business-service.js
@@ -44,6 +47,7 @@ class WeeklyBusinessService {
             if (this.weeklyBusinessSqlReader) {
                 if (mode === 'SUMMARY' || mode === 'ENTRIES') {
                      const sqlEntries = await this.weeklyBusinessSqlReader.getWeeklyBusinessEntries();
+                     console.log(`[WeeklyService] Read source=SQL (mode=${mode})`);
                      
                      if (mode === 'SUMMARY') {
                          return sqlEntries;
@@ -52,7 +56,7 @@ class WeeklyBusinessService {
                 }
             }
         } catch (error) {
-            console.warn(`[WeeklyService] SQL Read Failed, falling back to Sheet: ${error.message}`);
+            console.warn(`[WeeklyService] SQL read failed, fallback source=Sheet, Sheet ID=CORE, reason=${error.message}`);
         }
 
         if (mode === 'SUMMARY') {

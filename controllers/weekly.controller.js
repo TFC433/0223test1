@@ -1,3 +1,6 @@
+// ============================================================================
+// File: controllers/weekly.controller.js
+// ============================================================================
 /**
  * controllers/weekly.controller.js
  * 週間業務控制器 (Controller Layer)
@@ -101,10 +104,9 @@ class WeeklyController {
     deleteEntry = async (req, res) => {
         try {
             const { recordId } = req.params;
-            const { rowIndex } = req.body; // 從前端傳入 rowIndex 以加速刪除
             
             // 修正：現在直接呼叫 Service 方法，不再穿透到 Writer
-            const result = await this.weeklyBusinessService.deleteWeeklyBusinessEntry(recordId, rowIndex);
+            const result = await this.weeklyBusinessService.deleteWeeklyBusinessEntry(recordId);
             res.json(result);
         } catch (error) {
             handleApiError(res, error, 'Delete Weekly Entry');

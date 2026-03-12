@@ -1,5 +1,10 @@
 // public/scripts/core/main.js (重構版: Smart Polling + 序列化資源載入)
 // 職責：系統初始化入口與智慧輪詢管理
+// @version [Patch] Dashboard debug cleanup
+// @date 2026-03-12
+// @changelog
+// - Removed high-frequency SmartPolling lifecycle debug logs.
+// - Removed refreshCurrentView debug and debounce logs.
 
 window.CRM_APP = window.CRM_APP || {};
 
@@ -12,8 +17,6 @@ const SmartPolling = {
     dataTimestamp: 0,
 
     init() {
-        console.log('🧠 [SmartPolling] 初始化智慧輪詢...');
-        
         // 1. 監聽使用者活動 (Activity Tracking)
         const resetActivity = () => {
             this.lastActivity = Date.now();
@@ -68,7 +71,6 @@ const SmartPolling = {
         // Check for open modals (Pause if editing)
         const hasOpenModal = document.querySelector('.modal[style*="display: block"]');
         if (hasOpenModal) {
-            console.log('⏸ [SmartPolling] Modal open, skipping poll.');
             this.intervalId = setTimeout(() => this.runCycle(), 10000); // Check again in 10s
             return;
         }
@@ -79,7 +81,6 @@ const SmartPolling = {
 
     resume() {
         if (!this.isActive) {
-            console.log('▶ [SmartPolling] Resuming normal speed.');
             this.isActive = true;
             this.currentInterval = 30000;
             this.runCycle(); // Restart immediately
@@ -87,7 +88,6 @@ const SmartPolling = {
     },
 
     slowDown() {
-        console.log('💤 [SmartPolling] Entering background mode.');
         this.isActive = false;
         // Logic handled in runCycle via document.hidden check
     },
@@ -227,7 +227,6 @@ window.CRM_APP.refreshCurrentView = async function(successMsg) {
     // 1. Debounce Guard (500ms)
     const now = Date.now();
     if (window.CRM_APP._lastRefresh && (now - window.CRM_APP._lastRefresh < 500)) {
-        console.warn('[Main] Refresh skipped (debounced).');
         return;
     }
     window.CRM_APP._lastRefresh = now;
@@ -241,7 +240,6 @@ window.CRM_APP.refreshCurrentView = async function(successMsg) {
     // 3. Special Handling: Event Editor -> Events List
     // If we just saved inside the standalone editor, we want to go back to the list and refresh it.
     if (pageName === 'event-editor' || hash.includes('event-editor')) {
-        console.log('🔄 [Main] Saved in editor -> redirecting to events list.');
         window.location.hash = '#events';
         pageName = 'events';
         paramStr = ''; 
@@ -251,7 +249,6 @@ window.CRM_APP.refreshCurrentView = async function(successMsg) {
     const loader = window.CRM_APP.pageModules && window.CRM_APP.pageModules[pageName];
     
     if (loader) {
-        console.log(`🔄 [Main] Soft refreshing: ${pageName}`);
         try {
             // Parse params if any
             let params = {};
