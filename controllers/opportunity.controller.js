@@ -1,9 +1,9 @@
 // controllers/opportunity.controller.js
 /**
  * OpportunityController
- * * @version 6.0.0 (Phase 4 - SQL Transition - ID Based)
- * @date 2026-02-06
- * @description 機會案件控制器，已移除所有 rowIndex 依賴，全面轉向 opportunityId。
+ * * @version 6.1.0 (Phase 8.11 - Table Data Flow Decoupling)
+ * @date 2026-03-12
+ * @description 機會案件控制器，擴展 searchOpportunities 以支援獨立的 Table API Fetch 與 SQL 委派。
  */
 
 const { handleApiError } = require('../middleware/error.middleware');
@@ -44,14 +44,29 @@ class OpportunityController {
         }
     };
 
-    // GET /api/opportunities/ (Search)
+    // GET /api/opportunities/ (Search / Table Fetch)
     searchOpportunities = async (req, res) => {
         try {
-            const { q, page = 0, assignee, type, stage } = req.query;
-            const filters = { assignee, type, stage };
+            // [Phase 8.11] Expanded query parameter extraction for Table decoupling
+            const { q, page = 0, limit = 500, sortField, sortDirection, assignee, type, stage, ...otherFilters } = req.query;
+            const filters = { assignee, type, stage, ...otherFilters };
             Object.keys(filters).forEach(key => (filters[key] === undefined || filters[key] === '') && delete filters[key]);
             
-            const result = await this.opportunityService.searchOpportunities(q, parseInt(page), filters);
+            const result = await this.opportunityService.searchOpportunities(
+                q, 
+                parseInt(page), 
+                parseInt(limit), 
+                sortField, 
+                sortDirection, 
+                filters
+            );
+            
+            // Legacy contract preservation: If page=0, frontend loadOpportunities expects a raw array for the Chip Wall
+            if (parseInt(page) === 0) {
+                 return res.json(result.data || result); 
+            }
+
+            // Table fetch expects { data, total }
             res.json(result);
         } catch (error) {
             handleApiError(res, error, 'Search Opps');
@@ -92,7 +107,6 @@ class OpportunityController {
     // PUT /api/opportunities/:opportunityId
     updateOpportunity = async (req, res) => {
         try {
-            // [Modified] Extract opportunityId string, no parseInt
             const result = await this.opportunityService.updateOpportunity(
                 req.params.opportunityId, 
                 req.body, 
@@ -107,7 +121,6 @@ class OpportunityController {
     // DELETE /api/opportunities/:opportunityId
     deleteOpportunity = async (req, res) => {
         try {
-            // [Modified] Extract opportunityId string, no parseInt
             const result = await this.opportunityService.deleteOpportunity(
                 req.params.opportunityId, 
                 req.user

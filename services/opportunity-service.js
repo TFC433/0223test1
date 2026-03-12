@@ -4,9 +4,10 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.8.0 (Phase 8.8: Architectural Fix - Delegate SQL to Reader)
- * @date 2026-03-11
+ * @version 8.9.0 (Phase 8.11: Table Data Flow Decoupling - SQL Delegation)
+ * @date 2026-03-12
  * @description 
+ * - [PHASE 8.11] Overhauled searchOpportunities to delegate native filters to OpportunitySqlReader.
  * - [PHASE 8.8] Removed direct Supabase calls and inline SqlReader instantiations. Fully migrated to injected ContactSqlReader.
  * - [PHASE 8.7] Removed ContactReader from getOpportunityDetails and deleteContactLink. Fully replaced with Supabase SQL joins.
  * - [PHASE 8.6C] Removed full-table Opportunity and EventLog fetches in getOpportunityDetails, utilizing scoped SQL reader methods.
@@ -19,23 +20,6 @@
  */
 
 class OpportunityService {
-    /**
-     * @param {Object} config - 系統設定
-     * @param {OpportunityWriter} opportunityWriter
-     * @param {ContactReader} contactReader
-     * @param {ContactWriter} contactWriter
-     * @param {CompanyWriter} companyWriter
-     * @param {InteractionReader} interactionReader
-     * @param {InteractionWriter} interactionWriter
-     * @param {EventLogReader} eventLogReader
-     * @param {SystemReader} systemReader
-     * @param {OpportunitySqlReader} opportunitySqlReader
-     * @param {OpportunitySqlWriter} opportunitySqlWriter
-     * @param {EventLogSqlReader} eventLogSqlReader
-     * @param {CompanySqlReader} companySqlReader
-     * @param {InteractionSqlReader} interactionSqlReader
-     * @param {ContactSqlReader} contactSqlReader
-     */
     constructor({
         config,
         opportunityWriter,
@@ -48,10 +32,10 @@ class OpportunityService {
         systemReader,
         opportunitySqlReader,
         opportunitySqlWriter,
-        eventLogSqlReader, // [Phase 8 Fix] Inject SQL Reader
-        companySqlReader,  // [Phase 8.4 Patch] Inject SQL Reader
-        interactionSqlReader, // [Phase 8.6B] Inject Scoped SQL Reader
-        contactSqlReader // [Phase 8.8] Inject Scoped SQL Reader
+        eventLogSqlReader, 
+        companySqlReader,  
+        interactionSqlReader, 
+        contactSqlReader 
     }) {
         this.config = config;
         
@@ -61,10 +45,10 @@ class OpportunityService {
         this.contactReader = contactReader;
         this.systemReader = systemReader;
         this.opportunitySqlReader = opportunitySqlReader;
-        this.eventLogSqlReader = eventLogSqlReader; // [Phase 8 Fix] Store SQL Reader
-        this.companySqlReader = companySqlReader;   // [Phase 8.4 Patch] Store SQL Reader
-        this.interactionSqlReader = interactionSqlReader; // [Phase 8.6B] Store SQL Reader
-        this.contactSqlReader = contactSqlReader; // [Phase 8.8] Store SQL Reader
+        this.eventLogSqlReader = eventLogSqlReader; 
+        this.companySqlReader = companySqlReader;   
+        this.interactionSqlReader = interactionSqlReader; 
+        this.contactSqlReader = contactSqlReader; 
 
         // Writers
         this.opportunityWriter = opportunityWriter;
@@ -144,7 +128,6 @@ class OpportunityService {
                 ? this.eventLogSqlReader.getEventLogsByOpportunityId(opportunityId)
                 : eventReader.getEventLogs().then(all => all.filter(e => e.opportunityId === opportunityId));
 
-            // [Phase 8.8] Delegate SQL completely to SqlReader
             const linksPromise = this.contactSqlReader 
                 ? this.contactSqlReader.getContactsByOpportunityId(opportunityId)
                 : Promise.resolve([]);
@@ -325,7 +308,6 @@ class OpportunityService {
         try {
             const modifier = user.displayName || user.username || 'System';
             
-            // [Phase 8.8] Safe degradation based on DI
             const contact = this.contactSqlReader 
                 ? await this.contactSqlReader.getContactById(contactId)
                 : (await this.contactReader.getContactList()).find(c => c.contactId === contactId);
@@ -481,8 +463,29 @@ class OpportunityService {
         }
     }
 
-    async searchOpportunities(query, page, filters) {
+    // [Phase 8.11] Expanded parameter signature to support direct SQL delegation for Table Data
+    async searchOpportunities(query, page = 0, limit = 500, sortField = null, sortDirection = null, filters = {}) {
         try {
+            // New SQL-Delegated Path for Table
+            if (this.opportunitySqlReader && typeof this.opportunitySqlReader.searchOpportunitiesTable === 'function') {
+                const offset = (page > 0) ? (page - 1) * limit : 0;
+                
+                const result = await this.opportunitySqlReader.searchOpportunitiesTable({
+                    q: query,
+                    filters: filters || {},
+                    sortField,
+                    sortDirection,
+                    limit: page > 0 ? limit : null,
+                    offset
+                });
+                
+                // Return raw array if page == 0 to maintain legacy compatibility for Chip Wall
+                if (page === 0) return result.data;
+                
+                return result; // Table expects { data, total }
+            }
+
+            // Fallback (legacy JS handling)
             let items = await this._fetchOpportunities();
 
             if (!filters || !filters.includeArchived) {
@@ -518,7 +521,7 @@ class OpportunityService {
                 return dateB - dateA;
             });
 
-            return items;
+            return page === 0 ? items : { data: items, total: items.length };
 
         } catch (error) {
              console.error('❌ [OpportunityService] searchOpportunities 錯誤:', error);

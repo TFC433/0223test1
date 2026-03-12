@@ -1,9 +1,9 @@
 // public/scripts/opportunities/opportunities.js
 /**
  * 職責：管理「機會案件列表頁」的圖表、篩選、列表渲染與操作
- * @version 7.2.4
+ * @version 7.3.0 (Phase 8.11 - Table Data Flow Decoupling)
  * @date 2026-03-12
- * @description [Performance Patch] Removed redundant interactions fetch. Frontend strict fallback relies strictly on exact existing DTO timestamp contract. Unified stale signaling via dashboardManager.markStale(). Converged channel text fallback.
+ * @description [Performance Patch] Decoupled Opportunities Table from the bulk opportunitiesData payload. Table now queries the backend via API with URL parameters for filtering, sorting, and pagination. Chip Wall retains existing behavior.
  */
 
 // ==================== 全域變數 (此頁面專用) ====================
@@ -98,7 +98,7 @@ async function loadOpportunities(query = '') {
     try {
         const [dashboardResult, opportunitiesResult, systemConfigResult] = await Promise.all([
             authedFetch(`/api/opportunities/dashboard`),
-            authedFetch(`/api/opportunities?page=0`), 
+            authedFetch(`/api/opportunities?page=0`), // page=0 is strictly reserved to fetch raw array for ChipWall/Dashboard
             authedFetch(`/api/config`)
         ]);
 
@@ -185,14 +185,14 @@ async function loadOpportunities(query = '') {
                     opportunitiesListFilters.type = filters.type; 
                     opportunitiesListFilters.source = filters.source;
                     opportunitiesListFilters.time = filters.time;
-                    filterAndRenderOpportunities();
+                    filterAndRenderOpportunities(); 
                 }
             });
             chipWall.render();
         }
 
-        // 執行初始渲染
-        filterAndRenderOpportunities();
+        // 執行初始表格 API 渲染 (Decoupled from opportunitiesData)
+        fetchAndRenderOpportunitiesTable();
 
     } catch (error) {
         if (error.message !== 'Unauthorized') {
@@ -248,7 +248,7 @@ function populateOppFilterOptions(selectId, options, defaultText) {
 function handleOppFilterDropdownChange(e) {
     const filterKey = e.target.dataset.filter;
     opportunitiesListFilters[filterKey] = e.target.value;
-    filterAndRenderOpportunities();
+    filterAndRenderOpportunities(); // State mapping -> Table Fetch
 }
 
 function clearAllOppFilters() {
@@ -270,18 +270,14 @@ function clearAllOppFilters() {
             }
         });
     }
-    filterAndRenderOpportunities();
+    fetchAndRenderOpportunitiesTable(); // Direct fetch
 }
 
+/**
+ * [Phase 8.11 Decoupling]
+ * State Updater Wrapper. Translates chart clicks and widget interactions into state, then fetches the Table via API.
+ */
 function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
-    const listContent = document.getElementById('opportunities-page-content');
-    const filterStatus = document.getElementById('opportunities-filter-status');
-    const filterText = document.getElementById('opportunities-filter-text');
-    const countDisplay = document.getElementById('opportunities-count-display');
-    const query = document.getElementById('opportunities-list-search')?.value.toLowerCase() || '';
-
-    if (!listContent) return;
-
     if (filterKey && filterDisplayValue) {
         const filterValue = reverseNameMaps[filterKey]?.get(filterDisplayValue) || filterDisplayValue;
         if (opportunitiesListFilters[filterKey] === filterValue) {
@@ -295,6 +291,23 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
         if (selectEl) selectEl.value = opportunitiesListFilters[filterKey];
     }
 
+    fetchAndRenderOpportunitiesTable();
+}
+
+/**
+ * [Phase 8.11 Decoupling]
+ * Fetches decoupled table data directly from the backend API.
+ */
+async function fetchAndRenderOpportunitiesTable() {
+    const listContent = document.getElementById('opportunities-page-content');
+    const filterStatus = document.getElementById('opportunities-filter-status');
+    const filterText = document.getElementById('opportunities-filter-text');
+    const countDisplay = document.getElementById('opportunities-count-display');
+    const query = document.getElementById('opportunities-list-search')?.value.trim() || '';
+
+    if (!listContent) return;
+
+    // Update UI for active filters
     const activeFiltersCount = Object.entries(opportunitiesListFilters).filter(([k, v]) => v !== 'all' && v !== undefined).length;
     if (activeFiltersCount > 0) {
         if (filterStatus) filterStatus.style.display = 'flex';
@@ -303,71 +316,45 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
         if (filterStatus) filterStatus.style.display = 'none';
     }
 
-    let filteredData = [...opportunitiesData];
-    const now = Date.now();
-    const timeThresholds = { '7': 7, '30': 30, '90': 90 };
+    listContent.innerHTML = '<div class="loading show"><div class="spinner"></div><p>載入機會資料中...</p></div>';
 
-    if (opportunitiesListFilters.year !== 'all') {
-        filteredData = filteredData.filter(opp => String(opp.creationYear) === String(opportunitiesListFilters.year));
-    }
-    if (opportunitiesListFilters.time !== 'all') {
-        const days = timeThresholds[opportunitiesListFilters.time];
-        const threshold = days ? now - days * 24 * 60 * 60 * 1000 : 0;
-        filteredData = filteredData.filter(opp => opp.effectiveLastActivity >= threshold);
-    }
-
-    const keyMapping = { 
-        'type': 'opportunityType', 
-        'source': 'opportunitySource',
-        'stage': 'currentStage'
-    };
-
-    for (const [key, value] of Object.entries(opportunitiesListFilters)) {
-        if (value === 'all' || value === undefined) continue;
-        if (key === 'year' || key === 'time') continue; 
+    try {
+        const params = new URLSearchParams();
+        params.append('page', '1');
+        params.append('limit', '500'); // Baseline reasonable limit for unpaginated UI
+        if (query) params.append('q', query);
         
-        const dataKey = keyMapping[key] || key;
+        if (currentOppSort.field) {
+            params.append('sortField', currentOppSort.field);
+            params.append('sortDirection', currentOppSort.direction);
+        }
+
+        // Map UI filters to backend params
+        const keyMapping = { 'type': 'type', 'source': 'source', 'stage': 'stage' };
+
+        for (const [key, value] of Object.entries(opportunitiesListFilters)) {
+            if (value !== 'all' && value !== undefined) {
+                const apiParam = keyMapping[key] || key;
+                params.append(apiParam, value);
+            }
+        }
+
+        const result = await authedFetch(`/api/opportunities?${params.toString()}`);
         
-        if (dataKey === 'potentialSpecification') {
-            filteredData = filteredData.filter(opp => {
-                const specData = opp.potentialSpecification;
-                if (!specData) return false;
-                try {
-                    const parsedJson = JSON.parse(specData);
-                    return typeof parsedJson === 'object' && parsedJson[value] > 0;
-                } catch (e) { return typeof specData === 'string' && specData.includes(value); }
-            });
-        } else {
-            filteredData = filteredData.filter(opp => opp[dataKey] === value);
-        }
+        const tableData = result.data || result || [];
+        const totalCount = result.total !== undefined ? result.total : tableData.length;
+
+        if (countDisplay) countDisplay.textContent = totalCount;
+        listContent.innerHTML = renderOpportunitiesTable(tableData);
+
+    } catch (error) {
+        console.error('Fetch table data failed:', error);
+        listContent.innerHTML = `<div class="alert alert-error">載入表格失敗: ${error.message}</div>`;
     }
-
-    if (query) {
-        filteredData = filteredData.filter(o =>
-            (o.opportunityName && o.opportunityName.toLowerCase().includes(query)) ||
-            (o.customerCompany && o.customerCompany.toLowerCase().includes(query))
-        );
-    }
-
-    filteredData.sort((a, b) => {
-        let valA = a[currentOppSort.field];
-        let valB = b[currentOppSort.field];
-        if (valA === undefined || valA === null) valA = '';
-        if (valB === undefined || valB === null) valB = '';
-        if (typeof valA === 'number' && typeof valB === 'number') {
-            return currentOppSort.direction === 'asc' ? valA - valB : valB - valA;
-        }
-        return currentOppSort.direction === 'asc' 
-            ? String(valA).localeCompare(String(valB), 'zh-Hant') 
-            : String(valB).localeCompare(String(valA), 'zh-Hant');
-    });
-
-    if (countDisplay) countDisplay.textContent = filteredData.length;
-    listContent.innerHTML = renderOpportunitiesTable(filteredData);
 }
 
 function handleOpportunitiesSearch(event) {
-    handleSearch(() => filterAndRenderOpportunities());
+    handleSearch(() => fetchAndRenderOpportunitiesTable());
 }
 
 function handleOppSort(field) {
@@ -377,7 +364,7 @@ function handleOppSort(field) {
         currentOppSort.field = field;
         currentOppSort.direction = 'desc'; 
     }
-    filterAndRenderOpportunities();
+    fetchAndRenderOpportunitiesTable();
 }
 
 function renderOpportunitiesTable(opportunities) {
@@ -481,7 +468,7 @@ function renderOpportunitiesTable(opportunities) {
                             data-action="delete-opp" 
                             data-opp-id="${opp.opportunityId}" 
                             data-name="${safeOppName}">
-                        <svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        <svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2-2v2"></path></svg>
                     </button>
                 </td>
             </tr>`;

@@ -6,9 +6,9 @@
  * - Table: opportunities
  * - Schema: Strict adherence to provided schema list
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.3.4
+ * - Version: 1.5.0
  * - Date: 2026-03-12
- * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries. Phase 1 SQL Aggregation: Added getOpportunityStats. Phase 8.2: Moved effectiveLastActivity computation to backend. Restored proven legacy UI contracts (channelDetails, opportunityValueType) explicitly required by opportunity-details.js.
+ * - Changelog: Added SQL Fast-Path for native sorting and true DB-level pagination in searchOpportunitiesTable.
  */
 
 const { supabase } = require('../config/supabase');
@@ -187,6 +187,178 @@ class OpportunitySqlReader {
 
         } catch (error) {
             console.error('[OpportunitySqlReader] getOpportunities Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * [Phase 8.11] Delegated SQL Query for Table Decoupling
+     * [Phase 8.12] SQL Fast-Path for Native Sorting & True Pagination
+     */
+    async searchOpportunitiesTable({ q, filters = {}, sortField, sortDirection, limit, offset }) {
+        try {
+            const isNativeSort = sortField && sortField !== 'effectiveLastActivity';
+            
+            const hasJsFilters = 
+                (filters.probability && filters.probability !== 'all') ||
+                (filters.time && filters.time !== 'all') ||
+                (filters.potentialSpecification && filters.potentialSpecification !== 'all');
+
+            const useFastPath = isNativeSort && !hasJsFilters;
+
+            let query = useFastPath 
+                ? supabase.from(this.tableName).select('*', { count: 'exact' })
+                : supabase.from(this.tableName).select('*');
+
+            // Apply native SQL filters
+            if (filters.type && filters.type !== 'all') query = query.eq('opportunity_type', filters.type);
+            if (filters.source && filters.source !== 'all') query = query.eq('source', filters.source);
+            if (filters.stage && filters.stage !== 'all') query = query.eq('current_stage', filters.stage);
+            if (filters.channel && filters.channel !== 'all') query = query.eq('sales_channel', filters.channel);
+            if (filters.scale && filters.scale !== 'all') query = query.eq('equipment_scale', filters.scale);
+            
+            if (filters.status && filters.status !== 'all') {
+                query = query.eq('current_status', filters.status);
+            } else {
+                query = query.neq('current_status', '已封存');
+            }
+            
+            if (filters.year && filters.year !== 'all') {
+                const y = parseInt(filters.year);
+                query = query.gte('created_time', `${y}-01-01T00:00:00Z`).lt('created_time', `${y + 1}-01-01T00:00:00Z`);
+            }
+
+            if (q) {
+                query = query.or(`opportunity_name.ilike.%${q}%,customer_company.ilike.%${q}%`);
+            }
+
+            // --- SQL FAST-PATH ---
+            if (useFastPath) {
+                const sortMap = {
+                    opportunityName: 'opportunity_name',
+                    customerCompany: 'customer_company',
+                    opportunityValue: 'opportunity_value',
+                    createdTime: 'created_time',
+                    lastUpdateTime: 'updated_time',
+                    opportunityType: 'opportunity_type',
+                    opportunitySource: 'source',
+                    assignee: 'owner',
+                    mainContact: 'main_contact',
+                    salesModel: 'sales_model',
+                    salesChannel: 'sales_channel',
+                    currentStage: 'current_stage',
+                    currentStatus: 'current_status',
+                    expectedCloseDate: 'expected_close_date',
+                    deviceScale: 'equipment_scale'
+                };
+
+                const dbColumn = sortMap[sortField] || 'updated_time';
+                query = query.order(dbColumn, { ascending: sortDirection === 'asc' });
+
+                if (limit && limit > 0) {
+                    query = query.range(offset, offset + limit - 1);
+                }
+
+                const { data, count, error } = await query;
+                if (error) throw new Error(`[OpportunitySqlReader] DB Error (Fast-Path): ${error.message}`);
+
+                return { 
+                    data: (data || []).map(row => this._mapRowToDto(row)), 
+                    total: count || 0 
+                };
+            }
+
+            // --- FALLBACK PATH ---
+            // Fetch primary rows from DB
+            const oppsRes = await query;
+            if (oppsRes.error) throw new Error(`[OpportunitySqlReader] DB Error: ${oppsRes.error.message}`);
+            
+            // Compute effectiveLastActivity ONLY for the filtered subset
+            const oppIds = oppsRes.data.map(o => o.opportunity_id);
+            let latestIntMap = new Map();
+            
+            if (oppIds.length > 0) {
+                const intsRes = await supabase.from('interactions')
+                    .select('opportunity_id, interaction_time, created_time')
+                    .in('opportunity_id', oppIds);
+                    
+                if (!intsRes.error && intsRes.data) {
+                    intsRes.data.forEach(int => {
+                        const id = int.opportunity_id;
+                        const time = new Date(int.interaction_time || int.created_time).getTime();
+                        if (time && (!latestIntMap.has(id) || time > latestIntMap.get(id))) {
+                            latestIntMap.set(id, time);
+                        }
+                    });
+                }
+            }
+
+            let results = oppsRes.data.map(row => {
+                const dto = this._mapRowToDto(row);
+                const lastInt = latestIntMap.get(dto.opportunityId) || 0;
+                if (lastInt > dto.effectiveLastActivity) {
+                    dto.effectiveLastActivity = lastInt;
+                }
+                return dto;
+            });
+
+            // --- JS Fallback Filters (Non-Native fields) ---
+            if (filters.probability && filters.probability !== 'all') {
+                results = results.filter(o => Number(o.orderProbability || o.winProbability || 0) >= Number(filters.probability));
+            }
+
+            if (filters.potentialSpecification && filters.potentialSpecification !== 'all') {
+                const val = filters.potentialSpecification;
+                results = results.filter(opp => {
+                    const specData = opp.potentialSpecification;
+                    if (!specData) return false;
+                    try {
+                        const parsedJson = JSON.parse(specData);
+                        return typeof parsedJson === 'object' && parsedJson[val] > 0;
+                    } catch (e) {
+                        return typeof specData === 'string' && specData.includes(val);
+                    }
+                });
+            }
+            
+            if (filters.time && filters.time !== 'all') {
+                const timeMap = { '7': 7, '30': 30, '90': 90 };
+                const days = timeMap[filters.time];
+                if (days) {
+                    const threshold = Date.now() - days * 24 * 60 * 60 * 1000;
+                    results = results.filter(opp => opp.effectiveLastActivity >= threshold);
+                }
+            }
+
+            // --- Sorting (Applied in JS to support effectiveLastActivity without DDL) ---
+            if (sortField) {
+                 results.sort((a, b) => {
+                     let valA = a[sortField];
+                     let valB = b[sortField];
+                     if (valA === undefined || valA === null) valA = '';
+                     if (valB === undefined || valB === null) valB = '';
+                     
+                     if (typeof valA === 'number' && typeof valB === 'number') {
+                         return sortDirection === 'asc' ? valA - valB : valB - valA;
+                     }
+                     return sortDirection === 'asc' 
+                         ? String(valA).localeCompare(String(valB), 'zh-Hant') 
+                         : String(valB).localeCompare(String(valA), 'zh-Hant');
+                 });
+            } else {
+                 results.sort((a, b) => b.effectiveLastActivity - a.effectiveLastActivity);
+            }
+
+            // --- Final Pagination Slice ---
+            const total = results.length;
+            if (limit && limit > 0) {
+                results = results.slice(offset, offset + limit);
+            }
+
+            return { data: results, total };
+
+        } catch (error) {
+            console.error('[OpportunitySqlReader] searchOpportunitiesTable Error:', error);
             throw error;
         }
     }
