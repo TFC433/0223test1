@@ -1,7 +1,8 @@
 /**
- * @version 1.0.1
- * @date 2026-01-27
- * @purpose Hotfix：event-editor 最小改動 (參數傳遞 + 解除一次性載入鎖定)
+ * @version 1.0.2
+ * @date 2026-03-12
+ * @purpose Hotfix：event-editor 最小改動 (參數傳遞 + 解除一次性載入鎖定) 
+ * * [Performance Fix] Dashboard SPA Cache: 修復 dashboard 忽略 SPA 快取導致的每次切換重複請求問題
  */
 
 // public/scripts/core/router.js
@@ -139,7 +140,10 @@ const Router = {
 
         // 4. 執行模組載入邏輯
         if (pageName === 'dashboard') {
-            if (window.dashboardManager?.refresh) await window.dashboardManager.refresh();
+            // [Hotfix] 遵循 SPA 載入旗標，避免路由切換時重複發送 /api/dashboard 請求
+            if (!config.loaded && window.dashboardManager?.refresh) {
+                await window.dashboardManager.refresh();
+            }
         } else {
             const loadFn = window.CRM_APP.pageModules[pageName];
 

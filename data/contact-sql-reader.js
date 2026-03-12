@@ -6,12 +6,13 @@
  * - Table: contacts
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.5.0 (Phase 9.4 Relational Join Fix)
+ * - Version: 1.6.0 (Phase 8.9 Dashboard Optimization)
  * - Date: 2026-03-12
  * - Changelog: 
  * - Removed Supabase relational join in getContactsByOpportunityId to fix schema cache crash.
  * - Implemented strict 2-step application-level join logic.
  * - Added getContactList adapter to abstract legacy method requirements.
+ * - Added getRecentContactsFeed to eliminate full table fetch during dashboard render.
  */
 
 const { supabase } = require('../config/supabase');
@@ -20,6 +21,33 @@ class ContactSqlReader {
 
     constructor() {
         this.tableName = 'contacts';
+    }
+
+    /**
+     * [Performance Fix] 
+     * Get recent contacts limited by exact number. Used strictly to bypass 
+     * full table memory allocation in DashboardService._prepareRecentActivity.
+     * @param {number} limit 
+     * @returns {Promise<Array<Object>>} Array of Contact DTOs
+     */
+    async getRecentContactsFeed(limit = 5) {
+        try {
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .order('created_time', { ascending: false })
+                .limit(limit);
+
+            if (error) {
+                throw new Error(`[ContactSqlReader] DB Error: ${error.message}`);
+            }
+
+            return data.map(row => this._mapRowToDto(row));
+
+        } catch (error) {
+            console.error('[ContactSqlReader] getRecentContactsFeed Error:', error);
+            throw error;
+        }
     }
 
     /**

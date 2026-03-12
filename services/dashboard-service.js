@@ -1,18 +1,12 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 8.9.0 (Phase 1 Task: SQL Aggregation Counts)
- * @date 2026-03-11
+ * @version 8.11.0 (Phase 8.9 - Follow-Up O(1) Optimization)
+ * @date 2026-03-12
  * @description 負責整合各個模組的數據，計算統計指標、圖表數據與 KPI。
- * * [Forensics Fix / Phase 8.3 Task]
- * - Enforced eventLogSqlReader injection to strictly bypass Google Sheets for events.
- * - Removed ambiguous eventLogReader usage.
- * - Migrated all remaining Dashboard legacy reads to pure SQL readers.
- * - [Phase 8.8] Replaced deprecated systemReader calls with systemService.
- * - [Phase 8.3 Task] COMPLETELY REMOVED companyReader, opportunityReader, interactionReader dependencies.
- * - [Phase 8.3 Task] Added temporary debug logs for getDashboardData payload forensics.
- * * [Phase 1 SQL Aggregation]
- * - Replaced in-memory counts with getContactStats, getOpportunityStats, getEventLogStats.
+ * * [Performance Fix] Removed full contacts table fetch from dashboard flow.
+ * * [Performance Fix] Delegated recentActivity generation to SQL readers to minimize data transfer.
+ * * [Performance Fix] Optimized _getFollowUpOpportunities from O(N*M) nested loop to O(1) Map lookup.
  */
 
 class DashboardService {
@@ -92,14 +86,13 @@ class DashboardService {
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
         // --- Batch 1: 核心業務資料 ---
+        // [Performance Fix] Removed this.contactSqlReader.getContacts() from core fetch
         console.log('   ↳ 正在載入核心資料 (Batch 1)...');
         const [
             opportunitiesRaw,
-            contacts,
             interactions
         ] = await Promise.all([
             this.opportunitySqlReader.getOpportunities(),
-            this.contactSqlReader.getContacts(),
             this.interactionSqlReader.getInteractions()
         ]);
 
@@ -108,22 +101,26 @@ class DashboardService {
         
         const calendarPromise = this.calendarService ? this.calendarService.getThisWeekEvents() : Promise.resolve({ todayEvents: [], todayCount: 0, weekCount: 0 });
         const companyPromise = this.companySqlReader ? this.companySqlReader.getCompanies() : Promise.resolve([]);
-        
-        // [Phase 8.3d] STRICT SQL READ
         const eventLogPromise = this.eventLogSqlReader.getEventLogs();
-        
         const systemPromise = this.systemService ? this.systemService.getSystemConfig() : Promise.resolve({});
+        
+        // [Performance Fix] Fetch strictly limited top 5 contacts for feed to bypass full table load
+        const recentContactsPromise = typeof this.contactSqlReader.getRecentContactsFeed === 'function' 
+            ? this.contactSqlReader.getRecentContactsFeed(5)
+            : Promise.resolve([]);
 
         const [
             calendarData,
             eventLogs,
             systemConfig,
-            companies
+            companies,
+            recentContactsRaw
         ] = await Promise.all([
             calendarPromise,
             eventLogPromise,
             systemPromise,
-            companyPromise
+            companyPromise,
+            recentContactsPromise
         ]);
 
         // --- Batch 3: SQL Aggregation Stats (Phase 1) ---
@@ -264,7 +261,8 @@ class DashboardService {
             return new Date(dateStr) >= startOfMonth;
         }).length;
 
-        const followUps = this._getFollowUpOpportunities(opportunities, interactions);
+        // [Performance Fix] 傳遞已預先計算的 latestInteractionMap，消滅 O(N*M) 巢狀迴圈
+        const followUps = this._getFollowUpOpportunities(opportunities, latestInteractionMap);
 
         const stats = {
             contactsCount: contactStats.total,
@@ -297,7 +295,9 @@ class DashboardService {
         };
 
         const kanbanData = this._prepareKanbanData(opportunities, systemConfig);
-        const recentActivity = this._prepareRecentActivity(interactions, contacts, opportunities, companies, 5);
+        
+        // [Performance Fix] 嚴格重現 Recent Activity 合併邏輯，但不拉取 Contacts 全表
+        const recentActivity = this._prepareRecentActivity(interactions, recentContactsRaw, opportunities, companies, 5);
         
         const thisWeekInfoForDashboard = {
             weekId: thisWeekId,
@@ -306,7 +306,7 @@ class DashboardService {
         };
 
         // --- TEMPORARY DEBUG LOGS ---
-        console.log(`[DashboardService][DEBUG] opportunitiesRaw=${opportunitiesRaw.length}, contacts=${contacts.length}, interactions=${interactions.length}, eventLogs=${eventLogs.length}, companies=${companies.length}`);
+        console.log(`[DashboardService][DEBUG] opportunitiesRaw=${opportunitiesRaw.length}, interactions=${interactions.length}, eventLogs=${eventLogs.length}, companies=${companies.length}`);
         console.log(`[DashboardService][DEBUG] final stats=`, JSON.stringify(stats));
         console.log(`[DashboardService][DEBUG] kanban keys=`, Object.keys(kanbanData).length);
         console.log(`[DashboardService][DEBUG] followUpList length=${followUps.slice(0, 5).length}`);
@@ -416,29 +416,28 @@ class DashboardService {
 
     // --- 內部資料處理函式 (Data Processing Helpers) ---
 
-    _getFollowUpOpportunities(opportunities, interactions) {
+    // [Performance Fix] Receives O(1) Map instead of raw interactions array.
+    _getFollowUpOpportunities(opportunities, latestInteractionMap) {
         const daysThreshold = (this.config.FOLLOW_UP && this.config.FOLLOW_UP.DAYS_THRESHOLD) || 7;
         const activeStages = (this.config.FOLLOW_UP && this.config.FOLLOW_UP.ACTIVE_STAGES) || ['01_初步接觸', '02_需求確認', '03_提案報價', '04_談判修正'];
         
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - daysThreshold);
+        const thresholdTime = sevenDaysAgo.getTime();
 
         return opportunities.filter(opp => {
             if (opp.currentStatus !== '進行中' || !activeStages.includes(opp.currentStage)) {
                 return false;
             }
-            const oppInteractions = interactions.filter(i => i.opportunityId === opp.opportunityId);
-            if (oppInteractions.length === 0) {
+            
+            const lastInteractionTime = latestInteractionMap.get(opp.opportunityId);
+            
+            if (!lastInteractionTime) {
                 const createdDate = new Date(opp.createdTime);
-                return createdDate < sevenDaysAgo;
+                return createdDate.getTime() < thresholdTime;
             }
             
-            const sortedInteractions = oppInteractions.sort((a,b) => 
-                new Date(b.interactionTime || b.createdTime) - new Date(a.interactionTime || a.createdTime)
-            );
-            const lastInteractionDate = new Date(sortedInteractions[0].interactionTime || sortedInteractions[0].createdTime);
-            
-            return lastInteractionDate < sevenDaysAgo;
+            return lastInteractionTime < thresholdTime;
         });
     }
 
@@ -462,16 +461,20 @@ class DashboardService {
         return stageGroups;
     }
 
-    _prepareRecentActivity(interactions, contacts, opportunities, companies, limit) {
-        const contactFeed = contacts.map(item => {
+    // [Performance Fix] Accepts limited contact array, maintains exact original sorting semantics
+    _prepareRecentActivity(interactions, contactsLimitArray, opportunities, companies, limit) {
+        const contactFeed = contactsLimitArray.map(item => {
             const ts = new Date(item.createdTime);
             return { type: 'new_contact', timestamp: isNaN(ts.getTime()) ? 0 : ts.getTime(), data: item };
         });
+        
+        // Preserve exact semantic fidelity: Interaction Time OR Created Time
         const interactionFeed = interactions.map(item => {
             const ts = new Date(item.interactionTime || item.createdTime);
             return { type: 'interaction', timestamp: isNaN(ts.getTime()) ? 0 : ts.getTime(), data: item };
         });
 
+        // Safe absolute Top N sort because interactionFeed is exhaustive and contactFeed represents the absolute Top 5 contacts
         const combinedFeed = [...interactionFeed, ...contactFeed]
             .sort((a, b) => b.timestamp - a.timestamp)
             .slice(0, limit);

@@ -1,4 +1,12 @@
-// public/scripts/dashboard/dashboard.js (V3.1 - Modularized Controller)
+/**
+ * public/scripts/dashboard/dashboard.js
+ * @version 3.2.2 (Phase 8.9 - SPA Cache Fix)
+ * @date 2026-03-12
+ * @description Dashboard UI Controller. 
+ * * [Performance Fix] Removed redundant client-side fetch of /api/interactions/all. 
+ * * effectiveLastActivity is now strictly sourced from backend SQL aggregation with strict null/NaN guarding.
+ * * [Performance Fix] Added SPA loaded flag setter to prevent redundant re-fetches on route navigation.
+ */
 
 const dashboardManager = {
     // 狀態變數
@@ -19,36 +27,26 @@ const dashboardManager = {
         const dashboardApiUrl = force ? `/api/dashboard?t=${Date.now()}` : '/api/dashboard';
 
         try {
-            // 1. 併發請求資料
-            const [dashboardResult, announcementResult, interactionsResult] = await Promise.all([
+            // 1. 併發請求資料 (已移除贅餘的 interactions/all 請求)
+            const [dashboardResult, announcementResult] = await Promise.all([
                 authedFetch(dashboardApiUrl),
-                authedFetch('/api/announcements'),
-                authedFetch('/api/interactions/all?fetchAll=true') 
+                authedFetch('/api/announcements')
             ]);
 
             if (!dashboardResult.success) throw new Error(dashboardResult.details || '獲取儀表板資料失敗');
-            if (!interactionsResult || !interactionsResult.data) throw new Error('獲取互動資料失敗 (回應格式不正確)');
 
             const data = dashboardResult.data;
-            const interactions = interactionsResult.data || [];
             this.kanbanRawData = data.kanbanData || {};
             
-            // 2. 資料處理：計算最後活動時間與年份
-            const latestInteractionMap = new Map();
-            interactions.forEach(interaction => {
-                const id = interaction.opportunityId;
-                const existing = latestInteractionMap.get(id) || 0;
-                const current = new Date(interaction.interactionTime || interaction.createdTime).getTime();
-                if (current > existing) latestInteractionMap.set(id, current);
-            });
-
+            // 2. 資料處理：計算年份 (effectiveLastActivity 已由後端提供)
             const allOpportunities = Object.values(this.kanbanRawData).flatMap(stage => stage.opportunities);
             const yearSet = new Set();
             
             this.processedOpportunities = allOpportunities.map(item => {
-                const selfUpdate = new Date(item.lastUpdateTime || item.createdTime).getTime();
-                const lastInteraction = latestInteractionMap.get(item.opportunityId) || 0;
-                item.effectiveLastActivity = Math.max(selfUpdate, lastInteraction);
+                // 安全防呆：嚴格檢查是否為 null, undefined 或 NaN，避免誤判有效數值
+                if (typeof item.effectiveLastActivity !== 'number' || Number.isNaN(item.effectiveLastActivity)) {
+                    item.effectiveLastActivity = new Date(item.lastUpdateTime || item.createdTime).getTime();
+                }
                 
                 const year = item.createdTime ? new Date(item.createdTime).getFullYear() : null;
                 item.creationYear = year;
@@ -79,10 +77,7 @@ const dashboardManager = {
 
             // C. 看板 (Kanban)
             if (window.DashboardKanban) {
-                // Fix Initialization Race Condition: Check if initialized or rely on idempotent init.
-                // We rely on the idempotent init() in dashboard_kanban.js (which checks isInitialized).
-                // But for extra safety, we can also check here if we wanted to avoid the call entirely.
-                // Since we updated DashboardKanban.init to be safe, calling it here is fine.
+                // Fix Initialization Race Condition
                 DashboardKanban.init((forceRefresh) => this.refresh(forceRefresh));
                 
                 // 更新資料並渲染
@@ -96,6 +91,11 @@ const dashboardManager = {
             // D. 地圖 (Map)
             if (window.mapManager) {
                 await window.mapManager.update();
+            }
+
+            // 標記為已載入，遵循 SPA 快取機制避免路由切換時重複請求
+            if (window.CRM_APP && window.CRM_APP.pageConfig && window.CRM_APP.pageConfig['dashboard']) {
+                window.CRM_APP.pageConfig['dashboard'].loaded = true;
             }
 
         } catch (error) {
