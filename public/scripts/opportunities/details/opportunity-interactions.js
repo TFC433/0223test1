@@ -1,11 +1,12 @@
 /*
  * Project: TFC CRM
  * File: public/scripts/opportunities/details/opportunity-interactions.js
- * Version: v8.0.6 (Phase 8.10.2 - Stale Reachability Fix)
+ * Version: v8.0.7 (Phase 8.10.3 - UTC Naive Display Fix)
  * Date: 2026-03-12
  * Changelog: 
  * - Phase 8 Interaction UI: operation-key rowIndex -> interactionId for edit/delete
  * - Phase 8.10.2 Fix: Relaxed strict result.success check to prevent unreachable markStale on 204/raw responses
+ * - Phase 8.10.3 Fix: Appended 'Z' to naive UTC ISO strings during showForEditing to prevent 8-hour offset loss.
  */
 // public/scripts/opportunities/details/opportunity-interactions.js
 // 職責：專門管理「互動與新增」頁籤的所有 UI 與功能
@@ -290,7 +291,13 @@ const OpportunityInteractions = (() => {
         // #interaction-edit-rowIndex carries interactionId since Phase 8; legacy name kept for minimal diff.
         form.querySelector('#interaction-edit-rowIndex').value = item.interactionId;
 
-        const interactionTime = new Date(item.interactionTime || item.createdTime || new Date().toISOString());
+        // [Strict Digital Forensics Patch] Ensure UTC parsing for naive DB strings before offset calculation
+        let rawInteractionTime = item.interactionTime || item.createdTime;
+        if (typeof rawInteractionTime === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(rawInteractionTime)) {
+            rawInteractionTime += 'Z';
+        }
+        const interactionTime = new Date(rawInteractionTime || new Date().toISOString());
+        
         interactionTime.setMinutes(interactionTime.getMinutes() - interactionTime.getTimezoneOffset());
         form.querySelector('#interaction-time').value = interactionTime.toISOString().slice(0, 16);
 

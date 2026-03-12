@@ -25,8 +25,15 @@ function formatDateTime(dateInput) {
     if (dateInput instanceof Date) {
         date = dateInput;
     } else {
+        // [Strict Digital Forensics Patch] UTC Naive String Normalization
+        // Supabase/PostgreSQL 'timestamp' returns naive ISO strings without 'Z'.
+        // JS new Date() parses naive 'T' strings as Local Time. Append 'Z' to force UTC.
+        let safeInput = dateInput;
+        if (typeof safeInput === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(safeInput)) {
+            safeInput += 'Z';
+        }
         // Try parsing string or number
-        date = new Date(dateInput);
+        date = new Date(safeInput);
     }
 
     // Check if the resulting date is valid
