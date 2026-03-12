@@ -1,12 +1,13 @@
 /**
  * public/scripts/companies/company-list.js
  * 職責：管理「公司總覽列表頁」
- * * @version 7.5.0 (Phase 8: Strict ID Navigation)
- * * @date 2026-02-10
+ * * @version 7.5.1
+ * * @date 2026-03-12
  * * @description 
  * * 1. [Fix] handleCompanyListClick: Navigation payload must use companyId.
  * * 2. [Fix] submitQuickCreateCompany: Navigation after create uses companyId.
  * * 3. [Contract] All operations (delete, navigate) use companyId exclusively.
+ * * 4. [Patch] Added dashboardManager.markStale() on successful mutations (create, delete).
  */
 
 // ==================== 全域變數 ====================
@@ -109,6 +110,10 @@ async function performDeleteAPI(companyId) {
         const toastFunc = window.showNotification || window.showToast;
 
         if (res.success) {
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
+            
             if(toastFunc) toastFunc('刪除成功', 'success');
             else alert('刪除成功');
             await loadCompaniesListPage(); 
@@ -404,6 +409,10 @@ async function submitQuickCreateCompany() {
         if (typeof hideLoading === 'function') hideLoading();
         
         if (res.success) {
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
+
             if(toastFunc) toastFunc('建立成功！', 'success');
             else alert('建立成功！');
             

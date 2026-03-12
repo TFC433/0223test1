@@ -4,9 +4,10 @@
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details-events.js
- * Version: 8.1.2
- * Date: 2026-03-11
+ * Version: 8.1.3
+ * Date: 2026-03-12
  * Changelog:
+ * - [FIX] Added window.dashboardManager.markStale() to save() success branch to force dashboard refresh upon return.
  * - [FIX] _initSpecQuantities: Robust handling for JSON string, CSV string, or Object to prevent .split() crash.
  * - [FIX] salesChannel/channelDetails conflict in save() payload.
  * - [FIX] Ensure potentialSpecification reads from normalized data.
@@ -442,6 +443,11 @@ const OpportunityInfoCardEvents = (() => {
                 init(updatedOpp);
 
                 toggleEditMode(false);
+
+                // [Phase 8.11 Patch] Flag dashboard as stale to force refresh on back navigation
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
             } else {
                 throw new Error((result && result.error) || '儲存失敗');
             }

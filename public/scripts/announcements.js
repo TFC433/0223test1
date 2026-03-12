@@ -1,3 +1,10 @@
+/**
+ * public/scripts/announcements.js
+ * @version 1.1.0
+ * @date 2026-03-12
+ * @changelog
+ * - [Patch] Added dashboardManager.markStale() on successful mutations (create/update, delete).
+ */
 // views/scripts/announcements.js (Event Delegation Refactor)
 
 async function loadAnnouncementsPage() {
@@ -129,6 +136,10 @@ async function handleAnnouncementFormSubmit(event) {
         const result = await authedFetch(url, { method, body: JSON.stringify(data) });
         if (!result.success) throw new Error(result.error);
         
+        if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+            window.dashboardManager.markStale();
+        }
+
         closeModal('announcement-modal');
         // authedFetch 會自動觸發資料重載，這裡不需要手動呼叫
     } catch (error) {
@@ -144,6 +155,11 @@ function confirmDeleteAnnouncement(id, title) {
         try {
             const result = await authedFetch(`/api/announcements/${id}`, { method: 'DELETE' });
             if (!result.success) throw new Error(result.error);
+
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
+
         } catch (error) {
             if (error.message !== 'Unauthorized') showNotification(`刪除失敗: ${error.message}`, 'error');
         } finally {

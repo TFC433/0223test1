@@ -1,14 +1,15 @@
 /**
  * ============================================================================
  * File: weekly-business.js
- * Version: v8.0.0 (Phase 8 UI Contract Cleanup)
- * Date: 2026-02-10
+ * Version: v8.0.1 
+ * Date: 2026-03-12
  * Author: Gemini (Assisted)
  *
  * Change Log:
  * - [Phase 8] Remove legacy rowIndex from WeeklyBusiness UI write path
  * - UI behavior unchanged
  * - Operation key unified to recordId
+ * - [Patch] Added dashboardManager.markStale() on successful mutations
  * ============================================================================
  */
 
@@ -452,6 +453,10 @@ async function handleSaveWeeklyEntry(event) {
         const result = await authedFetch(url, { method, body: JSON.stringify(entryData) });
         if (!result.success) throw new Error(result.error || '儲存失敗');
 
+        if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+            window.dashboardManager.markStale();
+        }
+
         closeWeeklyBusinessEditorPanel();
         navigateToWeeklyDetail(currentWeekData.id);
     } catch (error) {
@@ -497,6 +502,10 @@ function confirmDeleteWeeklyBusinessEntry(recordId, topic) {
             });
 
             if (result.success) {
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
+
                 closeWeeklyBusinessEditorPanel();
                 navigateToWeeklyDetail(currentWeekData.id);
             } else {
@@ -684,6 +693,3 @@ if (window.CRM_APP) {
     window.CRM_APP.pageModules['weekly-business'] = loadWeeklyBusinessPage;
     window.CRM_APP.pageModules['weekly-detail'] = navigateToWeeklyDetail;
 }
-
-
-//Verification: This file is the complete updated version of `public/scripts/weekly/weekly-business.js` with no omissions.
