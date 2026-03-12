@@ -1,12 +1,13 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 8.11.0 (Phase 8.9 - Follow-Up O(1) Optimization)
+ * @version 8.12.1 (Phase 8.10.1 - Zero-RPC MTU/SI In-Memory Optimization)
  * @date 2026-03-12
  * @description 負責整合各個模組的數據，計算統計指標、圖表數據與 KPI。
  * * [Performance Fix] Removed full contacts table fetch from dashboard flow.
  * * [Performance Fix] Delegated recentActivity generation to SQL readers to minimize data transfer.
  * * [Performance Fix] Optimized _getFollowUpOpportunities from O(N*M) nested loop to O(1) Map lookup.
+ * * [Performance Fix] Pre-filtered MTU/SI event_logs via targeted minimal projection query, avoiding full table hydration.
  */
 
 class DashboardService {
@@ -101,7 +102,7 @@ class DashboardService {
         
         const calendarPromise = this.calendarService ? this.calendarService.getThisWeekEvents() : Promise.resolve({ todayEvents: [], todayCount: 0, weekCount: 0 });
         const companyPromise = this.companySqlReader ? this.companySqlReader.getCompanies() : Promise.resolve([]);
-        const eventLogPromise = this.eventLogSqlReader.getEventLogs();
+        // [Performance Fix] Removed eventLogPromise full hydration from Batch 2
         const systemPromise = this.systemService ? this.systemService.getSystemConfig() : Promise.resolve({});
         
         // [Performance Fix] Fetch strictly limited top 5 contacts for feed to bypass full table load
@@ -111,28 +112,43 @@ class DashboardService {
 
         const [
             calendarData,
-            eventLogs,
             systemConfig,
             companies,
             recentContactsRaw
         ] = await Promise.all([
             calendarPromise,
-            eventLogPromise,
             systemPromise,
             companyPromise,
             recentContactsPromise
         ]);
+
+        // --- 提前計算 MTU/SI 目標清單以優化 SQL 查詢 ---
+        const normalize = (name) => (name || '').trim().toLowerCase();
+        const isStrictMTU = (type) => normalize(type) === 'mtu';
+        const isSI = (type) => /SI|系統整合|System Integrator/i.test(type || '');
+
+        const targetCompanyIds = companies
+            .filter(c => isStrictMTU(c.companyType) || isSI(c.companyType))
+            .map(c => c.companyId)
+            .filter(Boolean);
+
+        // [Performance Fix] Fetch explicitly projected, targeted event_logs instead of the full table
+        const eventActivityPromise = typeof this.companySqlReader.getTargetCompanyEventActivities === 'function' && targetCompanyIds.length > 0
+            ? this.companySqlReader.getTargetCompanyEventActivities(targetCompanyIds)
+            : Promise.resolve([]);
 
         // --- Batch 3: SQL Aggregation Stats (Phase 1) ---
         console.log('   ↳ 正在載入統計資料 (Batch 3)...');
         const [
             contactStats,
             opportunityStats,
-            eventStats
+            eventStats,
+            eventActivities // Projected list: { company_id, created_time }
         ] = await Promise.all([
             this.contactSqlReader.getContactStats(startOfMonth),
             this.opportunitySqlReader.getOpportunityStats(startOfMonth),
-            this.eventLogSqlReader.getEventLogStats(startOfMonth)
+            this.eventLogSqlReader.getEventLogStats(startOfMonth),
+            eventActivityPromise
         ]);
 
         // --- 週間業務資料整合 ---
@@ -181,17 +197,12 @@ class DashboardService {
         const opportunities = opportunitiesRaw.sort((a, b) => b.effectiveLastActivity - a.effectiveLastActivity);
 
         // MTU/SI 統計邏輯
-        const normalize = (name) => (name || '').trim().toLowerCase();
-        
         const companyNameMap = new Map();
         companies.forEach(c => {
             if (c.companyName) {
                 companyNameMap.set(normalize(c.companyName), c.companyId);
             }
         });
-
-        const isStrictMTU = (type) => normalize(type) === 'mtu';
-        const isSI = (type) => /SI|系統整合|System Integrator/i.test(type || '');
         
         const staticMtuList = companies.filter(c => isStrictMTU(c.companyType));
 
@@ -211,12 +222,15 @@ class DashboardService {
             }
         };
 
+        // We already have interactions and opportunities in full, process them normally
         interactions.forEach(i => i.companyId && recordActivity(i.companyId, i.interactionTime || i.createdTime));
-        eventLogs.forEach(e => e.companyId && recordActivity(e.companyId, e.createdTime));
         opportunities.forEach(opp => {
             const cId = companyNameMap.get(normalize(opp.customerCompany));
             if (cId) recordActivity(cId, opp.createdTime);
         });
+        
+        // [Performance Fix] Iterate over heavily targeted, minimal DB projection (using raw snake_case keys)
+        eventActivities.forEach(e => e.company_id && recordActivity(e.company_id, e.created_time));
 
         let mtuCount = 0;
         let mtuNewMonth = 0;
@@ -306,7 +320,7 @@ class DashboardService {
         };
 
         // --- TEMPORARY DEBUG LOGS ---
-        console.log(`[DashboardService][DEBUG] opportunitiesRaw=${opportunitiesRaw.length}, interactions=${interactions.length}, eventLogs=${eventLogs.length}, companies=${companies.length}`);
+        console.log(`[DashboardService][DEBUG] opportunitiesRaw=${opportunitiesRaw.length}, interactions=${interactions.length}, eventActivities=${eventActivities.length}, companies=${companies.length}`);
         console.log(`[DashboardService][DEBUG] final stats=`, JSON.stringify(stats));
         console.log(`[DashboardService][DEBUG] kanban keys=`, Object.keys(kanbanData).length);
         console.log(`[DashboardService][DEBUG] followUpList length=${followUps.slice(0, 5).length}`);
@@ -343,7 +357,7 @@ class DashboardService {
     }
 
     async getEventsDashboardData() {
-        // [Phase 8.3d] STRICT SQL READ
+        // [Phase 8.3d] STRICT SQL READ (This isolated page still needs full payload)
         const eventLogs = await this.eventLogSqlReader.getEventLogs();
         
         // Use Promise.all for others

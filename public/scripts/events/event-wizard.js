@@ -1,6 +1,6 @@
-// public/scripts/event-wizard.js
+// public/scripts/events/event-wizard.js
 // 職責：管理「新增事件精靈」的完整流程 (Step 1 -> 2 -> 3 -> Create)
-// 修改歷程：加入機會自動跳轉、公司防呆、完成後連結至獨立編輯器、新增我方人員手動輸入
+// 修改歷程：加入機會自動跳轉、公司防呆、完成後連結至獨立編輯器、新增我方人員手動輸入、Dashboard Stale Integration
 
 const EventWizard = (() => {
     // 狀態儲存
@@ -457,6 +457,11 @@ const EventWizard = (() => {
                 // 4. 顯示永久通知
                 showNotification(messageHtml, 'success', 0); 
                 
+                // [Phase 8.10 Stale-Refresh Fix] 標記 Dashboard 資料過期
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
+
                 // 5. 觸發背景資料刷新
                 if (window.CRM_APP && window.CRM_APP.refreshCurrentView) {
                      window.CRM_APP.refreshCurrentView('資料同步中...');

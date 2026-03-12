@@ -1,7 +1,7 @@
 /**
- * @version Phase 8 Final Stable
- * @date 2026-03-05
- * @purpose Phase 8 Production：修正儲存 UX（成功提示＋關閉編輯器＋避免強制回到 Dashboard／router 迴圈）
+ * @version Phase 8.10 Final Stable
+ * @date 2026-03-12
+ * @purpose Phase 8 Production：修正儲存 UX（成功提示＋關閉編輯器＋避免強制回到 Dashboard／router 迴圈）+ Mutation Stale Integration
  */
 
 // public/scripts/events/event-editor-standalone.js
@@ -9,7 +9,7 @@
 // (Refactored: Fix Zero-Dimension Trap via ResizeObserver - Loop Safe)
 
 // [Forensics Probe] Debug Counter
-console.log('%c[EventEditorStandalone] LOADED Phase 8 Final Stable Production 2026-03-05', 'color:#22c55e;font-weight:bold;');
+console.log('%c[EventEditorStandalone] LOADED Phase 8.10 Final Stable Production 2026-03-12', 'color:#22c55e;font-weight:bold;');
 
 window._DEBUG_EDITOR_OPEN_COUNT ||= 0;
 
@@ -531,6 +531,11 @@ const EventEditorStandalone = (() => {
             // ✅ Success UX
             showNotification('事件已儲存', 'success');
 
+            // [Phase 8.10 Stale-Refresh Fix] 標記 Dashboard 資料過期
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
+
             // Close first for best UX (avoid modal lingering if router refresh triggers)
             _close();
 
@@ -554,8 +559,19 @@ const EventEditorStandalone = (() => {
             showLoading('刪除中...');
             try {
                 await authedFetch(`/api/events/${id}`, { method: 'DELETE' });
+                
+                // [Phase 8.10 Stale-Refresh Fix] 標記 Dashboard 資料過期
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
+                
                 _close();
                 closeModal('event-log-report-modal');
+                
+                // 即時更新當前列表 (如果是停留在 Event List)
+                if (window.CRM_APP && window.CRM_APP.refreshCurrentView) {
+                     window.CRM_APP.refreshCurrentView();
+                }
             } catch (e) { console.error(e); } finally { hideLoading(); }
         });
     }

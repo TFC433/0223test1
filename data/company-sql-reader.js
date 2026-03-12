@@ -6,7 +6,7 @@
  * - Table: companies
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.1.0 (Blocker Fix: Added getCompanyList adapter)
+ * - Version: 1.2.0 (Performance Fix: Added getTargetCompanyEventActivities to avoid dashboard memory hydration)
  * - Date: 2026-03-12
  */
 
@@ -81,6 +81,44 @@ class CompanySqlReader {
 
         } catch (error) {
             console.error('[CompanySqlReader] getCompanies Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * [Performance Optimization]
+     * Cross-domain projection: Fetches ONLY minimal activity timestamps from event_logs
+     * for specifically requested company IDs. Eliminates massive memory hydration in Dashboard.
+     * Avoids needing new RPC/views by utilizing standard PostgREST filtering and chunking.
+     * @param {Array<string>} companyIds 
+     * @returns {Promise<Array<Object>>} Array of raw DB rows: { company_id, created_time }
+     */
+    async getTargetCompanyEventActivities(companyIds) {
+        if (!companyIds || companyIds.length === 0) return [];
+        
+        try {
+            const chunkSize = 200; // Safe chunk size for PostgREST URL length limits
+            let allData = [];
+
+            for (let i = 0; i < companyIds.length; i += chunkSize) {
+                const chunk = companyIds.slice(i, i + chunkSize);
+                const { data, error } = await supabase
+                    .from('event_logs')
+                    .select('company_id, created_time')
+                    .in('company_id', chunk);
+
+                if (error) {
+                    throw new Error(`[CompanySqlReader] DB Error fetching event activities: ${error.message}`);
+                }
+                if (data) {
+                    allData = allData.concat(data);
+                }
+            }
+
+            return allData;
+
+        } catch (error) {
+            console.error('[CompanySqlReader] getTargetCompanyEventActivities Error:', error);
             throw error;
         }
     }

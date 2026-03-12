@@ -1,11 +1,12 @@
 /**
  * public/scripts/dashboard/dashboard.js
- * @version 3.2.2 (Phase 8.9 - SPA Cache Fix)
+ * @version 3.3.0 (Phase 8.10 - Mutation-Driven Stale Refresh Strategy)
  * @date 2026-03-12
  * @description Dashboard UI Controller. 
  * * [Performance Fix] Removed redundant client-side fetch of /api/interactions/all. 
  * * effectiveLastActivity is now strictly sourced from backend SQL aggregation with strict null/NaN guarding.
  * * [Performance Fix] Added SPA loaded flag setter to prevent redundant re-fetches on route navigation.
+ * * [Architecture Fix] Added markStale() to support mutation-driven dashboard invalidation without breaking fast SPA navigation.
  */
 
 const dashboardManager = {
@@ -13,6 +14,18 @@ const dashboardManager = {
     kanbanRawData: {},
     processedOpportunities: [], 
     availableYears: [], 
+
+    /**
+     * 標記儀表板資料為過期 (Stale)
+     * 當發生會影響統計的資料變更 (如新增/編輯/刪除事件) 時呼叫此函式，
+     * 使得下次進入儀表板時能觸發重新整理，而不破壞 SPA 快速切換的機制。
+     */
+    markStale() {
+        if (window.CRM_APP && window.CRM_APP.pageConfig && window.CRM_APP.pageConfig['dashboard']) {
+            window.CRM_APP.pageConfig['dashboard'].loaded = false;
+            console.log('⚠️ [Dashboard] 已標記為過期 (Stale)，下次進入將重新載入');
+        }
+    },
 
     /**
      * 初始化與刷新儀表板資料
@@ -93,7 +106,7 @@ const dashboardManager = {
                 await window.mapManager.update();
             }
 
-            // 標記為已載入，遵循 SPA 快取機制避免路由切換時重複請求
+            // 標記為已載入，遵循 SPA 快取機制避免路由切換時重複請求，並清除 Stale 狀態
             if (window.CRM_APP && window.CRM_APP.pageConfig && window.CRM_APP.pageConfig['dashboard']) {
                 window.CRM_APP.pageConfig['dashboard'].loaded = true;
             }
