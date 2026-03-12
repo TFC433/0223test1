@@ -6,9 +6,12 @@
  * - Table: contacts
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.3.0
- * - Date: 2026-03-11
- * - Changelog: Added getContactsByOpportunityId to abstract SQL JOINs out of Service layer. Added getContactsByCompanyId for Phase 8.1 SQL-first queries. Phase 1 SQL Aggregation: Added getContactStats.
+ * - Version: 1.5.0 (Phase 9.4 Relational Join Fix)
+ * - Date: 2026-03-12
+ * - Changelog: 
+ * - Removed Supabase relational join in getContactsByOpportunityId to fix schema cache crash.
+ * - Implemented strict 2-step application-level join logic.
+ * - Added getContactList adapter to abstract legacy method requirements.
  */
 
 const { supabase } = require('../config/supabase');
@@ -17,6 +20,16 @@ class ContactSqlReader {
 
     constructor() {
         this.tableName = 'contacts';
+    }
+
+    /**
+     * [Compatibility Adapter]
+     * Exposes getContactList to safely satisfy legacy CORE reader dependencies
+     * without modifying service constructor signatures.
+     * @returns {Promise<Array<Object>>}
+     */
+    async getContactList() {
+        return this.getContacts();
     }
 
     /**
@@ -110,7 +123,7 @@ class ContactSqlReader {
 
     /**
      * Get contacts linked to a specific opportunity
-     * Performs SQL JOIN on opportunity_contact_links
+     * Performs a STRICT 2-Step Application Level Join to bypass schema cache errors.
      * @param {string} opportunityId 
      * @returns {Promise<Array<Object>>} Array of Contact DTOs with linkId attached
      */
@@ -118,28 +131,53 @@ class ContactSqlReader {
         if (!opportunityId) throw new Error('ContactSqlReader: opportunityId is required');
 
         try {
-            const { data, error } = await supabase
+            // STEP A: Query opportunity_contact_links only
+            const { data: linkData, error: linkError } = await supabase
                 .from('opportunity_contact_links')
-                .select(`
-                    link_id,
-                    status,
-                    contacts (*)
-                `)
+                .select('link_id, contact_id, status')
                 .eq('opportunity_id', opportunityId)
                 .eq('status', 'active');
 
-            if (error) {
-                throw new Error(`[ContactSqlReader] DB Error: ${error.message}`);
+            if (linkError) {
+                throw new Error(`[ContactSqlReader] DB Error (Links): ${linkError.message}`);
             }
 
-            if (!data) return [];
+            // STEP B: Collect contact_ids
+            if (!linkData || linkData.length === 0) {
+                return [];
+            }
 
-            return data.map(row => {
-                if (!row.contacts) return null;
-                const dto = this._mapRowToDto(row.contacts);
-                dto.linkId = row.link_id; // Preserve link_id for UI
+            const contactIds = linkData.map(link => link.contact_id).filter(Boolean);
+            if (contactIds.length === 0) {
+                return [];
+            }
+
+            // STEP C: Query contacts table directly
+            const { data: contactsData, error: contactsError } = await supabase
+                .from(this.tableName)
+                .select('*')
+                .in('contact_id', contactIds);
+
+            if (contactsError) {
+                throw new Error(`[ContactSqlReader] DB Error (Contacts): ${contactsError.message}`);
+            }
+
+            if (!contactsData || contactsData.length === 0) {
+                return [];
+            }
+
+            // STEP D & E: Map contacts via _mapRowToDto and merge link_id back on
+            const contactIdToLinkIdMap = new Map();
+            linkData.forEach(link => {
+                contactIdToLinkIdMap.set(link.contact_id, link.link_id);
+            });
+
+            return contactsData.map(row => {
+                const dto = this._mapRowToDto(row);
+                // Attach linkId dynamically for UI consumption
+                dto.linkId = contactIdToLinkIdMap.get(row.contact_id);
                 return dto;
-            }).filter(Boolean);
+            });
 
         } catch (error) {
             console.error('[ContactSqlReader] getContactsByOpportunityId Error:', error);

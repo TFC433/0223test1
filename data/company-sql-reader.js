@@ -6,8 +6,8 @@
  * - Table: companies
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.0.0
- * - Date: 2026-01-29
+ * - Version: 1.1.0 (Blocker Fix: Added getCompanyList adapter)
+ * - Date: 2026-03-12
  */
 
 const { supabase } = require('../config/supabase');
@@ -16,6 +16,17 @@ class CompanySqlReader {
 
     constructor() {
         this.tableName = 'companies';
+    }
+
+    /**
+     * [Compatibility Adapter]
+     * Exposes getCompanyList to safely satisfy legacy CORE reader dependencies
+     * without modifying service constructor signatures or internal logic.
+     * Resolves TypeError: this.companyReader.getCompanyList is not a function
+     * @returns {Promise<Array<Object>>}
+     */
+    async getCompanyList() {
+        return this.getCompanies();
     }
 
     /**
