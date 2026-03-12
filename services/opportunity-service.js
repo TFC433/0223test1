@@ -4,9 +4,10 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.9.0 (Phase 8.11: Table Data Flow Decoupling - SQL Delegation)
+ * @version 8.9.1 (Phase 8.12: SystemService Migration)
  * @date 2026-03-12
  * @description 
+ * - [PHASE 8.12] Migrated systemReader.getSystemConfig to systemService.
  * - [PHASE 8.11] Overhauled searchOpportunities to delegate native filters to OpportunitySqlReader.
  * - [PHASE 8.8] Removed direct Supabase calls and inline SqlReader instantiations. Fully migrated to injected ContactSqlReader.
  * - [PHASE 8.7] Removed ContactReader from getOpportunityDetails and deleteContactLink. Fully replaced with Supabase SQL joins.
@@ -29,7 +30,7 @@ class OpportunityService {
         interactionReader,
         interactionWriter,
         eventLogReader,
-        systemReader,
+        systemService,
         opportunitySqlReader,
         opportunitySqlWriter,
         eventLogSqlReader, 
@@ -43,7 +44,7 @@ class OpportunityService {
         this.interactionReader = interactionReader;
         this.eventLogReader = eventLogReader;
         this.contactReader = contactReader;
-        this.systemReader = systemReader;
+        this.systemService = systemService;
         this.opportunitySqlReader = opportunitySqlReader;
         this.eventLogSqlReader = eventLogSqlReader; 
         this.companySqlReader = companySqlReader;   
@@ -218,7 +219,7 @@ class OpportunityService {
             
             const oldStage = originalOpportunity.currentStage;
 
-            const systemConfig = await this.systemReader.getSystemConfig();
+            const systemConfig = await this.systemService.getSystemConfig();
             const getNote = (configKey, value) => (systemConfig[configKey] || []).find(i => i.value === value)?.note || value || 'N/A';
             const stageMapping = new Map((systemConfig['機會階段'] || []).map(item => [item.value, item.note]));
             
@@ -435,7 +436,7 @@ class OpportunityService {
         try {
             const [opportunities, systemConfig] = await Promise.all([
                 this._fetchOpportunities(),
-                this.systemReader.getSystemConfig()
+                this.systemService.getSystemConfig()
             ]);
             
             const safeOpportunities = Array.isArray(opportunities) ? opportunities : [];

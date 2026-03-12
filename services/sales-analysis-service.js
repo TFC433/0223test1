@@ -1,21 +1,21 @@
 /**
  * services/sales-analysis-service.js
  * 銷售分析服務
- * * @version 5.0.1 (Phase 5 Refactoring - Response Shape Fix)
- * @date 2026-01-27
+ * * @version 5.0.2 (Phase 5 Refactoring - SystemService Migration)
+ * @date 2026-03-12
  * @description 負責處理成交金額、銷售渠道分析與產品組合統計。
- * 依賴注入：OpportunityReader, SystemReader, Config
+ * 依賴注入：OpportunityReader, SystemService, Config
  */
 
 class SalesAnalysisService {
     /**
      * @param {OpportunityReader} opportunityReader
-     * @param {SystemReader} systemReader
+     * @param {SystemService} systemService
      * @param {Object} config - 系統設定
      */
-    constructor(opportunityReader, systemReader, config) {
+    constructor(opportunityReader, systemService, config) {
         this.opportunityReader = opportunityReader;
-        this.systemReader = systemReader;
+        this.systemService = systemService;
         this.config = config;
         
         // --- !!! 重要設定 !!! ---
@@ -32,7 +32,7 @@ class SalesAnalysisService {
         console.log(`📈 [SalesAnalysisService] 計算成交分析資料...`);
 
         const allOpportunities = await this.opportunityReader.getOpportunities();
-        const systemConfig = await this.systemReader.getSystemConfig();
+        const systemConfig = await this.systemService.getSystemConfig();
 
         // 1. 準備設定資料傳給前端
         // (A) 銷售模式顏色對應表

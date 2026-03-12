@@ -1,8 +1,8 @@
 /**
  * services/product-service.js
  * 商品管理服務
- * * @version 5.2.1 (Phase 4 Optimization)
- * @date 2026-01-13
+ * * @version 5.2.2 (Phase 4 Optimization - SystemService Migration)
+ * @date 2026-03-12
  * @author Gemini (System Architect)
  * @description 負責市場商品資料的查詢、建立與維護。
  * 優化：實作 batchUpdate 的 Dirty Checking (差異更新) 與 Rate Limiting (速率限制) 以解決 429 錯誤。
@@ -12,14 +12,16 @@ class ProductService {
     /**
      * @param {ProductReader} productReader
      * @param {ProductWriter} productWriter
-     * @param {SystemReader} systemReader - 用於讀取分類排序設定
+     * @param {SystemReader} systemReader - 用於讀取分類排序設定 (Cache clearing)
      * @param {SystemWriter} systemWriter - 用於寫入分類排序設定
+     * @param {SystemService} systemService - [Migrated] 用於讀取系統設定
      */
-    constructor(productReader, productWriter, systemReader, systemWriter) {
+    constructor(productReader, productWriter, systemReader, systemWriter, systemService) {
         this.productReader = productReader;
         this.productWriter = productWriter;
         this.systemReader = systemReader;
         this.systemWriter = systemWriter;
+        this.systemService = systemService;
     }
 
     /**
@@ -216,7 +218,7 @@ class ProductService {
      */
     async getCategoryOrder() {
         try {
-            const systemConfig = await this.systemReader.getSystemConfig();
+            const systemConfig = await this.systemService.getSystemConfig();
             
             // 讀取 SystemPref 中的 PRODUCT_CATEGORY_ORDER
             if (systemConfig && systemConfig['SystemPref']) {

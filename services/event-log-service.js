@@ -1,8 +1,9 @@
 /*
  * FILE: services/event-log-service.js
- * VERSION: 8.4.1-BackupFix
- * DATE: 2026-03-06
+ * VERSION: 8.4.2-SystemServiceMigration
+ * DATE: 2026-03-12
  * CHANGELOG:
+ * - Phase 8.4.2: Migrated systemConfig dependency from SystemReader to SystemService.
  * - Phase 8.4.1: Fix Backup logic to use snake_case keys + correct labels.
  * - Phase 8.4: Implemented Type-Change Backup to Notes (Business Logic).
  * - Phase 8.3d: Robust SQL-only write mapping for IoT/DT fields.
@@ -13,7 +14,7 @@ class EventLogService {
    * @param {EventLogReader} eventReader (Deprecated)
    * @param {OpportunityReader} oppReader (Deprecated)
    * @param {CompanyReader} companyReader (Deprecated)
-   * @param {SystemReader} systemReader
+   * @param {SystemService} systemService
    * @param {CalendarService} calendarService
    * @param {EventLogSqlReader} eventLogSqlReader
    * @param {EventLogSqlWriter} eventLogSqlWriter
@@ -22,7 +23,7 @@ class EventLogService {
     eventReader,
     oppReader,
     companyReader,
-    systemReader,
+    systemService,
     calendarService,
     eventLogSqlReader,
     eventLogSqlWriter
@@ -30,7 +31,7 @@ class EventLogService {
     // Deprecated (kept only for legacy cache invalidation safety)
     this.eventReader = eventReader;
 
-    this.systemReader = systemReader;
+    this.systemService = systemService;
     this.calendarService = calendarService;
 
     // SQL (authoritative for Event Logs)
@@ -417,7 +418,7 @@ ${lines.join('\n')}
 
   async getEventTypes() {
     try {
-      const config = await this.systemReader.getSystemConfig();
+      const config = await this.systemService.getSystemConfig();
       return config['事件類型'] || [];
     } catch (error) {
       console.error('[EventLogService] getEventTypes Error:', error);

@@ -4,9 +4,10 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 9.3.0 (Phase 9.3: Absolute Safe SQL-Only CORE Container)
+ * @version 9.3.1 (Phase 9.3.1: DI Wiring Fix for SystemService Migration)
  * @date 2026-03-12
  * @changelog
+ * - [PHASE 9.3.1] Patched dependency injection wiring to securely provide systemService to OpportunityService, EventLogService, SalesAnalysisService, and ProductService.
  * - [PHASE 9.3] Verified and fixed all semantic RAW vs OFFICIAL mismatches in domain logic.
  * - [PHASE 9.3] Successfully and safely eradicated 100% of CORE Legacy Sheet Readers/Writers instantiations.
  * - [PHASE 9.3] Retained contactRawReader explicitly and exclusively for RAW (leads) mapping.
@@ -79,7 +80,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v9.3.0 SQL-Only CORE)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v9.3.1 SQL-Only CORE)...');
 
     try {
         // 1. Infrastructure
@@ -179,6 +180,7 @@ async function initializeServices() {
             interactionWriter: interactionSqlWriter, // interactionWriter => SQL
             eventLogReader: eventLogSqlReader, // eventLogReader => SQL
             systemReader,
+            systemService, // [Patch 9.3.1] Wire newly required systemService
             opportunitySqlReader,
             opportunitySqlWriter,
             eventLogSqlReader,     
@@ -198,7 +200,7 @@ async function initializeServices() {
             eventLogSqlReader, 
             opportunitySqlReader, 
             companySqlReader, 
-            systemReader,
+            systemService, // [Patch 9.3.1] Replaced systemReader with systemService
             calendarService,
             eventLogSqlReader, 
             eventLogSqlWriter  
@@ -217,11 +219,12 @@ async function initializeServices() {
 
         const salesAnalysisService = new SalesAnalysisService(
             opportunitySqlReader, 
-            systemReader, 
+            systemService, // [Patch 9.3.1] Replaced systemReader with systemService
             config
         );
         
-        const productService = new ProductService(productReader, productWriter, systemReader, systemWriter);
+        // [Patch 9.3.1] Appended systemService as 5th argument
+        const productService = new ProductService(productReader, productWriter, systemReader, systemWriter, systemService);
 
         const dashboardService = new DashboardService(
             config,
