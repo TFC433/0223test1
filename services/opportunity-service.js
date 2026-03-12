@@ -4,20 +4,18 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.6.1 (Phase 8.6C Patch: Scoped SQL Opp/Event Fetch)
+ * @version 8.8.0 (Phase 8.8: Architectural Fix - Delegate SQL to Reader)
  * @date 2026-03-11
  * @description 
+ * - [PHASE 8.8] Removed direct Supabase calls and inline SqlReader instantiations. Fully migrated to injected ContactSqlReader.
+ * - [PHASE 8.7] Removed ContactReader from getOpportunityDetails and deleteContactLink. Fully replaced with Supabase SQL joins.
  * - [PHASE 8.6C] Removed full-table Opportunity and EventLog fetches in getOpportunityDetails, utilizing scoped SQL reader methods.
  * - [PHASE 8.6B] Migrated interactions read in getOpportunityDetails to scoped InteractionSqlReader.
- * - [PHASE 8.6B] Wrapped contactReader.getContacts() in catch([]) to prevent Sheet errors from crashing the page.
  * - [PHASE 8.5] Removed dead dependency OpportunityReader.
  * - [PHASE 8.5] Replaced companyReader with companySqlReader in deleteOpportunity.
  * - [FIX-1] Locked _fetchOpportunities to SQL Reader only (No Sheet fallback).
  * - [FIX-2] Enforced hard contract on batchUpdateOpportunities (Throw on missing ID).
- * - [FIX-3] Explicitly marked RAW Contact Upgrade boundary.
  * - [PHASE 7] Migrated Contact Linking (Add/Delete) to SQL Writer.
- * - [PHASE 8 FIX] Switched getOpportunityDetails to use EventLogSqlReader for events.
- * - [PHASE 8.4 PATCH] Injected companySqlReader & migrated getOpportunitiesByCounty to strictly use SQL.
  */
 
 class OpportunityService {
@@ -36,6 +34,7 @@ class OpportunityService {
      * @param {EventLogSqlReader} eventLogSqlReader
      * @param {CompanySqlReader} companySqlReader
      * @param {InteractionSqlReader} interactionSqlReader
+     * @param {ContactSqlReader} contactSqlReader
      */
     constructor({
         config,
@@ -51,7 +50,8 @@ class OpportunityService {
         opportunitySqlWriter,
         eventLogSqlReader, // [Phase 8 Fix] Inject SQL Reader
         companySqlReader,  // [Phase 8.4 Patch] Inject SQL Reader
-        interactionSqlReader // [Phase 8.6B] Inject Scoped SQL Reader
+        interactionSqlReader, // [Phase 8.6B] Inject Scoped SQL Reader
+        contactSqlReader // [Phase 8.8] Inject Scoped SQL Reader
     }) {
         this.config = config;
         
@@ -64,6 +64,7 @@ class OpportunityService {
         this.eventLogSqlReader = eventLogSqlReader; // [Phase 8 Fix] Store SQL Reader
         this.companySqlReader = companySqlReader;   // [Phase 8.4 Patch] Store SQL Reader
         this.interactionSqlReader = interactionSqlReader; // [Phase 8.6B] Store SQL Reader
+        this.contactSqlReader = contactSqlReader; // [Phase 8.8] Store SQL Reader
 
         // Writers
         this.opportunityWriter = opportunityWriter;
@@ -73,9 +74,6 @@ class OpportunityService {
         this.opportunitySqlWriter = opportunitySqlWriter;
     }
 
-    /**
-     * 標準化公司名稱的輔助函式
-     */
     _normalizeCompanyName(name) {
         if (!name) return '';
         return name
@@ -86,23 +84,13 @@ class OpportunityService {
             .trim();
     }
 
-    /**
-     * [Phase 7 Boundary Fix v1] 統一資料獲取入口 - SQL ONLY
-     * [FIX-1] Lock Read World to SQL ONLY
-     */
     async _fetchOpportunities() {
-        // Strict enforcement: OpportunitySqlReader is required.
-        // No fallback to Sheet Reader is allowed in CORE logic.
         if (!this.opportunitySqlReader) {
             throw new Error("[Phase7 Boundary Violation] OpportunitySqlReader is required");
         }
-        
         return await this.opportunitySqlReader.getOpportunities();
     }
 
-    /**
-     * 輔助函式：建立一筆機會互動日誌
-     */
     async _logOpportunityInteraction(opportunityId, title, summary, modifier) {
         try {
             await this.interactionWriter.createInteraction({
@@ -118,9 +106,6 @@ class OpportunityService {
         }
     }
 
-    /**
-     * 建立新機會案件
-     */
     async createOpportunity(opportunityData, user) {
         try {
             const modifier = user.displayName || user.username || 'System';
@@ -133,29 +118,22 @@ class OpportunityService {
         }
     }
 
-    /**
-     * 高效獲取機會案件的完整詳細資料
-     */
     async getOpportunityDetails(opportunityId) {
         try {
-            // [Phase 8.6C] Fetch Self Opportunity first to resolve parent ID for scoped queries
             const opportunityInfo = await this.opportunitySqlReader.getOpportunityById(opportunityId);
             if (!opportunityInfo) {
                 throw new Error(`找不到機會ID為 ${opportunityId} 的案件`);
             }
 
-            // [Phase 8 Fix] Ensure eventLogSqlReader is available
             if (!this.eventLogSqlReader) {
                 console.warn('[OpportunityService] EventLogSqlReader missing, falling back to legacy reader (Data may be stale).');
             }
             const eventReader = this.eventLogSqlReader || this.eventLogReader;
 
-            // [Phase 8.6B] Use scoped SQL for interactions
             const interactionPromise = this.interactionSqlReader 
                 ? this.interactionSqlReader.getInteractionsByOpportunityIds([opportunityId])
                 : this.interactionReader.getInteractions().then(all => all.filter(i => i.opportunityId === opportunityId));
 
-            // [Phase 8.6C] Scoped queries for Parent, Children, and Events
             const parentPromise = opportunityInfo.parentOpportunityId 
                 ? this.opportunitySqlReader.getOpportunityById(opportunityInfo.parentOpportunityId)
                 : Promise.resolve(null);
@@ -166,79 +144,59 @@ class OpportunityService {
                 ? this.eventLogSqlReader.getEventLogsByOpportunityId(opportunityId)
                 : eventReader.getEventLogs().then(all => all.filter(e => e.opportunityId === opportunityId));
 
+            // [Phase 8.8] Delegate SQL completely to SqlReader
+            const linksPromise = this.contactSqlReader 
+                ? this.contactSqlReader.getContactsByOpportunityId(opportunityId)
+                : Promise.resolve([]);
+                
+            const allCompaniesPromise = this.companySqlReader.getCompanies();
+
             const [
                 parentOpportunity,
                 childOpportunities,
                 scopedInteractions, 
                 scopedEventLogs, 
-                allLinks,
-                allOfficialContacts,
-                allPotentialContacts
+                linkedContactsFromCache,
+                allCompanies
             ] = await Promise.all([
                 parentPromise,
                 childPromise,
-                interactionPromise, // [Phase 8.6B] Scoped SQL Fetch
-                eventPromise, // [Phase 8.6C] Scoped SQL Fetch
-                this.contactReader.getAllOppContactLinks(),
-                this.contactReader.getContactList(),
-                // [Phase 8.6B] Isolate RAW contacts fetch failure to prevent page crash
-                this.contactReader.getContacts().catch(e => {
-                    console.warn(`[OpportunityService] Failed to load potential contacts (Sheet error): ${e.message}`);
-                    return [];
-                })
+                interactionPromise, 
+                eventPromise, 
+                linksPromise,
+                allCompaniesPromise
             ]);
 
-            const safeGet = (obj, keys) => {
-                for (const k of keys) {
-                    if (obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
-                }
-                return undefined;
-            };
-
-            const normalizeStr = (v) => (v === undefined || v === null) ? '' : String(v).trim();
-
-            const linkedContactsFromCache = (allLinks || [])
-                .filter(link => {
-                    const linkOppId = normalizeStr(safeGet(link, ['opportunityId', 'oppId', 'opportunity_id']));
-                    if (!linkOppId) return false;
-
-                    const statusVal = normalizeStr(safeGet(link, ['status', 'linkStatus', 'state'])).toLowerCase();
-                    const isActive = !statusVal || statusVal === 'active';
-
-                    return linkOppId === normalizeStr(opportunityId) && isActive;
-                })
-                .map(link => {
-                    const linkContactId = normalizeStr(safeGet(link, ['contactId', 'id', 'contact_id']));
-                    if (!linkContactId) return null;
-
-                    const contact = (allOfficialContacts || []).find(c => normalizeStr(c.contactId) === linkContactId);
-                    if (!contact) return null;
-
-                    const linkId = safeGet(link, ['linkId', 'id', 'rowId', 'rowIndex']);
-                    return { ...contact, linkId: linkId };
-                })
-                .filter(Boolean);
+            const linkedContacts = (linkedContactsFromCache || []).map(contact => ({
+                ...contact,
+                position: contact.jobTitle || contact.position 
+            }));
             
-            // [Phase 8.6B] Interactions are already scoped, only sorting is required
             const interactions = (scopedInteractions || [])
                 .sort((a, b) => new Date(b.interactionTime || b.createdTime) - new Date(a.interactionTime || a.createdTime));
 
-            // [Phase 8.6C] Events are already scoped, just sort them
             const eventLogs = (scopedEventLogs || [])
                 .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
 
             const normalizedOppCompany = this._normalizeCompanyName(opportunityInfo.customerCompany);
             
-            const potentialContacts = (allPotentialContacts || []).filter(pc => {
-                const normalizedPcCompany = this._normalizeCompanyName(pc.company);
-                return normalizedPcCompany && normalizedOppCompany && normalizedPcCompany === normalizedOppCompany;
-            });
+            const matchedCompany = (allCompanies || []).find(c => this._normalizeCompanyName(c.companyName) === normalizedOppCompany);
+            
+            let potentialContacts = [];
+            if (matchedCompany && this.contactSqlReader) {
+                const companyContacts = await this.contactSqlReader.getContactsByCompanyId(matchedCompany.companyId);
+                potentialContacts = companyContacts.map(c => ({
+                    ...c,
+                    company: matchedCompany.companyName,
+                    position: c.jobTitle || c.position
+                }));
+            }
 
             let mainContactJobTitle = '';
             const targetName = (opportunityInfo.mainContact || '').trim();
             
             if (targetName) {
-                const linkedMatch = linkedContactsFromCache.find(c => c.name === targetName);
+                const linkedMatch = linkedContacts.find(c => c.name === targetName);
                 if (linkedMatch && linkedMatch.position) {
                     mainContactJobTitle = linkedMatch.position;
                 } 
@@ -246,15 +204,7 @@ class OpportunityService {
                     const potentialMatch = potentialContacts.find(pc => pc.name === targetName); 
                     if (potentialMatch && potentialMatch.position) {
                         mainContactJobTitle = potentialMatch.position;
-                    } else {
-                        const fallbackMatch = (allPotentialContacts || []).find(pc => 
-                            pc.name === targetName && 
-                            this._normalizeCompanyName(pc.company) === normalizedOppCompany
-                        );
-                        if (fallbackMatch && fallbackMatch.position) {
-                            mainContactJobTitle = fallbackMatch.position;
-                        }
-                    }
+                    } 
                 }
             }
             opportunityInfo.mainContactJobTitle = mainContactJobTitle;
@@ -263,7 +213,7 @@ class OpportunityService {
                 opportunityInfo,
                 interactions,
                 eventLogs,
-                linkedContacts: linkedContactsFromCache,
+                linkedContacts,
                 potentialContacts,
                 parentOpportunity,
                 childOpportunities
@@ -274,9 +224,6 @@ class OpportunityService {
         }
     }
 
-    /**
-     * 更新機會案件，並自動新增多種互動紀錄
-     */
     async updateOpportunity(opportunityId, updateData, user) {
         try {
             const modifier = user.displayName || user.username || 'System';
@@ -333,9 +280,6 @@ class OpportunityService {
         }
     }
     
-    /**
-     * 將一個聯絡人關聯到機會案件的工作流
-     */
     async addContactToOpportunity(opportunityId, contactData, user) {
         try {
             const modifier = user.displayName || user.username || 'System';
@@ -352,11 +296,6 @@ class OpportunityService {
                 const contactCompanyData = await this.companyWriter.getOrCreateCompany(contactData.company, contactData, modifier, {});
                 contactToLink = await this.contactWriter.getOrCreateContact(contactData, contactCompanyData, modifier);
 
-                // ================================
-                // RAW CONTACT UPGRADE ZONE
-                // Scope: IDS.RAW ONLY (Contact Module)
-                // rowIndex usage is ALLOWED here (Contact is not Phase 7)
-                // ================================
                 if (contactData.rowIndex) {
                     logTitle = '從潛在客戶關聯';
                     await this.contactWriter.updateContactStatus(
@@ -366,8 +305,6 @@ class OpportunityService {
                 }
             }
 
-            // [Phase 7 Migration] SQL Write Authority
-            // Old: await this.opportunityWriter.linkContactToOpportunity(opportunityId, contactToLink.id, modifier);
             const linkResult = await this.opportunitySqlWriter.linkContact(opportunityId, contactToLink.id, modifier);
             
             await this._logOpportunityInteraction(
@@ -384,19 +321,17 @@ class OpportunityService {
         }
     }
 
-    /**
-     * 刪除機會與聯絡人的關聯
-     */
     async deleteContactLink(opportunityId, contactId, user) {
         try {
             const modifier = user.displayName || user.username || 'System';
             
-            const allContacts = await this.contactReader.getContactList();
-            const contact = allContacts.find(c => c.contactId === contactId);
+            // [Phase 8.8] Safe degradation based on DI
+            const contact = this.contactSqlReader 
+                ? await this.contactSqlReader.getContactById(contactId)
+                : (await this.contactReader.getContactList()).find(c => c.contactId === contactId);
+                
             const contactName = contact ? contact.name : `ID ${contactId}`;
 
-            // [Phase 7 Migration] SQL Write Authority
-            // Old: await this.opportunityWriter.deleteContactLink(opportunityId, contactId);
             const deleteResult = await this.opportunitySqlWriter.unlinkContact(opportunityId, contactId);
 
             if (deleteResult.success) {
@@ -415,9 +350,6 @@ class OpportunityService {
         }
     }
 
-    /**
-     * 刪除一筆機會案件
-     */
     async deleteOpportunity(opportunityId, user) {
         try {
             const modifier = user.displayName || user.username || 'System';
@@ -459,9 +391,6 @@ class OpportunityService {
         }
     }
 
-    /**
-     * 根據日期範圍獲取機會案件
-     */
     async getOpportunitiesByDateRange(startDate, endDate, dateField = 'createdTime') {
         try {
             const allOpportunities = await this._fetchOpportunities();
@@ -481,12 +410,8 @@ class OpportunityService {
         }
     }
 
-    /**
-     * [Standard A] 獲取縣市分佈統計
-     */
     async getOpportunitiesByCounty(opportunityType = null) {
         try {
-            // [Phase 8.4 Patch] Fetch completely via SQL Readers
             const [allOpportunities, companies] = await Promise.all([
                 this._fetchOpportunities(),
                 this.companySqlReader.getCompanies()
@@ -505,7 +430,6 @@ class OpportunityService {
             
             (companies || []).forEach(c => {
                 if (c.companyName) {
-                    // Support DTO shapes (county from legacy/hybrid logic, city from raw SQL mapping)
                     companyToCountyMap.set(normalize(c.companyName), c.county || c.city);
                 }
             });
@@ -526,9 +450,6 @@ class OpportunityService {
         }
     }
 
-    /**
-     * [Standard A] 按階段聚合機會案件
-     */
     async getOpportunitiesByStage() {
         try {
             const [opportunities, systemConfig] = await Promise.all([
@@ -560,9 +481,6 @@ class OpportunityService {
         }
     }
 
-    /**
-     * [Standard A] 搜尋機會案件
-     */
     async searchOpportunities(query, page, filters) {
         try {
             let items = await this._fetchOpportunities();
@@ -608,10 +526,6 @@ class OpportunityService {
         }
     }
 
-    /**
-     * 批量更新機會案件
-     * [FIX-2] Enforce Hard Contract (Fail Fast on missing ID)
-     */
     async batchUpdateOpportunities(updates) {
         let successCount = 0;
         

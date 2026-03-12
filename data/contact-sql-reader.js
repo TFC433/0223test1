@@ -6,9 +6,9 @@
  * - Table: contacts
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.2.0
+ * - Version: 1.3.0
  * - Date: 2026-03-11
- * - Changelog: Added getContactsByCompanyId for Phase 8.1 SQL-first queries. Phase 1 SQL Aggregation: Added getContactStats.
+ * - Changelog: Added getContactsByOpportunityId to abstract SQL JOINs out of Service layer. Added getContactsByCompanyId for Phase 8.1 SQL-first queries. Phase 1 SQL Aggregation: Added getContactStats.
  */
 
 const { supabase } = require('../config/supabase');
@@ -104,6 +104,45 @@ class ContactSqlReader {
 
         } catch (error) {
             console.error('[ContactSqlReader] getContactsByCompanyId Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get contacts linked to a specific opportunity
+     * Performs SQL JOIN on opportunity_contact_links
+     * @param {string} opportunityId 
+     * @returns {Promise<Array<Object>>} Array of Contact DTOs with linkId attached
+     */
+    async getContactsByOpportunityId(opportunityId) {
+        if (!opportunityId) throw new Error('ContactSqlReader: opportunityId is required');
+
+        try {
+            const { data, error } = await supabase
+                .from('opportunity_contact_links')
+                .select(`
+                    link_id,
+                    status,
+                    contacts (*)
+                `)
+                .eq('opportunity_id', opportunityId)
+                .eq('status', 'active');
+
+            if (error) {
+                throw new Error(`[ContactSqlReader] DB Error: ${error.message}`);
+            }
+
+            if (!data) return [];
+
+            return data.map(row => {
+                if (!row.contacts) return null;
+                const dto = this._mapRowToDto(row.contacts);
+                dto.linkId = row.link_id; // Preserve link_id for UI
+                return dto;
+            }).filter(Boolean);
+
+        } catch (error) {
+            console.error('[ContactSqlReader] getContactsByOpportunityId Error:', error);
             throw error;
         }
     }
