@@ -3,7 +3,7 @@
  * VERSION: 8.4.2-SystemServiceMigration
  * DATE: 2026-03-12
  * CHANGELOG:
- * - Phase 8.4.2: Migrated systemConfig dependency from SystemReader to SystemService.
+ * - Phase 8.4.2: Migrated getSystemConfig from deprecated SystemReader to SystemService.
  * - Phase 8.4.1: Fix Backup logic to use snake_case keys + correct labels.
  * - Phase 8.4: Implemented Type-Change Backup to Notes (Business Logic).
  * - Phase 8.3d: Robust SQL-only write mapping for IoT/DT fields.
@@ -31,7 +31,7 @@ class EventLogService {
     // Deprecated (kept only for legacy cache invalidation safety)
     this.eventReader = eventReader;
 
-    this.systemService = systemService;
+    this.systemService = systemService; // [Patch 2026-03-12]
     this.calendarService = calendarService;
 
     // SQL (authoritative for Event Logs)
@@ -418,6 +418,7 @@ ${lines.join('\n')}
 
   async getEventTypes() {
     try {
+      // [Patch 2026-03-12] Migrated to SystemService
       const config = await this.systemService.getSystemConfig();
       return config['事件類型'] || [];
     } catch (error) {

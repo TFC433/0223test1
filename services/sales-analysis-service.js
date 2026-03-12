@@ -5,6 +5,8 @@
  * @date 2026-03-12
  * @description 負責處理成交金額、銷售渠道分析與產品組合統計。
  * 依賴注入：OpportunityReader, SystemService, Config
+ * @changelog
+ * - [2026-03-12] Migrated getSystemConfig from deprecated SystemReader to SystemService.
  */
 
 class SalesAnalysisService {
@@ -15,7 +17,7 @@ class SalesAnalysisService {
      */
     constructor(opportunityReader, systemService, config) {
         this.opportunityReader = opportunityReader;
-        this.systemService = systemService;
+        this.systemService = systemService; // [Patch 2026-03-12]
         this.config = config;
         
         // --- !!! 重要設定 !!! ---
@@ -32,6 +34,7 @@ class SalesAnalysisService {
         console.log(`📈 [SalesAnalysisService] 計算成交分析資料...`);
 
         const allOpportunities = await this.opportunityReader.getOpportunities();
+        // [Patch 2026-03-12] Migrated to SystemService
         const systemConfig = await this.systemService.getSystemConfig();
 
         // 1. 準備設定資料傳給前端
