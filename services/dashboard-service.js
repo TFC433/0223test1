@@ -4,14 +4,15 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version [Patch] Dashboard DEBUG cleanup
+ * @version v1.1.0 Dashboard Parallel Fetch Optimization
  * @date 2026-03-12
  * @changelog
+ * - [PERF] Parallelized dashboard data fetch groups (Batch1, Batch2, Batch3, Weekly) to reduce first-load latency.
+ * - [PERF] Eliminated full contacts table hydration from dashboard flow.
+ * - [PERF] Introduced O(1) latestInteractionMap lookup to replace nested interaction scans.
+ * - [PERF] Introduced targeted MTU/SI event activity projection to avoid full event_logs hydration.
+ * - [CLEANUP] Removed temporary performance instrumentation used during forensics.
  * - Removed DashboardService DEBUG console logs
- * * [Performance Fix] Removed full contacts table fetch from dashboard flow.
- * * [Performance Fix] Delegated recentActivity generation to SQL readers to minimize data transfer.
- * * [Performance Fix] Optimized _getFollowUpOpportunities from O(N*M) nested loop to O(1) Map lookup.
- * * [Performance Fix] Pre-filtered MTU/SI event_logs via targeted minimal projection query, avoiding full table hydration.
  */
 
 class DashboardService {
@@ -81,108 +82,133 @@ class DashboardService {
 
     /**
      * 取得主儀表板所需的所有整合資料
-     * 採用分批請求 (Batching) 以優化效能
+     * 採用分批請求 (Batching) 與 Promise.all 並行處理以優化效能
      */
     async getDashboardData() {
-        console.log('📊 [DashboardService] 執行主儀表板資料整合 (SQL-Only Mode)...');
+        console.log('📊 [DashboardService] 執行主儀表板資料整合 (SQL-Only Mode, Parallelized)...');
 
         const today = new Date();
         const thisWeekId = this._getWeekId(today);
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-        // --- Batch 1: 核心業務資料 ---
-        // [Performance Fix] Removed this.contactSqlReader.getContacts() from core fetch
-        console.log('   ↳ 正在載入核心資料 (Batch 1)...');
-        const [
-            opportunitiesRaw,
-            interactions
-        ] = await Promise.all([
-            this.opportunitySqlReader.getOpportunities(),
-            this.interactionSqlReader.getInteractions()
-        ]);
-
-        // --- Batch 2: 次要/參考資料 ---
-        console.log('   ↳ 正在載入參考資料 (Batch 2)...');
-        
-        const calendarPromise = this.calendarService ? this.calendarService.getThisWeekEvents() : Promise.resolve({ todayEvents: [], todayCount: 0, weekCount: 0 });
+        // --- Parallel Fetch Architecture ---
+        // Shared Promise: Company data is needed by both Batch 2 (reference data) and Batch 3 (MTU/SI stats).
+        // Hoisted to avoid duplicate SQL reads across concurrent batches.
         const companyPromise = this.companySqlReader ? this.companySqlReader.getCompanies() : Promise.resolve([]);
-        // [Performance Fix] Removed eventLogPromise full hydration from Batch 2
-        const systemPromise = this.systemService ? this.systemService.getSystemConfig() : Promise.resolve({});
-        
-        // [Performance Fix] Fetch strictly limited top 5 contacts for feed to bypass full table load
-        const recentContactsPromise = typeof this.contactSqlReader.getRecentContactsFeed === 'function' 
-            ? this.contactSqlReader.getRecentContactsFeed(5)
-            : Promise.resolve([]);
 
-        const [
-            calendarData,
-            systemConfig,
-            companies,
-            recentContactsRaw
-        ] = await Promise.all([
-            calendarPromise,
-            systemPromise,
-            companyPromise,
-            recentContactsPromise
+        // =================================================================
+        // Parallel Data Fetch Groups
+        // =================================================================
+
+        // --- Batch 1: Core Business Data ---
+        // Responsibilities: Fetch primary entities (Opportunities, Interactions) required for active kanban and activity feeds.
+        const batch1Promise = (async () => {
+            const oppPromise = this.opportunitySqlReader.getOpportunities();
+            const intPromise = this.interactionSqlReader.getInteractions();
+            return await Promise.all([oppPromise, intPromise]);
+        })();
+
+        // --- Batch 2: Secondary / Reference Data ---
+        // Responsibilities: Fetch calendar events, system configuration, companies, and a lightweight contact feed.
+        const batch2Promise = (async () => {
+            const calendarPromise = this.calendarService ? this.calendarService.getThisWeekEvents() : Promise.resolve({ todayEvents: [], todayCount: 0, weekCount: 0 });
+            const systemPromise = this.systemService ? this.systemService.getSystemConfig() : Promise.resolve({});
+            
+            // Performance Fix: Fetch strictly limited top 5 contacts for feed to bypass full table load, saving memory and DB time.
+            const recentContactsPromise = typeof this.contactSqlReader.getRecentContactsFeed === 'function' 
+                ? this.contactSqlReader.getRecentContactsFeed(5)
+                : Promise.resolve([]);
+
+            return await Promise.all([
+                calendarPromise,
+                systemPromise,
+                companyPromise,
+                recentContactsPromise
+            ]);
+        })();
+
+        // --- Batch 3: SQL Aggregation Stats ---
+        // Responsibilities: Offload heavy COUNT/GROUP BY operations to the SQL layer (Contacts, Opportunities, EventLogs).
+        const batch3Promise = (async () => {
+            const contactStatsPromise = this.contactSqlReader.getContactStats(startOfMonth);
+            const opportunityStatsPromise = this.opportunitySqlReader.getOpportunityStats(startOfMonth);
+            const eventStatsPromise = this.eventLogSqlReader.getEventLogStats(startOfMonth);
+
+            // Await companies specifically to build MTU/SI target IDs
+            const companies = await companyPromise;
+            
+            const normalize = (name) => (name || '').trim().toLowerCase();
+            const isStrictMTU = (type) => normalize(type) === 'mtu';
+            const isSI = (type) => /SI|系統整合|System Integrator/i.test(type || '');
+
+            const targetCompanyIds = companies
+                .filter(c => isStrictMTU(c.companyType) || isSI(c.companyType))
+                .map(c => c.companyId)
+                .filter(Boolean);
+
+            // Performance Fix: Targeted MTU/SI event activity projection to avoid full event_logs hydration.
+            const eventActivityPromise = typeof this.companySqlReader.getTargetCompanyEventActivities === 'function' && targetCompanyIds.length > 0
+                ? this.companySqlReader.getTargetCompanyEventActivities(targetCompanyIds)
+                : Promise.resolve([]);
+
+            return await Promise.all([
+                contactStatsPromise,
+                opportunityStatsPromise,
+                eventStatsPromise,
+                eventActivityPromise
+            ]);
+        })();
+
+        // --- Weekly Details: Weekly Business Data Integration ---
+        const weeklyPromise = (async () => {
+            let thisWeeksEntries = [];
+            let thisWeekDetails = { title: '載入中...', days: [] };
+
+            if (this.weeklyBusinessService) {
+                try {
+                    const fullDetails = await this.weeklyBusinessService.getWeeklyDetails(thisWeekId);
+                    if (fullDetails) {
+                        thisWeekDetails = fullDetails;
+                        thisWeeksEntries = fullDetails.entries || [];
+                    }
+                } catch (error) {
+                    console.error(`[DashboardService] 週間業務載入失敗 (${thisWeekId}):`, error.message);
+                    thisWeekDetails = {
+                        title: `Week ${thisWeekId} (載入失敗)`,
+                        days: [],
+                        month: today.getMonth() + 1,
+                        weekOfMonth: '?',
+                        shortDateRange: ''
+                    };
+                }
+            }
+            return { thisWeeksEntries, thisWeekDetails };
+        })();
+
+        // =================================================================
+        // Resolve All Parallel Groups
+        // =================================================================
+        const [batch1Result, batch2Result, batch3Result, weeklyResult] = await Promise.all([
+            batch1Promise,
+            batch2Promise,
+            batch3Promise,
+            weeklyPromise
         ]);
 
-        // --- 提前計算 MTU/SI 目標清單以優化 SQL 查詢 ---
+        // =================================================================
+        // 資料處理與統計邏輯 (Post-Fetch Aggregation)
+        // =================================================================
+        const [opportunitiesRaw, interactions] = batch1Result;
+        const [calendarData, systemConfig, companies, recentContactsRaw] = batch2Result;
+        const [contactStats, opportunityStats, eventStats, eventActivities] = batch3Result;
+        const { thisWeeksEntries, thisWeekDetails } = weeklyResult;
+
         const normalize = (name) => (name || '').trim().toLowerCase();
         const isStrictMTU = (type) => normalize(type) === 'mtu';
         const isSI = (type) => /SI|系統整合|System Integrator/i.test(type || '');
 
-        const targetCompanyIds = companies
-            .filter(c => isStrictMTU(c.companyType) || isSI(c.companyType))
-            .map(c => c.companyId)
-            .filter(Boolean);
-
-        // [Performance Fix] Fetch explicitly projected, targeted event_logs instead of the full table
-        const eventActivityPromise = typeof this.companySqlReader.getTargetCompanyEventActivities === 'function' && targetCompanyIds.length > 0
-            ? this.companySqlReader.getTargetCompanyEventActivities(targetCompanyIds)
-            : Promise.resolve([]);
-
-        // --- Batch 3: SQL Aggregation Stats (Phase 1) ---
-        console.log('   ↳ 正在載入統計資料 (Batch 3)...');
-        const [
-            contactStats,
-            opportunityStats,
-            eventStats,
-            eventActivities // Projected list: { company_id, created_time }
-        ] = await Promise.all([
-            this.contactSqlReader.getContactStats(startOfMonth),
-            this.opportunitySqlReader.getOpportunityStats(startOfMonth),
-            this.eventLogSqlReader.getEventLogStats(startOfMonth),
-            eventActivityPromise
-        ]);
-
-        // --- 週間業務資料整合 ---
-        let thisWeeksEntries = [];
-        let thisWeekDetails = { title: '載入中...', days: [] };
-
-        if (this.weeklyBusinessService) {
-            try {
-                const fullDetails = await this.weeklyBusinessService.getWeeklyDetails(thisWeekId);
-                if (fullDetails) {
-                    thisWeekDetails = fullDetails;
-                    thisWeeksEntries = fullDetails.entries || [];
-                }
-            } catch (error) {
-                console.error(`[DashboardService] 週間業務載入失敗 (${thisWeekId}):`, error.message);
-                thisWeekDetails = {
-                    title: `Week ${thisWeekId} (載入失敗)`,
-                    days: [],
-                    month: today.getMonth() + 1,
-                    weekOfMonth: '?',
-                    shortDateRange: ''
-                };
-            }
-        }
-
-        // =================================================================
-        // 資料處理與統計邏輯
-        // =================================================================
-
         // 1. 計算機會最後活動時間
+        // Performance Fix: O(1) Map lookup replaces nested interaction scans (O(N*M))
         const latestInteractionMap = new Map();
         interactions.forEach(interaction => {
             const existingTimestamp = latestInteractionMap.get(interaction.opportunityId) || 0;
@@ -233,7 +259,7 @@ class DashboardService {
             if (cId) recordActivity(cId, opp.createdTime);
         });
         
-        // [Performance Fix] Iterate over heavily targeted, minimal DB projection (using raw snake_case keys)
+        // Iterate over heavily targeted, minimal DB projection (using raw snake_case keys)
         eventActivities.forEach(e => e.company_id && recordActivity(e.company_id, e.created_time));
 
         let mtuCount = 0;
@@ -279,7 +305,7 @@ class DashboardService {
             return new Date(dateStr) >= startOfMonth;
         }).length;
 
-        // [Performance Fix] 傳遞已預先計算的 latestInteractionMap，消滅 O(N*M) 巢狀迴圈
+        // 傳遞已預先計算的 latestInteractionMap，消滅 O(N*M) 巢狀迴圈
         const followUps = this._getFollowUpOpportunities(opportunities, latestInteractionMap);
 
         const stats = {
@@ -314,7 +340,7 @@ class DashboardService {
 
         const kanbanData = this._prepareKanbanData(opportunities, systemConfig);
         
-        // [Performance Fix] 嚴格重現 Recent Activity 合併邏輯，但不拉取 Contacts 全表
+        // 嚴格重現 Recent Activity 合併邏輯，但不拉取 Contacts 全表
         const recentActivity = this._prepareRecentActivity(interactions, recentContactsRaw, opportunities, companies, 5);
         
         const thisWeekInfoForDashboard = {
