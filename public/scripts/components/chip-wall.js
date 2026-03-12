@@ -1,5 +1,9 @@
 // views/scripts/components/chip-wall.js
-// (Stability Overhaul: Zero-Dimension Fix + Event Delegation)
+/**
+ * @version 1.1.2
+ * @date 2026-03-12
+ * @description (Stability Overhaul: Zero-Dimension Fix + Backend effectiveLastActivity trust + opportunityId route fix)
+ */
 
 class ChipWall {
     constructor(containerSelector, options = {}) {
@@ -9,7 +13,6 @@ class ChipWall {
         this.options = {
             stages: [],
             items: [],
-            interactions: [],
             colorConfigKey: '機會種類',
             isDraggable: false,
             isCollapsible: false,
@@ -24,7 +27,9 @@ class ChipWall {
         this.viewMode = localStorage.getItem('chipWallViewMode') || 'grid';
         this.filters = { type: 'all', source: 'all', time: 'all', year: 'all' };
         this.availableYears = []; 
-        this.allItems = this._processAllItems(JSON.parse(JSON.stringify(this.options.items)), this.options.interactions);
+        
+        // Phase 8.2: No longer passing interactions payload. Trusting backend item.effectiveLastActivity.
+        this.allItems = this._processAllItems(JSON.parse(JSON.stringify(this.options.items)));
         
         const yearSet = new Set(this.allItems.map(item => item.creationYear).filter(Boolean));
         this.availableYears = Array.from(yearSet).sort((a, b) => b - a); 
@@ -45,19 +50,12 @@ class ChipWall {
         this.resizeObserver = new ResizeObserver(this._handleResize);
     }
 
-    _processAllItems(items, interactions) {
-        const latestInteractionMap = new Map();
-        (interactions || []).forEach(interaction => {
-            const id = interaction.opportunityId;
-            const existing = latestInteractionMap.get(id) || 0;
-            const current = new Date(interaction.interactionTime || interaction.createdTime).getTime();
-            if (current > existing) latestInteractionMap.set(id, current);
-        });
-
+    _processAllItems(items) {
         return items.map(item => {
-            const selfUpdate = new Date(item.lastUpdateTime || item.createdTime).getTime();
-            const lastInteraction = latestInteractionMap.get(item.opportunityId) || 0;
-            item.effectiveLastActivity = Math.max(selfUpdate, lastInteraction);
+            // Trust backend DTO effectiveLastActivity with strict fallback guard honoring legacy timestamp keys
+            if (typeof item.effectiveLastActivity !== 'number' || Number.isNaN(item.effectiveLastActivity)) {
+                item.effectiveLastActivity = new Date(item.lastUpdateTime || item.createdTime || 0).getTime();
+            }
             
             const year = item.createdTime ? new Date(item.createdTime).getFullYear() : null;
             item.creationYear = year;
@@ -314,7 +312,6 @@ class ChipWall {
             <div class="opportunity-chip" 
                  ${draggableAttr}
                  data-item-id="${item.opportunityId}" 
-                 data-item-row-index="${item.rowIndex}"
                  style="--chip-color: ${color};"
                  title="${item.opportunityName}">
                 ${item.opportunityName}
@@ -409,7 +406,6 @@ class ChipWall {
         const chip = e.target.closest('.opportunity-chip');
         if (!chip) return;
         e.dataTransfer.setData('text/plain', chip.dataset.itemId);
-        e.dataTransfer.setData('text/rowIndex', chip.dataset.itemRowIndex);
         setTimeout(() => chip.classList.add('dragging'), 0);
     }
 
@@ -440,7 +436,6 @@ class ChipWall {
         
         block.classList.remove('drag-over');
         const opportunityId = e.dataTransfer.getData('text/plain');
-        const rowIndex = e.dataTransfer.getData('text/rowIndex');
         const newStageId = block.dataset.stageId;
         
         const item = this.allItems.find(i => i.opportunityId === opportunityId);
@@ -452,7 +447,7 @@ class ChipWall {
             historySet.add(`C:${newStageId}`); 
             const newStageHistory = Array.from(historySet).join(',');
             
-            const result = await authedFetch(`/api/opportunities/${rowIndex}`, {
+            const result = await authedFetch(`/api/opportunities/${opportunityId}`, {
                 method: 'PUT',
                 body: JSON.stringify({ 
                     currentStage: newStageId, 

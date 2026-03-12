@@ -1,6 +1,10 @@
 // public/scripts/opportunities/opportunities.js
-// 職責：管理「機會案件列表頁」的圖表、篩選、列表渲染與操作
-// (V-Layout-Optimized & Event Delegation: 篩選器右上角、搜尋欄獨立行、屏蔽晶片牆、精簡日期與欄位、移除 onclick)
+/**
+ * 職責：管理「機會案件列表頁」的圖表、篩選、列表渲染與操作
+ * @version 7.2.4
+ * @date 2026-03-12
+ * @description [Performance Patch] Removed redundant interactions fetch. Frontend strict fallback relies strictly on exact existing DTO timestamp contract. Unified stale signaling via dashboardManager.markStale(). Converged channel text fallback.
+ */
 
 // ==================== 全域變數 (此頁面專用) ====================
 let opportunitiesData = [];
@@ -80,11 +84,11 @@ async function loadOpportunities(query = '') {
         </div>
     `;
 
-    // 2. 綁定事件委派 (移除舊的，綁定新的)
+    // 2. 綁定事件委派
     container.removeEventListener('click', handleOpportunitiesClick);
     container.addEventListener('click', handleOpportunitiesClick);
     
-    // 綁定搜尋事件 (keyup 仍維持直接綁定)
+    // 綁定搜尋事件
     const searchInput = document.getElementById('opportunities-list-search');
     if (searchInput) {
         searchInput.removeEventListener('keyup', handleOpportunitiesSearch);
@@ -92,10 +96,9 @@ async function loadOpportunities(query = '') {
     }
 
     try {
-        const [dashboardResult, opportunitiesResult, interactionsResult, systemConfigResult] = await Promise.all([
+        const [dashboardResult, opportunitiesResult, systemConfigResult] = await Promise.all([
             authedFetch(`/api/opportunities/dashboard`),
             authedFetch(`/api/opportunities?page=0`), 
-            authedFetch(`/api/interactions/all?fetchAll=true`), 
             authedFetch(`/api/config`)
         ]);
 
@@ -130,24 +133,14 @@ async function loadOpportunities(query = '') {
         }
 
         let opportunities = opportunitiesResult || [];
-        const interactions = interactionsResult.data || [];
-
-        const latestInteractionMap = new Map();
-        interactions.forEach(interaction => {
-            const id = interaction.opportunityId;
-            const existing = latestInteractionMap.get(id) || 0;
-            const current = new Date(interaction.interactionTime || interaction.createdTime).getTime();
-            if (current > existing) latestInteractionMap.set(id, current);
-        });
 
         const yearSet = new Set();
         opportunities.forEach(opp => {
-             const selfUpdate = new Date(opp.lastUpdateTime || opp.createdTime).getTime();
-             const lastInteraction = latestInteractionMap.get(opp.opportunityId) || 0;
-             opp.effectiveLastActivity = Math.max(selfUpdate, lastInteraction);
-             if (isNaN(opp.effectiveLastActivity)) {
-                 opp.effectiveLastActivity = new Date(opp.createdTime || 0).getTime();
+             // Strict guard: rely on backend computation, deploy strict legacy fallback just in case
+             if (typeof opp.effectiveLastActivity !== 'number' || Number.isNaN(opp.effectiveLastActivity)) {
+                 opp.effectiveLastActivity = new Date(opp.lastUpdateTime || opp.createdTime || 0).getTime();
              }
+             
              const createdDate = new Date(opp.createdTime);
              opp.creationYear = isNaN(createdDate.getTime()) ? null : createdDate.getFullYear();
              if (opp.creationYear) yearSet.add(opp.creationYear);
@@ -167,21 +160,25 @@ async function loadOpportunities(query = '') {
 
         opportunitiesData = opportunities;
 
-        // 保留晶片牆邏輯 (隱藏狀態下仍會運算，確保隨時開啟正常)
+        // 保留晶片牆邏輯
         const chipWallContainer = document.getElementById('opportunity-chip-wall-container');
         if (typeof ChipWall !== 'undefined' && chipWallContainer) {
             const ongoingOpportunities = opportunitiesData.filter(opp => opp.currentStatus === '進行中');
             const chipWall = new ChipWall('#opportunity-chip-wall-container', {
                 stages: window.CRM_APP?.systemConfig?.['機會階段'] || [], 
                 items: ongoingOpportunities,
-                interactions: interactions, 
                 colorConfigKey: '機會種類',
                 useDynamicSize: true,
                 isCollapsible: true,
                 isDraggable: true,
                 showControls: true, 
                 onItemUpdate: () => {
-                    if(window.CRM_APP?.pageConfig) window.CRM_APP.pageConfig.dashboard.loaded = false; 
+                    // Phase 8.10: Unify stale signaling via dashboardManager contract
+                    if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                        window.dashboardManager.markStale();
+                    } else if (window.CRM_APP?.pageConfig?.dashboard) {
+                        window.CRM_APP.pageConfig.dashboard.loaded = false; 
+                    }
                 },
                 onFilterChange: (filters) => {
                     opportunitiesListFilters.year = filters.year;
@@ -210,7 +207,6 @@ async function loadOpportunities(query = '') {
  * 統一事件處理器 (Centralized Event Handler)
  */
 function handleOpportunitiesClick(e) {
-    // 尋找最近的帶有 data-action 的元素
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     
@@ -222,7 +218,6 @@ function handleOpportunitiesClick(e) {
             handleOppSort(payload.field);
             break;
         case 'delete-opp':
-            // [Modified] Use oppId instead of rowIndex
             confirmDeleteOpportunity(payload.oppId, payload.name);
             break;
         case 'clear-filters':
@@ -230,7 +225,6 @@ function handleOpportunitiesClick(e) {
             break;
         case 'navigate':
             e.preventDefault();
-            // 解析可能的參數
             let params = {};
             if (payload.params) {
                 try {
@@ -244,9 +238,6 @@ function handleOpportunitiesClick(e) {
     }
 }
 
-/**
- * 填充下拉選單選項
- */
 function populateOppFilterOptions(selectId, options, defaultText) {
     const el = document.getElementById(selectId);
     if (!el) return;
@@ -254,30 +245,22 @@ function populateOppFilterOptions(selectId, options, defaultText) {
         (options || []).map(opt => `<option value="${opt.value}">${opt.note || opt.value}</option>`).join('');
 }
 
-/**
- * 處理下拉篩選變更
- */
 function handleOppFilterDropdownChange(e) {
     const filterKey = e.target.dataset.filter;
     opportunitiesListFilters[filterKey] = e.target.value;
     filterAndRenderOpportunities();
 }
 
-/**
- * 清除所有篩選條件並還原 UI
- */
 function clearAllOppFilters() {
     opportunitiesListFilters = { 
         year: 'all', type: 'all', source: 'all', time: 'all', 
         stage: 'all', probability: 'all', channel: 'all', scale: 'all' 
     };
     
-    // 重設下拉選單 UI 狀態
     document.querySelectorAll('#opportunity-list-filters select').forEach(select => {
         select.value = 'all';
     });
 
-    // 清除圖表選取狀態
     if (typeof Highcharts !== 'undefined') {
         Highcharts.charts.forEach(chart => {
             if (chart && chart.series && chart.series[0] && chart.series[0].points) {
@@ -290,9 +273,6 @@ function clearAllOppFilters() {
     filterAndRenderOpportunities();
 }
 
-/**
- * 篩選並重新渲染機會列表的核心函式
- */
 function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
     const listContent = document.getElementById('opportunities-page-content');
     const filterStatus = document.getElementById('opportunities-filter-status');
@@ -302,7 +282,6 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
 
     if (!listContent) return;
 
-    // 處理來自圖表的點擊連動
     if (filterKey && filterDisplayValue) {
         const filterValue = reverseNameMaps[filterKey]?.get(filterDisplayValue) || filterDisplayValue;
         if (opportunitiesListFilters[filterKey] === filterValue) {
@@ -311,13 +290,11 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
              opportunitiesListFilters[filterKey] = filterValue;
         }
         
-        // 同步 UI 下拉選單選取狀態
         const uiKey = filterKey.replace('opportunity', '').toLowerCase();
         const selectEl = document.querySelector(`#opportunity-list-filters select[data-filter="${uiKey}"]`);
         if (selectEl) selectEl.value = opportunitiesListFilters[filterKey];
     }
 
-    // 更新篩選狀態條顯示
     const activeFiltersCount = Object.entries(opportunitiesListFilters).filter(([k, v]) => v !== 'all' && v !== undefined).length;
     if (activeFiltersCount > 0) {
         if (filterStatus) filterStatus.style.display = 'flex';
@@ -326,12 +303,10 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
         if (filterStatus) filterStatus.style.display = 'none';
     }
 
-    // 執行資料篩選
     let filteredData = [...opportunitiesData];
     const now = Date.now();
     const timeThresholds = { '7': 7, '30': 30, '90': 90 };
 
-    // 1. 特殊屬性篩選 (年份與時間)
     if (opportunitiesListFilters.year !== 'all') {
         filteredData = filteredData.filter(opp => String(opp.creationYear) === String(opportunitiesListFilters.year));
     }
@@ -341,7 +316,6 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
         filteredData = filteredData.filter(opp => opp.effectiveLastActivity >= threshold);
     }
 
-    // 2. 通用物件屬性篩選
     const keyMapping = { 
         'type': 'opportunityType', 
         'source': 'opportunitySource',
@@ -368,7 +342,6 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
         }
     }
 
-    // 3. 搜尋框過濾
     if (query) {
         filteredData = filteredData.filter(o =>
             (o.opportunityName && o.opportunityName.toLowerCase().includes(query)) ||
@@ -376,7 +349,6 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
         );
     }
 
-    // 4. 資料排序
     filteredData.sort((a, b) => {
         let valA = a[currentOppSort.field];
         let valB = b[currentOppSort.field];
@@ -394,16 +366,10 @@ function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
     listContent.innerHTML = renderOpportunitiesTable(filteredData);
 }
 
-/**
- * 處理搜尋事件
- */
 function handleOpportunitiesSearch(event) {
     handleSearch(() => filterAndRenderOpportunities());
 }
 
-/**
- * 處理表頭排序
- */
 function handleOppSort(field) {
     if (currentOppSort.field === field) {
         currentOppSort.direction = currentOppSort.direction === 'asc' ? 'desc' : 'asc';
@@ -414,9 +380,6 @@ function handleOppSort(field) {
     filterAndRenderOpportunities();
 }
 
-/**
- * 渲染機會案件列表表格 (HTML 生成)
- */
 function renderOpportunitiesTable(opportunities) {
     const styleId = 'opportunity-list-upgraded-styles';
     if (!document.getElementById(styleId)) {
@@ -456,7 +419,6 @@ function renderOpportunitiesTable(opportunities) {
     const renderSortHeader = (field, label) => {
         let icon = '↕';
         if (currentOppSort.field === field) icon = currentOppSort.direction === 'asc' ? '↑' : '↓';
-        // 使用 data-action 替代 onclick
         return `<th class="sortable" data-action="sort" data-field="${field}">${label} <span class="opp-sort-icon">${icon}</span></th>`;
     };
 
@@ -481,10 +443,11 @@ function renderOpportunitiesTable(opportunities) {
         const stageName = stageNotes.get(opp.currentStage) || opp.currentStage || '-';
         const typeColor = typeColors.get(opp.opportunityType) || '#9ca3af';
         const modelColor = modelColors.get(opp.salesModel) || '#6b7280';
-        const channelText = opp.channelDetails || opp.salesChannel || '-';
+        
+        // Fully converged contract usage
+        const channelText = opp.salesChannel || '-';
         const lastActivityDate = opp.effectiveLastActivity ? new Date(opp.effectiveLastActivity).toLocaleDateString('zh-TW') : '-';
 
-        // 建構安全的 data params
         const oppParams = JSON.stringify({ opportunityId: opp.opportunityId }).replace(/"/g, '&quot;');
         const compParams = JSON.stringify({ companyName: encodeURIComponent(opp.customerCompany || '') }).replace(/"/g, '&quot;');
         const safeOppName = (opp.opportunityName || '').replace(/"/g, '&quot;');
@@ -526,8 +489,6 @@ function renderOpportunitiesTable(opportunities) {
 
     return html + '</tbody></table></div>';
 }
-
-// ==================== 圖表相關 (保持原有邏輯) ====================
 
 function renderOpportunityCharts(chartData) {
     const container = document.getElementById('opportunities-dashboard-container');
@@ -608,7 +569,6 @@ async function confirmDeleteOpportunity(oppId, opportunityName) {
     showConfirmDialog(message, async () => {
         showLoading('正在刪除...');
         try {
-            // [Modified] DELETE by ID
             const result = await authedFetch(`/api/opportunities/${oppId}`, { method: 'DELETE' });
             if (result.success) {
                 await loadOpportunities(document.getElementById('opportunities-list-search')?.value || '');
@@ -624,7 +584,6 @@ async function loadFollowUpPage() {
     
     container.innerHTML = '<div class="loading show"><div class="spinner"></div><p>載入待追蹤清單中...</p></div>';
     
-    // 同樣為追蹤頁面綁定事件委派
     container.removeEventListener('click', handleOpportunitiesClick);
     container.addEventListener('click', handleOpportunitiesClick);
 

@@ -6,9 +6,9 @@
  * - Table: opportunities
  * - Schema: Strict adherence to provided schema list
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.3.0
- * - Date: 2026-03-11
- * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries. Added getOpportunitiesByParentId for scoped child queries. Phase 1 SQL Aggregation: Added getOpportunityStats.
+ * - Version: 1.3.4
+ * - Date: 2026-03-12
+ * - Changelog: Added getOpportunitiesByCompanyName for Phase 8.1 SQL-first queries. Phase 1 SQL Aggregation: Added getOpportunityStats. Phase 8.2: Moved effectiveLastActivity computation to backend. Restored proven legacy UI contracts (channelDetails, opportunityValueType) explicitly required by opportunity-details.js.
  */
 
 const { supabase } = require('../config/supabase');
@@ -136,20 +136,54 @@ class OpportunitySqlReader {
 
     /**
      * Get all opportunities
-     * @returns {Promise<Array<Object>>} Array of Opportunity DTOs
+     * @returns {Promise<Array<Object>>} Array of Opportunity DTOs (raw array)
      */
     async getOpportunities() {
         try {
-            const { data, error } = await supabase
-                .from(this.tableName)
-                .select('*');
+            // Fetch opportunities. Preserving select('*') because this reader handles details views as well.
+            const oppsPromise = supabase.from(this.tableName).select('*');
+            
+            // Fetch interactions concurrently in backend with minimum projection
+            const intsPromise = supabase.from('interactions').select('opportunity_id, interaction_time, created_time');
 
-            if (error) {
-                throw new Error(`[OpportunitySqlReader] DB Error: ${error.message}`);
+            const [oppsRes, intsRes] = await Promise.all([oppsPromise, intsPromise]);
+
+            if (oppsRes.error) {
+                throw new Error(`[OpportunitySqlReader] DB Error: ${oppsRes.error.message}`);
             }
 
-            // Map all rows strictly
-            return data.map(row => this._mapRowToDto(row));
+            // Build interaction map in-memory on the backend
+            const latestIntMap = new Map();
+            let interactionsFailed = false;
+
+            if (intsRes.error) {
+                // Degrade Mode: Log error but do not crash the main list query
+                console.warn('[OpportunitySqlReader] Degrade Mode Active: Interactions subquery failed.', intsRes.error.message);
+                interactionsFailed = true;
+            } else if (intsRes.data) {
+                intsRes.data.forEach(int => {
+                    const id = int.opportunity_id;
+                    const time = new Date(int.interaction_time || int.created_time).getTime();
+                    if (time && (!latestIntMap.has(id) || time > latestIntMap.get(id))) {
+                        latestIntMap.set(id, time);
+                    }
+                });
+            }
+
+            // Map rows and attach effectiveLastActivity strictly as additive field
+            return oppsRes.data.map(row => {
+                const dto = this._mapRowToDto(row);
+                
+                if (!interactionsFailed) {
+                    const lastInt = latestIntMap.get(dto.opportunityId) || 0;
+                    // Override base effectiveLastActivity if interaction is newer
+                    if (lastInt > dto.effectiveLastActivity) {
+                        dto.effectiveLastActivity = lastInt;
+                    }
+                }
+                
+                return dto;
+            });
 
         } catch (error) {
             console.error('[OpportunitySqlReader] getOpportunities Error:', error);
@@ -159,13 +193,12 @@ class OpportunitySqlReader {
 
     /**
      * Maps Raw SQL Row to DTO
-     * Strict adherence to provided schema.
-     * snake_case -> camelCase
+     * Strict adherence to proven frontend legacy keys.
      */
     _mapRowToDto(row) {
         if (!row) return null;
 
-        return {
+        const dto = {
             // Identity
             opportunityId: row.opportunity_id,
             parentOpportunityId: row.parent_opportunity_id,
@@ -173,8 +206,8 @@ class OpportunitySqlReader {
             // Core Info
             opportunityName: row.opportunity_name,
             opportunityType: row.opportunity_type,
-            source: row.source,
-            owner: row.owner,
+            opportunitySource: row.source, // Mapped for frontend compatibility
+            assignee: row.owner, // Mapped for frontend compatibility
 
             // Customer & Contacts
             customerCompany: row.customer_company,
@@ -185,27 +218,34 @@ class OpportunitySqlReader {
             // Sales Details
             salesModel: row.sales_model,
             salesChannel: row.sales_channel,
+            channelDetails: row.sales_channel, // Proven legacy UI contract (opportunity-details.js)
             currentStage: row.current_stage,
             currentStatus: row.current_status,
             
             // Metrics & Values
             expectedCloseDate: row.expected_close_date,
-            winProbability: row.win_probability,
+            orderProbability: row.win_probability, // Mapped for frontend compatibility
             opportunityValue: row.opportunity_value,
             valueCalcMode: row.value_calc_mode,
-            equipmentScale: row.equipment_scale,
+            opportunityValueType: row.value_calc_mode, // Proven legacy UI contract (opportunity-details.js)
+            deviceScale: row.equipment_scale, // Mapped for frontend compatibility
 
             // Products & Details
-            productDetails: row.product_details,
+            potentialSpecification: row.product_details, // Proven legacy UI contract
             notes: row.notes,
-            driveLink: row.drive_link,
+            driveFolderLink: row.drive_link, // Mapped for frontend compatibility
             stageHistory: row.stage_history,
 
             // Metadata / Audit
             createdTime: row.created_time,
-            updatedTime: row.updated_time,
+            lastUpdateTime: row.updated_time, // Mapped for frontend compatibility
             updatedBy: row.updated_by
         };
+
+        // Initialize fallback effectiveLastActivity (epoch ms) purely based on legacy fields
+        dto.effectiveLastActivity = new Date(dto.lastUpdateTime || dto.createdTime || 0).getTime();
+
+        return dto;
     }
 }
 
