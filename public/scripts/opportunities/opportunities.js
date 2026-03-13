@@ -1,9 +1,9 @@
 // public/scripts/opportunities/opportunities.js
 /**
  * 職責：管理「機會案件列表頁」的圖表、篩選、列表渲染與操作
- * @version 7.3.0 (Phase 8.11 - Table Data Flow Decoupling)
- * @date 2026-03-12
- * @description [Performance Patch] Decoupled Opportunities Table from the bulk opportunitiesData payload. Table now queries the backend via API with URL parameters for filtering, sorting, and pagination. Chip Wall retains existing behavior.
+ * @version 7.3.1 (Phase 8.14 - UX Simplification Patch)
+ * @date 2026-03-13
+ * @description [UX Simplification Patch] Removed clickable links from company names in the Opportunities List table to prevent mis-clicks and simplify routing.
  */
 
 // ==================== 全域變數 (此頁面專用) ====================
@@ -436,7 +436,7 @@ function renderOpportunitiesTable(opportunities) {
         const lastActivityDate = opp.effectiveLastActivity ? new Date(opp.effectiveLastActivity).toLocaleDateString('zh-TW') : '-';
 
         const oppParams = JSON.stringify({ opportunityId: opp.opportunityId }).replace(/"/g, '&quot;');
-        const compParams = JSON.stringify({ companyName: encodeURIComponent(opp.customerCompany || '') }).replace(/"/g, '&quot;');
+        
         const safeOppName = (opp.opportunityName || '').replace(/"/g, '&quot;');
 
         html += `
@@ -453,12 +453,7 @@ function renderOpportunitiesTable(opportunities) {
                     </a>
                 </td>
                 <td style="min-width:150px;">
-                    <a href="#" class="text-link" style="color:var(--text-secondary);" 
-                       data-action="navigate" 
-                       data-page="company-details" 
-                       data-params="${compParams}">
-                        ${opp.customerCompany || '-'}
-                    </a>
+                    <span style="color:var(--text-secondary);">${opp.customerCompany || '-'}</span>
                 </td>
                 <td><span class="opp-sales-chip" style="background:${modelColor}">${opp.salesModel || '-'}</span></td>
                 <td><span class="opp-channel-chip" title="${channelText}">${channelText}</span></td>
