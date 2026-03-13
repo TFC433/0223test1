@@ -4,9 +4,10 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 9.3.1 (Phase 9.3.1: DI Wiring Fix for SystemService Migration)
- * @date 2026-03-12
+ * @version 9.3.2 (Phase 9.3.2: SQL Scaffolding Injection)
+ * @date 2026-03-13
  * @changelog
+ * - [PHASE 9.3.2] Injected contactSqlWriter into OpportunityService for SQL-safe contact scaffolding.
  * - [PHASE 9.3.1] Patched dependency injection wiring to securely provide systemService to OpportunityService, EventLogService, SalesAnalysisService, and ProductService.
  * - [PHASE 9.3] Verified and fixed all semantic RAW vs OFFICIAL mismatches in domain logic.
  * - [PHASE 9.3] Successfully and safely eradicated 100% of CORE Legacy Sheet Readers/Writers instantiations.
@@ -80,7 +81,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v9.3.1 SQL-Only CORE)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v9.3.2 SQL-Only CORE)...');
 
     try {
         // 1. Infrastructure
@@ -186,7 +187,8 @@ async function initializeServices() {
             eventLogSqlReader,     
             companySqlReader,      
             interactionSqlReader,   
-            contactSqlReader
+            contactSqlReader,
+            contactSqlWriter // [PHASE 9.3.2] Inject for SQL contact scaffolding
         });
 
         const interactionService = new InteractionService(

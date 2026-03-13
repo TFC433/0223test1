@@ -1,12 +1,11 @@
 /**
  * public/scripts/opportunities/opportunity-modals.js
- * @version v5.0.8
+ * @version v5.0.9
  * @date 2026-03-13
  * @changelog
- * - Fix Opportunity Wizard card search with preload-once + client-side filter
- * - Preserve approved abbreviation-based opportunity naming rule
- * - Preserve manual-name overwrite protection
- * - Preserve single-line card list display
+ * - Fix wizard card search residual input state
+ * - Add success notification after opportunity creation
+ * - Auto navigate to created opportunity detail page
  */
 
 // 職責：管理所有與「機會」相關的彈出視窗 (新增Wizard、編輯、關聯)
@@ -124,6 +123,9 @@ const NewOppWizard = {
         
         const form = document.getElementById('new-opportunity-wizard-form');
         if (form) form.reset();
+        
+        const cardSearch = document.getElementById('wiz-card-search');
+        if (cardSearch) cardSearch.value = '';
         
         // 重置 UI 顯示狀態
         const entryOptions = document.getElementById('wiz-entry-options');
@@ -781,6 +783,14 @@ document.addEventListener('submit', async function(e) {
                     window.dashboardManager.markStale();
                 }
                 closeModal('new-opportunity-modal');
+                
+                showNotification('機會建立成功', 'success');
+
+                const targetOppId = result.opportunityId || result.id;
+
+                if (targetOppId && window.CRM_APP && typeof window.CRM_APP.navigateTo === 'function') {
+                    window.CRM_APP.navigateTo('opportunity-details', { opportunityId: targetOppId });
+                }
             } else {
                 throw new Error(result.details || result.error || '建立失敗');
             }
