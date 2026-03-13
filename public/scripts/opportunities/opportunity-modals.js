@@ -1,4 +1,14 @@
-// views/scripts/opportunity-modals.js
+/**
+ * public/scripts/opportunities/opportunity-modals.js
+ * @version v5.0.8
+ * @date 2026-03-13
+ * @changelog
+ * - Fix Opportunity Wizard card search with preload-once + client-side filter
+ * - Preserve approved abbreviation-based opportunity naming rule
+ * - Preserve manual-name overwrite protection
+ * - Preserve single-line card list display
+ */
+
 // 職責：管理所有與「機會」相關的彈出視窗 (新增Wizard、編輯、關聯)
 
 // ==================== 全域變數 ====================
@@ -16,7 +26,8 @@ const NewOppWizard = {
             mainContact: '',
             contactPhone: '',
             county: '',
-            sourceId: null // 用於名片轉入 (Contact rowIndex)
+            sourceId: null, // 用於名片轉入 (Contact rowIndex)
+            lastGeneratedName: ''
         }
     },
 
@@ -91,6 +102,16 @@ const NewOppWizard = {
             summaryCard.style.textAlign = 'center';
             summaryCard.style.maxWidth = '400px';
         }
+
+        // 4. 綁定聯絡人搜尋框 (Client-side filter)
+        const cardSearch = document.getElementById('wiz-card-search');
+        if (cardSearch && !cardSearch.dataset.eventsBound) {
+            cardSearch.removeAttribute('onkeyup');
+            cardSearch.setAttribute('autocomplete', 'off');
+            cardSearch.addEventListener('focus', (e) => this.searchCards(e.target.value));
+            cardSearch.addEventListener('input', (e) => this.searchCards(e.target.value));
+            cardSearch.dataset.eventsBound = 'true';
+        }
     },
 
     // 重置狀態
@@ -98,7 +119,7 @@ const NewOppWizard = {
         this.state = {
             step: 1,
             path: null,
-            data: { companyName: '', mainContact: '', contactPhone: '', county: '', sourceId: null }
+            data: { companyName: '', mainContact: '', contactPhone: '', county: '', sourceId: null, lastGeneratedName: '' }
         };
         
         const form = document.getElementById('new-opportunity-wizard-form');
@@ -162,12 +183,13 @@ const NewOppWizard = {
         const list = document.getElementById('wiz-card-list');
         if (!list) return;
         
-        list.innerHTML = '<div class="loading show"><div class="spinner" style="width:20px;height:20px"></div></div>';
         try {
-            const result = await authedFetch(`/api/contacts?page=1`);
-            // 簡單取前 5 筆
-            const cards = (result.data || []).slice(0, 5);
-            this.renderCardList(cards);
+            if (allSearchedContacts.length === 0) {
+                list.innerHTML = '<div class="loading show"><div class="spinner" style="width:20px;height:20px"></div></div>';
+                const result = await authedFetch(`/api/contacts`);
+                allSearchedContacts = result.data || [];
+            }
+            this.renderCardList(allSearchedContacts.slice(0, 5));
         } catch(e) {
             console.error(e);
             list.innerHTML = '<div class="alert alert-error">載入名片失敗</div>';
@@ -175,21 +197,21 @@ const NewOppWizard = {
     },
 
     searchCards: function(query) {
-        handleSearch(async () => {
-            const list = document.getElementById('wiz-card-list');
-            if (!list) return;
-            
-            if(!query) { this.loadRecentCards(); return; }
-            
-            list.innerHTML = '<div class="loading show"><div class="spinner" style="width:20px;height:20px"></div></div>';
-            try {
-                const result = await authedFetch(`/api/contacts?q=${encodeURIComponent(query)}`);
-                this.renderCardList(result.data || []);
-            } catch(e) { 
-                console.error(e);
-                list.innerHTML = '<div class="alert alert-error">搜尋失敗</div>';
-            }
+        const list = document.getElementById('wiz-card-list');
+        if (!list) return;
+        
+        if(!query || !query.trim()) { 
+            this.renderCardList(allSearchedContacts.slice(0, 5)); 
+            return; 
+        }
+        
+        const q = query.toLowerCase().trim();
+        const filtered = allSearchedContacts.filter(c => {
+            return (c.name && c.name.toLowerCase().includes(q)) || 
+                   (c.company && c.company.toLowerCase().includes(q));
         });
+        
+        this.renderCardList(filtered);
     },
 
     renderCardList: function(cards) {
@@ -203,11 +225,11 @@ const NewOppWizard = {
         
         list.innerHTML = cards.map(c => {
             const safeJson = JSON.stringify(c).replace(/'/g, "&apos;").replace(/"/g, '&quot;');
-            const titleDisplay = c.position ? ` | ${c.position}` : ''; 
+            const companyDisplay = c.company || '未知公司';
+            const titleDisplay = c.position || c.jobTitle || '未知職位';
             return `
             <div class="search-result-item" onclick='NewOppWizard.selectCard(${safeJson})'>
-                <strong>${c.name}</strong>
-                <small>${c.company}${titleDisplay}</small>
+                ${c.name} ｜ ${companyDisplay} ｜ ${titleDisplay}
             </div>
         `}).join('');
     },
@@ -466,8 +488,14 @@ const NewOppWizard = {
 
         const currentName = nameInput.value.trim();
         
-        if(!currentName || currentName.includes(company)) {
-            nameInput.value = `${typeText} - ${company}`;
+        // 解析機會種類簡稱 (擷取空白、半形或全形括號前的文字)
+        const abbreviation = typeText.split(/[\s(（]+/)[0].trim();
+        const expectedName = `${abbreviation} - ${company}`;
+        
+        // 只有當「輸入框為空」、「符合系統前次自動生成的結果」或「與舊版邏輯相符(向下相容)」時，才執行覆寫
+        if(!currentName || currentName === this.state.data.lastGeneratedName || currentName === `${typeText} - ${company}`) {
+            nameInput.value = expectedName;
+            this.state.data.lastGeneratedName = expectedName;
         }
     }
 };
