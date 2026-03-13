@@ -2,11 +2,13 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.1.2 (Phase 8.1 Small UX Patch)
+ * Version: v8.1.4 (Phase 8.1 UI Polish)
  * Date: 2026-03-13
  * Author: Gemini (Assisted)
  *
  * Change Log:
+ * - [UI Polish] Enlarged tabs, simplified header, improved search placeholder, and added result count.
+ * - [UI Simplification] Removed Contacts Trend Chart and related dashboard fetch logic.
  * - [UX Patch] Added "項次" (index) column to the "名片列表" view.
  * - [UX Patch] Made "姓名" (name) an editable field in the RAW contact edit form.
  * - [Bugfix] Fixed `query.toLowerCase is not a function` crash by adding string type guards for routing params.
@@ -49,21 +51,23 @@ async function loadContacts(query = '') {
 
     // 1. 初始化容器與事件監聽 (加入頁籤 UI)
     container.innerHTML = `
-        <div id="contacts-dashboard-container" class="dashboard-grid-flexible" style="margin-bottom: 24px;">
-            <div class="loading show" style="grid-column: span 12;"><div class="spinner"></div></div>
-        </div>
         <div class="dashboard-widget">
-            <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0;">
-                <h2 class="widget-title" style="margin-bottom: 15px;">潛在客戶總覽</h2>
-                <div class="contacts-tabs" style="display: flex; gap: 20px;">
-                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="background: none; border: none; padding: 10px 5px; font-weight: ${isListActive ? '600' : '500'}; color: ${isListActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-bottom: 2px solid ${isListActive ? 'var(--accent-blue)' : 'transparent'}; cursor: pointer;">聯絡人列表</button>
-                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="background: none; border: none; padding: 10px 5px; font-weight: ${isCardsActive ? '600' : '500'}; color: ${isCardsActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-bottom: 2px solid ${isCardsActive ? 'var(--accent-blue)' : 'transparent'}; cursor: pointer;">名片列表</button>
+            <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                <div style="display: flex; align-items: baseline; gap: 15px;">
+                    <h2 class="widget-title" style="margin: 0;">潛在客戶</h2>
+                </div>
+                <div class="contacts-tabs" style="display: flex; gap: 4px; background: var(--bg-hover, #f1f5f9); padding: 4px; border-radius: 8px;">
+                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="background: ${isListActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isListActive ? '600' : '500'}; color: ${isListActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isListActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">名片總覽</button>
+                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="background: ${isCardsActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isCardsActive ? '600' : '500'}; color: ${isCardsActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isCardsActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">聯絡人列表</button>
                 </div>
             </div>
             
             <div id="contacts-action-bar" style="padding: 1.5rem 1.5rem 0;">
-                <div class="search-pagination" style="margin-bottom: 1rem;">
-                    <input type="text" class="search-box" id="contacts-page-search" placeholder="搜尋姓名或公司..." value="${searchQuery}">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 15px;">
+                    <div class="search-pagination" style="flex: 1;">
+                        <input type="text" class="search-box" id="contacts-page-search" placeholder="搜尋姓名 / 公司" value="${searchQuery}" style="width: 100%; max-width: 400px;">
+                    </div>
+                    <div id="contacts-count-display" style="font-size: 0.9rem; color: var(--text-muted); font-weight: 500;"></div>
                 </div>
             </div>
 
@@ -87,25 +91,8 @@ async function loadContacts(query = '') {
         if (allContactsData.length === 0) {
             console.log('[Contacts] 首次載入，正在獲取所有潛在客戶資料...');
             // [World Model] Fetching RAW Data from Sheet via API
-            const [dashboardResult, listResult] = await Promise.all([
-                authedFetch(`/api/contacts/dashboard`),
-                authedFetch(`/api/contacts?q=`)
-            ]);
-
-            if (dashboardResult.success && dashboardResult.data && dashboardResult.data.chartData) {
-                renderContactsDashboard(dashboardResult.data.chartData);
-            } else {
-                const dashboardContainer = document.getElementById('contacts-dashboard-container');
-                 if(dashboardContainer) dashboardContainer.innerHTML = `<div class="alert alert-error" style="grid-column: span 12;">圖表資料載入失敗</div>`;
-            }
-
+            const listResult = await authedFetch(`/api/contacts?q=`);
             allContactsData = listResult.data || [];
-        } else {
-            // 使用快取資料，但仍嘗試更新圖表
-            const dashboardResult = await authedFetch(`/api/contacts/dashboard`);
-            if (dashboardResult.success && dashboardResult.data && dashboardResult.data.chartData) {
-                renderContactsDashboard(dashboardResult.data.chartData);
-            }
         }
         
         filterAndRenderContacts(searchQuery);
@@ -149,12 +136,14 @@ function handleContactListClick(e) {
                 t.classList.remove('active');
                 t.style.fontWeight = '500';
                 t.style.color = 'var(--text-muted)';
-                t.style.borderBottomColor = 'transparent';
+                t.style.background = 'transparent';
+                t.style.boxShadow = 'none';
             });
             btn.classList.add('active');
             btn.style.fontWeight = '600';
             btn.style.color = 'var(--accent-blue)';
-            btn.style.borderBottomColor = 'var(--accent-blue)';
+            btn.style.background = 'white';
+            btn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
             
             // Re-apply current search
             const currentQuery = document.getElementById('contacts-page-search')?.value || '';
@@ -190,6 +179,7 @@ function searchContactsEvent(event) {
 function filterAndRenderContacts(query = '') {
     const listContent = document.getElementById('contacts-page-content');
     const actionBar = document.getElementById('contacts-action-bar');
+    const countDisplay = document.getElementById('contacts-count-display');
     if (!listContent) return;
 
     // Ensure search bar is visible when not in edit mode
@@ -209,57 +199,15 @@ function filterAndRenderContacts(query = '') {
         );
     }
     
+    // Update count display
+    if (countDisplay) {
+        countDisplay.textContent = `共 ${filteredData.length} 筆潛在客戶`;
+    }
+
     if (currentContactsTab === 'list') {
         listContent.innerHTML = renderContactsTable(filteredData);
     } else if (currentContactsTab === 'cards') {
         listContent.innerHTML = renderBusinessCardList(filteredData);
-    }
-}
-
-// ==================== 圖表渲染函式 ====================
-
-function renderContactsDashboard(chartData) {
-    const container = document.getElementById('contacts-dashboard-container');
-    if (!container) return;
-    
-    container.innerHTML = `
-        <div class="dashboard-widget grid-col-12">
-            <div class="widget-header"><h2 class="widget-title">潛客戶增加趨勢 (近30天)</h2></div>
-            <div id="contacts-trend-chart" class="widget-content" style="height: 300px;"></div>
-        </div>
-    `;
-    setTimeout(() => {
-        renderContactsTrendChart(chartData.trend);
-    }, 0);
-}
-
-function renderContactsTrendChart(data) {
-    if (!data || !Array.isArray(data)) {
-        const container = document.getElementById('contacts-trend-chart');
-        if (container) container.innerHTML = '<div class="alert alert-warning" style="text-align: center; padding: 10px;">無趨勢資料</div>';
-        return;
-    }
-
-    const specificOptions = {
-        chart: { type: 'area' },
-        title: { text: '' },
-        xAxis: { categories: data.map(d => d[0] ? d[0].substring(5) : '') },
-        yAxis: { title: { text: '數量' } },
-        legend: { enabled: false },
-        plotOptions: {
-            area: {
-                fillColor: { linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 }, stops: [] },
-                marker: { radius: 2 },
-                lineWidth: 2,
-                states: { hover: { lineWidth: 3 } },
-                threshold: null
-            }
-        },
-        series: [{ name: '新增客戶數', data: data.map(d => d[1] || 0) }]
-    };
-
-    if (typeof createThemedChart === 'function') {
-        createThemedChart('contacts-trend-chart', specificOptions);
     }
 }
 
