@@ -1,8 +1,8 @@
 /**
  * routes/contact.routes.js
  * 聯絡人/潛在客戶模組路由
- * * @version 6.1.1 (Fixed: Dashboard Route & Data Shape)
- * @date 2026-01-15
+ * * @version 6.1.2 (Added: RAW Contact Update Route)
+ * @date 2026-03-13
  */
 const express = require('express');
 const router = express.Router();
@@ -60,6 +60,13 @@ router.post('/:rowIndex/upgrade', async (req, res, next) => {
 router.put('/:contactId', async (req, res, next) => {
     try {
         await getController(req).updateContact(req, res);
+    } catch (e) { next(e); }
+});
+
+// PUT /api/contacts/:rowIndex/raw (更新 RAW 聯絡人)
+router.put('/:rowIndex/raw', async (req, res, next) => {
+    try {
+        await getController(req).updateRawContact(req, res);
     } catch (e) { next(e); }
 });
 

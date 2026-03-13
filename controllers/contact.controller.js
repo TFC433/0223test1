@@ -1,10 +1,11 @@
 /**
  * controllers/contact.controller.js
  * 聯絡人模組控制器
- * * @version 8.0.0 (Phase 8 Controller Annotation)
- * * @date 2026-02-10
+ * * @version 8.0.1 (Phase 8.1 RAW Update Patch)
+ * * @date 2026-03-13
  * * @description 負責處理聯絡人相關的 HTTP 請求，驗證參數，並呼叫對應的 Service。
  * * 修復了 API 回傳格式以符合前端 contacts.js 的預期 ({ data: [] })。
+ * * [Phase 8.1] 增加了 updateRawContact 以支援從 CRM UI 編輯 RAW 聯絡人資料。
  *
  * ============================================================================
  * WORLD MODEL (CONTROLLER LAYER):
@@ -12,9 +13,9 @@
  * 1. RAW ZONE (Potential Contacts)
  * - Source: Google Sheets (via ContactService -> ContactReader).
  * - Identity: rowIndex (Volatile, Sheet-based).
- * - Routes: GET / (searchContacts), GET /dashboard, POST /:rowIndex/file.
+ * - Routes: GET / (searchContacts), GET /dashboard, POST /:rowIndex/file, PUT /:rowIndex/raw.
  * - Purpose: OCR intake, high-volume, unverified data.
- * - Writes: Limited to Status flags (Archive/File) in Sheet.
+ * - Writes: Limited to Status flags (Archive/File) and Field Edits in Sheet.
  *
  * 2. CORE ZONE (Official Contacts)
  * - Source: SQL (Primary) via ContactService -> ContactSqlReader/Writer.
@@ -162,6 +163,31 @@ class ContactController {
             res.json(result);
         } catch (error) {
             handleApiError(res, error, 'Update Contact');
+        }
+    };
+
+    /**
+     * [ZONE: RAW / POTENTIAL]
+     * PUT /api/contacts/:rowIndex/raw
+     * 更新潛在客戶資料 (RAW Data)
+     * Identity: rowIndex
+     * Target: Google Sheets (Field Update)
+     * Contract: Directly edits RAW OCR contact fields from CRM.
+     */
+    updateRawContact = async (req, res) => {
+        try {
+            const rowIndex = parseInt(req.params.rowIndex);
+            const user = req.body.modifier || (req.user ? req.user.name : 'System');
+
+            const result = await this.contactService.updatePotentialContact(
+                rowIndex,
+                req.body,
+                user
+            );
+            
+            res.json(result);
+        } catch (error) {
+            handleApiError(res, error, 'Update Raw Contact');
         }
     };
 

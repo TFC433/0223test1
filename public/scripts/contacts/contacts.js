@@ -2,58 +2,37 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.0.2 (Phase 8 UI Repair)
- * Date: 2026-02-10
+ * Version: v8.1.2 (Phase 8.1 Small UX Patch)
+ * Date: 2026-03-13
  * Author: Gemini (Assisted)
  *
  * Change Log:
- * - [Phase 8] Added World Model Annotation for RAW vs CORE separation.
- * - [Phase 8] Semantic identity clarification (comments only).
- * - [Phase 8] Add explicit UI failure feedback for Upgrade to Opportunity.
- * * * WORLD MODEL (UI LAYER):
+ * - [UX Patch] Added "項次" (index) column to the "名片列表" view.
+ * - [UX Patch] Made "姓名" (name) an editable field in the RAW contact edit form.
+ * - [Bugfix] Fixed `query.toLowerCase is not a function` crash by adding string type guards for routing params.
+ * - [Bugfix] Fixed tab UI state resetting to "聯絡人列表" after saving an edit by binding DOM tab state to `currentContactsTab`.
+ * - [Bugfix] Added `e.preventDefault()` in action handler to prevent unexpected UI jumps.
+ * - [Phase 8.1] Removed "升級" (Upgrade to Opportunity) feature from RAW contacts page.
+ * - [Phase 8.1] Ensured contact names are always fully visible (removed truncation).
+ * - [Phase 8.1] Added "名片列表" (Business Card List) tab.
+ * - [Phase 8.1] Implemented inline edit mode for RAW contacts (Left: Preview, Right: Form).
+ * - [Phase 8.1] Wired edit form to PUT /api/contacts/:rowIndex/raw.
+ * * WORLD MODEL (UI LAYER):
  * 1. RAW Contact (Potential):
  * - Rendered here (loadContacts).
  * - Source: /api/contacts (Sheet Read).
- * - Action: Upgrade (triggers handoff to NewOppWizard).
- * - Identity: Uses rowIndex (passed in payload) for handoff.
- * * 2. CORE Contact (Official):
+ * - Action: View Card, Edit Card.
+ * - Identity: Uses rowIndex (passed in payload) for handoff to update API.
+ * 2. CORE Contact (Official):
  * - NOT rendered here. Managed in separate Official List views.
  * - This file strictly handles the "Potential Pool" (Sheet Data).
  * ============================================================================
  */
 
-/**
- * SEMANTIC IDENTITY (IMPORTANT):
- *
- * Although this file is named `contacts.js`, it does NOT represent
- * the CORE "Contact" domain.
- *
- * This module is SEMANTICALLY:
- * 👉 RAW / POTENTIAL CONTACT POOL UI
- *
- * Responsibilities:
- * - Render RAW contacts sourced from Google Sheets (OCR / business cards).
- * - Provide triage actions (view card, upgrade).
- * - Act as the handoff entry point into Opportunity / CORE workflows.
- *
- * Non-Responsibilities (by design):
- * - Does NOT render CORE (Official) Contacts.
- * - Does NOT manage SQL-backed Contact entities.
- * - Does NOT own Contact-Opportunity relationships.
- *
- * Rationale:
- * - RAW contacts are high-volume, unverified, and disposable.
- * - CORE contacts are curated entities and live in SQL with different UI.
- *
- * Naming Constraint:
- * - File name is kept as `contacts.js` for legacy routing stability.
- * - Semantic meaning is intentionally documented here to avoid misuse.
- */
-
-// 職責：管理「潛在客戶列表」的渲染與操作 (Event Delegation Refactor)
-
 // ==================== 全域變數 ====================
 let allContactsData = []; 
+let currentContactsTab = 'list'; // 'list' | 'cards'
+let currentEditRowIndex = null;
 
 // ==================== 主要功能函式 ====================
 
@@ -61,17 +40,34 @@ async function loadContacts(query = '') {
     const container = document.getElementById('page-contacts');
     if (!container) return;
 
-    // 1. 初始化容器與事件監聽
+    // Type Guard: Ensure query is a string (Router may pass a params object)
+    const searchQuery = typeof query === 'string' ? query : '';
+
+    // Determine active tab state
+    const isListActive = currentContactsTab === 'list';
+    const isCardsActive = currentContactsTab === 'cards';
+
+    // 1. 初始化容器與事件監聽 (加入頁籤 UI)
     container.innerHTML = `
         <div id="contacts-dashboard-container" class="dashboard-grid-flexible" style="margin-bottom: 24px;">
             <div class="loading show" style="grid-column: span 12;"><div class="spinner"></div></div>
         </div>
         <div class="dashboard-widget">
-            <div class="widget-header"><h2 class="widget-title">潛在客戶列表</h2></div>
-            <div class="search-pagination" style="padding: 0 1.5rem; margin-bottom: 1rem;">
-                <input type="text" class="search-box" id="contacts-page-search" placeholder="搜尋姓名或公司..." value="${query}">
+            <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0;">
+                <h2 class="widget-title" style="margin-bottom: 15px;">潛在客戶總覽</h2>
+                <div class="contacts-tabs" style="display: flex; gap: 20px;">
+                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="background: none; border: none; padding: 10px 5px; font-weight: ${isListActive ? '600' : '500'}; color: ${isListActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-bottom: 2px solid ${isListActive ? 'var(--accent-blue)' : 'transparent'}; cursor: pointer;">聯絡人列表</button>
+                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="background: none; border: none; padding: 10px 5px; font-weight: ${isCardsActive ? '600' : '500'}; color: ${isCardsActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-bottom: 2px solid ${isCardsActive ? 'var(--accent-blue)' : 'transparent'}; cursor: pointer;">名片列表</button>
+                </div>
             </div>
-            <div id="contacts-page-content">
+            
+            <div id="contacts-action-bar" style="padding: 1.5rem 1.5rem 0;">
+                <div class="search-pagination" style="margin-bottom: 1rem;">
+                    <input type="text" class="search-box" id="contacts-page-search" placeholder="搜尋姓名或公司..." value="${searchQuery}">
+                </div>
+            </div>
+
+            <div id="contacts-page-content" style="padding: 0 1.5rem 1.5rem;">
                 <div class="loading show"><div class="spinner"></div><p>載入潛在客戶資料中...</p></div>
             </div>
         </div>
@@ -82,9 +78,9 @@ async function loadContacts(query = '') {
     container.addEventListener('click', handleContactListClick);
 
     // 綁定搜尋輸入
-    const searchInput = document.getElementById('contacts-page-search');
-    if (searchInput) {
-        searchInput.addEventListener('keyup', searchContactsEvent);
+    const searchInputEl = document.getElementById('contacts-page-search');
+    if (searchInputEl) {
+        searchInputEl.addEventListener('keyup', searchContactsEvent);
     }
 
     try {
@@ -112,7 +108,7 @@ async function loadContacts(query = '') {
             }
         }
         
-        filterAndRenderContacts(query);
+        filterAndRenderContacts(searchQuery);
 
     } catch (error) {
         if (error.message !== 'Unauthorized') {
@@ -128,6 +124,8 @@ function handleContactListClick(e) {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
 
+    e.preventDefault(); // Prevent accidental form submits or jumping
+
     const action = btn.dataset.action;
     const payload = btn.dataset;
 
@@ -141,33 +139,45 @@ function handleContactListClick(e) {
             }
             break;
             
-        case 'upgrade':
-            // [World Model] Upgrade Trigger
-            // This initiates the "RAW -> CORE" handoff.
-            // Payload contains RAW data (including rowIndex) to seed the new Opportunity/Contact.
-            // No direct SQL write happens here; it's delegated to the Wizard/Workflow.
-            if (window.NewOppWizard && typeof window.NewOppWizard.startWithContact === 'function') {
-                try {
-                    const contact = JSON.parse(payload.contact);
-                    window.NewOppWizard.startWithContact(contact);
-                } catch (err) {
-                    console.error('升級操作失敗 (UI Error)', err);
-                    const errorMsg = `無法啟動升級流程: ${err.message || '資料解析錯誤'}`;
-                    if (typeof showNotification === 'function') {
-                        showNotification(errorMsg, 'error');
-                    } else {
-                        alert(errorMsg);
-                    }
-                }
-            } else {
-                console.error('NewOppWizard module missing');
-                const sysErrorMsg = '系統錯誤: 無法載入機會建立精靈 (NewOppWizard missing)。請重新整理頁面或聯絡管理員。';
-                if (typeof showNotification === 'function') {
-                    showNotification(sysErrorMsg, 'error');
-                } else {
-                    alert(sysErrorMsg);
-                }
+        case 'switch-tab':
+            const tabName = payload.tab;
+            if (currentContactsTab === tabName) return; // No change
+            
+            // Update UI state
+            currentContactsTab = tabName;
+            document.querySelectorAll('.contacts-tabs .tab-btn').forEach(t => {
+                t.classList.remove('active');
+                t.style.fontWeight = '500';
+                t.style.color = 'var(--text-muted)';
+                t.style.borderBottomColor = 'transparent';
+            });
+            btn.classList.add('active');
+            btn.style.fontWeight = '600';
+            btn.style.color = 'var(--accent-blue)';
+            btn.style.borderBottomColor = 'var(--accent-blue)';
+            
+            // Re-apply current search
+            const currentQuery = document.getElementById('contacts-page-search')?.value || '';
+            filterAndRenderContacts(currentQuery);
+            break;
+
+        case 'edit-card':
+            try {
+                const contactData = JSON.parse(payload.contact);
+                renderEditCardMode(contactData);
+            } catch (err) {
+                console.error('無法解析聯絡人資料進行編輯', err);
             }
+            break;
+
+        case 'cancel-edit':
+            // Return to current tab view
+            const query = document.getElementById('contacts-page-search')?.value || '';
+            filterAndRenderContacts(query);
+            break;
+            
+        case 'save-edit':
+            handleSaveCardEdit();
             break;
     }
 }
@@ -179,10 +189,18 @@ function searchContactsEvent(event) {
 
 function filterAndRenderContacts(query = '') {
     const listContent = document.getElementById('contacts-page-content');
+    const actionBar = document.getElementById('contacts-action-bar');
     if (!listContent) return;
 
+    // Ensure search bar is visible when not in edit mode
+    if (actionBar) actionBar.style.display = 'block';
+    currentEditRowIndex = null; // Reset edit state
+
     let filteredData = [...allContactsData];
-    const searchTerm = query.toLowerCase();
+    
+    // Type Guard: strictly handle query as a string
+    const safeQuery = typeof query === 'string' ? query : '';
+    const searchTerm = safeQuery.toLowerCase();
 
     if (searchTerm) {
         filteredData = filteredData.filter(c =>
@@ -191,7 +209,11 @@ function filterAndRenderContacts(query = '') {
         );
     }
     
-    listContent.innerHTML = renderContactsTable(filteredData);
+    if (currentContactsTab === 'list') {
+        listContent.innerHTML = renderContactsTable(filteredData);
+    } else if (currentContactsTab === 'cards') {
+        listContent.innerHTML = renderBusinessCardList(filteredData);
+    }
 }
 
 // ==================== 圖表渲染函式 ====================
@@ -202,7 +224,7 @@ function renderContactsDashboard(chartData) {
     
     container.innerHTML = `
         <div class="dashboard-widget grid-col-12">
-            <div class="widget-header"><h2 class="widget-title">潛在客戶增加趨勢 (近30天)</h2></div>
+            <div class="widget-header"><h2 class="widget-title">潛客戶增加趨勢 (近30天)</h2></div>
             <div id="contacts-trend-chart" class="widget-content" style="height: 300px;"></div>
         </div>
     `;
@@ -241,32 +263,39 @@ function renderContactsTrendChart(data) {
     }
 }
 
-// ==================== 專用渲染函式 (重構為卡片) ====================
+// ==================== 專用渲染函式 ====================
 
+// --- Tab 1: 聯絡人列表 (No Upgrade, Full Name) ---
 function renderContactsTable(data) {
     if (!data || data.length === 0) {
         return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到聯絡人資料</div>';
     }
 
-    let listHTML = `<div class="contact-card-list">`;
+    // Add specific style to ensure name wraps and does not truncate
+    let listHTML = `
+        <style>
+            .contact-card-name-full {
+                font-weight: 600;
+                font-size: 1.1rem;
+                color: var(--text-main);
+                white-space: normal; /* Force wrap */
+                word-break: break-all; /* Prevent overflow on long strings without spaces */
+                display: block;
+                line-height: 1.4;
+            }
+        </style>
+        <div class="contact-card-list">
+    `;
+
     data.forEach(contact => {
         const isUpgraded = contact.status === '已升級';
         const isArchived = contact.status === '已歸檔';
         const isFiled = contact.status === '已建檔';
-        const isPending = !isUpgraded && !isArchived && !isFiled;
 
-        // 安全序列化
-        const contactJsonString = JSON.stringify(contact).replace(/'/g, "&apos;").replace(/"/g, '&quot;');
         const safeDriveLink = contact.driveLink ? contact.driveLink.replace(/'/g, "\\'") : '';
 
-        // 改用 data-action
         const driveLinkBtn = contact.driveLink
             ? `<button class="action-btn small info" title="預覽名片" data-action="view-card" data-link="${safeDriveLink}">💳 名片</button>`
-            : '';
-
-        // 改用 data-action
-        const upgradeBtn = isPending
-            ? `<button class="action-btn small primary" data-action="upgrade" data-contact='${contactJsonString}'>📈 升級</button>`
             : '';
 
         let statusBadge = '';
@@ -283,22 +312,232 @@ function renderContactsTable(data) {
         listHTML += `
             <div class="contact-card">
                 <div class="contact-card-main">
-                    <div class="contact-card-header">
-                        <span class="contact-card-name">${contact.name || '(無姓名)'}</span>
-                        ${statusBadge}
+                    <div class="contact-card-header" style="align-items: flex-start; margin-bottom: 8px;">
+                        <span class="contact-card-name-full">${contact.name || '(無姓名)'}</span>
+                        <div style="margin-left: 10px; flex-shrink: 0;">${statusBadge}</div>
                     </div>
                     <div class="contact-card-company">${contact.company || '(無公司)'}</div>
                     <div class="contact-card-position">${contact.position || '(無職位)'}</div>
                 </div>
                 <div class="contact-card-actions">
                     ${driveLinkBtn}
-                    ${upgradeBtn}
                 </div>
             </div>
         `;
     });
     listHTML += '</div>';
     return listHTML;
+}
+
+// --- Tab 2: 名片列表 ---
+function renderBusinessCardList(data) {
+    if (!data || data.length === 0) {
+        return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到名片資料</div>';
+    }
+
+    let listHTML = `
+        <style>
+            .bc-list-table { width: 100%; border-collapse: collapse; min-width: 800px; }
+            .bc-list-table th, .bc-list-table td { padding: 12px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: middle; }
+            .bc-list-table th { background-color: var(--glass-bg); color: var(--text-secondary); font-weight: 600; }
+            .bc-list-table tr:hover { background-color: var(--bg-hover, #f8fafc); }
+            .bc-name-cell { font-weight: 600; color: var(--text-main); white-space: normal; word-break: break-all; }
+        </style>
+        <div style="overflow-x: auto;">
+            <table class="bc-list-table">
+                <thead>
+                    <tr>
+                        <th style="width: 60px; text-align: center;">項次</th>
+                        <th>姓名</th>
+                        <th>公司</th>
+                        <th>職位</th>
+                        <th>手機</th>
+                        <th>Email</th>
+                        <th style="text-align: right;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    data.forEach((contact, index) => {
+        const contactJsonString = JSON.stringify(contact).replace(/'/g, "&apos;").replace(/"/g, '&quot;');
+        const safeDriveLink = contact.driveLink ? contact.driveLink.replace(/'/g, "\\'") : '';
+        
+        const previewBtn = contact.driveLink 
+            ? `<button class="action-btn small info" title="預覽名片" data-action="view-card" data-link="${safeDriveLink}" style="margin-right: 8px;">💳</button>`
+            : '';
+
+        listHTML += `
+            <tr>
+                <td style="text-align: center; color: var(--text-muted); font-weight: 500;">${index + 1}</td>
+                <td class="bc-name-cell">${contact.name || '-'}</td>
+                <td>${contact.company || '-'}</td>
+                <td>${contact.position || '-'}</td>
+                <td>${contact.mobile || '-'}</td>
+                <td>${contact.email || '-'}</td>
+                <td style="text-align: right; white-space: nowrap;">
+                    ${previewBtn}
+                    <button class="action-btn small primary" data-action="edit-card" data-contact='${contactJsonString}'>✏️ 編輯</button>
+                </td>
+            </tr>
+        `;
+    });
+
+    listHTML += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    return listHTML;
+}
+
+// --- Edit Mode (Left Image / Right Form) ---
+function renderEditCardMode(contact) {
+    const listContent = document.getElementById('contacts-page-content');
+    const actionBar = document.getElementById('contacts-action-bar');
+    if (!listContent) return;
+
+    // Hide search bar during edit
+    if (actionBar) actionBar.style.display = 'none';
+    currentEditRowIndex = contact.rowIndex;
+
+    let imagePreviewHtml = '';
+    if (contact.driveLink) {
+        const proxyUrl = `/api/drive/thumbnail?link=${encodeURIComponent(contact.driveLink)}`;
+        imagePreviewHtml = `
+            <a href="${contact.driveLink}" target="_blank" title="點擊開啟原始檔案 (Google Drive)" style="display: block; text-align: center; cursor: zoom-in;">
+                <img src="${proxyUrl}" alt="名片預覽" style="max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid var(--border-color);" onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'alert alert-warning\\'>預覽載入失敗，可點擊查看原檔</div>';">
+            </a>
+            <div style="text-align: center; margin-top: 8px;"><small style="color: var(--text-muted);">點擊圖片可開啟原檔</small></div>
+        `;
+    } else {
+        imagePreviewHtml = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 300px; background-color: var(--glass-bg); border-radius: 8px; border: 1px dashed var(--border-color); color: var(--text-muted);">
+                <span style="font-size: 3rem; margin-bottom: 1rem;">📇</span>
+                <p>無名片圖檔</p>
+            </div>
+        `;
+    }
+
+    // Editable fields: name, company, position, mobile, email
+    const safeName = (contact.name || '').replace(/"/g, '&quot;');
+    const safeCompany = (contact.company || '').replace(/"/g, '&quot;');
+    const safePosition = (contact.position || '').replace(/"/g, '&quot;');
+    const safeMobile = (contact.mobile || '').replace(/"/g, '&quot;');
+    const safeEmail = (contact.email || '').replace(/"/g, '&quot;');
+
+    listContent.innerHTML = `
+        <div class="edit-card-container" style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
+            
+            <div class="edit-card-preview" style="flex: 1; min-width: 300px;">
+                <h3 style="margin-bottom: 1rem; font-size: 1.1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">名片預覽</h3>
+                ${imagePreviewHtml}
+            </div>
+
+            <div class="edit-card-form" style="flex: 1; min-width: 300px; background: var(--card-bg, #fff); padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                    <h3 style="font-size: 1.1rem; margin: 0;">編輯聯絡人資訊</h3>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">姓名</label>
+                    <input type="text" id="raw-edit-name" class="form-input" value="${safeName}" style="width: 100%;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">公司名稱</label>
+                    <input type="text" id="raw-edit-company" class="form-input" value="${safeCompany}" style="width: 100%;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">職稱 (Position)</label>
+                    <input type="text" id="raw-edit-position" class="form-input" value="${safePosition}" style="width: 100%;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">手機 (Mobile)</label>
+                    <input type="tel" id="raw-edit-mobile" class="form-input" value="${safeMobile}" style="width: 100%;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 2rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">信箱 (Email)</label>
+                    <input type="email" id="raw-edit-email" class="form-input" value="${safeEmail}" style="width: 100%;">
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button class="action-btn" data-action="cancel-edit" style="background: var(--glass-bg); color: var(--text-main); border: 1px solid var(--border-color);">取消</button>
+                    <button class="action-btn primary" data-action="save-edit" id="btn-save-raw-edit">儲存變更</button>
+                </div>
+            </div>
+
+        </div>
+    `;
+}
+
+// --- Save Action ---
+async function handleSaveCardEdit() {
+    if (!currentEditRowIndex) {
+        console.error('Missing rowIndex for save.');
+        if (typeof showNotification === 'function') showNotification('無法儲存：缺少資料識別碼', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('btn-save-raw-edit');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '儲存中...';
+    }
+
+    const payload = {
+        name: document.getElementById('raw-edit-name')?.value.trim() || '',
+        company: document.getElementById('raw-edit-company')?.value.trim() || '',
+        position: document.getElementById('raw-edit-position')?.value.trim() || '',
+        mobile: document.getElementById('raw-edit-mobile')?.value.trim() || '',
+        email: document.getElementById('raw-edit-email')?.value.trim() || ''
+    };
+
+    try {
+        const response = await authedFetch(`/api/contacts/${currentEditRowIndex}/raw`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+
+        if (response && response.success) {
+            if (typeof showNotification === 'function') showNotification('資料已更新成功', 'success');
+            
+            // Re-fetch data to reflect changes immediately
+            const listResult = await authedFetch(`/api/contacts?q=`);
+            if (listResult && listResult.data) {
+                allContactsData = listResult.data;
+            }
+            
+            // Exit edit mode and return to previous list view safely
+            currentEditRowIndex = null;
+            const safeQuery = document.getElementById('contacts-page-search')?.value || '';
+            filterAndRenderContacts(safeQuery);
+            
+            // Signal dashboard update. 
+            // Note: If refreshCurrentView clears the DOM, the new logic in loadContacts ensures 
+            // the tabs correctly respect currentContactsTab, keeping the user in the cards view.
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
+
+        } else {
+            throw new Error(response.error || '更新失敗');
+        }
+    } catch (error) {
+        console.error('Save raw contact failed:', error);
+        if (typeof showNotification === 'function') {
+            showNotification(`儲存失敗: ${error.message}`, 'error');
+        } else {
+            alert(`儲存失敗: ${error.message}`);
+        }
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '儲存變更';
+        }
+    }
 }
 
 if (window.CRM_APP) {
