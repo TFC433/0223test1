@@ -2,11 +2,16 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.1.4 (Phase 8.1 UI Polish)
+ * Version: v8.2.2 (Phase 8.2 CORE UX Polish)
  * Date: 2026-03-13
- * Author: Gemini (Assisted)
+ * Author: Gemini
  *
  * Change Log:
+ * - [UX Polish] Sorted CORE contacts by update time, added '最後更新' column and UI hint.
+ * - [Bugfix] Implemented multi-page fetching loop for CORE contacts to ensure all SQL rows are loaded into the frontend.
+ * - [Feature] Added "正式聯絡人" tab to view CORE (SQL) contacts in read-only mode.
+ * - [Feature] Integrated /api/contacts/list API fetch into the page load flow.
+ * - [Feature] Split search logic to support `company` (RAW) vs `companyName` (CORE).
  * - [UI Polish] Enlarged tabs, simplified header, improved search placeholder, and added result count.
  * - [UI Simplification] Removed Contacts Trend Chart and related dashboard fetch logic.
  * - [UX Patch] Added "項次" (index) column to the "名片列表" view.
@@ -16,24 +21,26 @@
  * - [Bugfix] Added `e.preventDefault()` in action handler to prevent unexpected UI jumps.
  * - [Phase 8.1] Removed "升級" (Upgrade to Opportunity) feature from RAW contacts page.
  * - [Phase 8.1] Ensured contact names are always fully visible (removed truncation).
- * - [Phase 8.1] Added "名片列表" (Business Card List) tab.
+ * - [Phase 8.1] Added "名片總覽" (Business Card List) tab.
  * - [Phase 8.1] Implemented inline edit mode for RAW contacts (Left: Preview, Right: Form).
  * - [Phase 8.1] Wired edit form to PUT /api/contacts/:rowIndex/raw.
  * * WORLD MODEL (UI LAYER):
  * 1. RAW Contact (Potential):
- * - Rendered here (loadContacts).
+ * - Rendered here (loadContacts) in "聯絡人列表" & "名片總覽" tabs.
  * - Source: /api/contacts (Sheet Read).
  * - Action: View Card, Edit Card.
  * - Identity: Uses rowIndex (passed in payload) for handoff to update API.
  * 2. CORE Contact (Official):
- * - NOT rendered here. Managed in separate Official List views.
- * - This file strictly handles the "Potential Pool" (Sheet Data).
+ * - Rendered here in "正式聯絡人" tab (Read-Only).
+ * - Source: /api/contacts/list (SQL Read - Multi-page accumulation).
+ * - Identity: contactId.
  * ============================================================================
  */
 
 // ==================== 全域變數 ====================
 let allContactsData = []; 
-let currentContactsTab = 'list'; // 'list' | 'cards'
+let coreContactsData = [];
+let currentContactsTab = 'list'; // 'list' | 'cards' | 'core'
 let currentEditRowIndex = null;
 
 // ==================== 主要功能函式 ====================
@@ -48,6 +55,7 @@ async function loadContacts(query = '') {
     // Determine active tab state
     const isListActive = currentContactsTab === 'list';
     const isCardsActive = currentContactsTab === 'cards';
+    const isCoreActive = currentContactsTab === 'core';
 
     // 1. 初始化容器與事件監聽 (加入頁籤 UI)
     container.innerHTML = `
@@ -57,8 +65,9 @@ async function loadContacts(query = '') {
                     <h2 class="widget-title" style="margin: 0;">潛在客戶</h2>
                 </div>
                 <div class="contacts-tabs" style="display: flex; gap: 4px; background: var(--bg-hover, #f1f5f9); padding: 4px; border-radius: 8px;">
-                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="background: ${isListActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isListActive ? '600' : '500'}; color: ${isListActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isListActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">名片總覽</button>
-                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="background: ${isCardsActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isCardsActive ? '600' : '500'}; color: ${isCardsActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isCardsActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">聯絡人列表</button>
+                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="background: ${isListActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isListActive ? '600' : '500'}; color: ${isListActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isListActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">聯絡人列表</button>
+                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="background: ${isCardsActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isCardsActive ? '600' : '500'}; color: ${isCardsActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isCardsActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">名片總覽</button>
+                    <button class="tab-btn ${isCoreActive ? 'active' : ''}" data-action="switch-tab" data-tab="core" style="background: ${isCoreActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isCoreActive ? '600' : '500'}; color: ${isCoreActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isCoreActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">正式聯絡人</button>
                 </div>
             </div>
             
@@ -72,7 +81,7 @@ async function loadContacts(query = '') {
             </div>
 
             <div id="contacts-page-content" style="padding: 0 1.5rem 1.5rem;">
-                <div class="loading show"><div class="spinner"></div><p>載入潛在客戶資料中...</p></div>
+                <div class="loading show"><div class="spinner"></div><p>載入客戶資料中...</p></div>
             </div>
         </div>
     `;
@@ -88,11 +97,37 @@ async function loadContacts(query = '') {
     }
 
     try {
-        if (allContactsData.length === 0) {
-            console.log('[Contacts] 首次載入，正在獲取所有潛在客戶資料...');
-            // [World Model] Fetching RAW Data from Sheet via API
-            const listResult = await authedFetch(`/api/contacts?q=`);
+        if (allContactsData.length === 0 || coreContactsData.length === 0) {
+            console.log('[Contacts] 首次載入，正在獲取潛在與正式客戶資料...');
+            
+            // Helper function to fetch all paginated CORE contacts
+            const fetchAllCoreContacts = async () => {
+                let accumulatedData = [];
+                let currentPage = 1;
+                let hasNext = true;
+                
+                while (hasNext) {
+                    const res = await authedFetch(`/api/contacts/list?page=${currentPage}&limit=100`); // using 100 to be safe with standard pagination bounds
+                    if (res && res.data) {
+                        accumulatedData = accumulatedData.concat(res.data);
+                    }
+                    if (res && res.pagination && res.pagination.hasNext) {
+                        currentPage++;
+                    } else {
+                        hasNext = false;
+                    }
+                }
+                return accumulatedData;
+            };
+
+            // [World Model] Fetching RAW Data and CORE Data in parallel
+            const [listResult, fullCoreData] = await Promise.all([
+                authedFetch(`/api/contacts?q=`),
+                fetchAllCoreContacts()
+            ]);
+            
             allContactsData = listResult.data || [];
+            coreContactsData = fullCoreData || [];
         }
         
         filterAndRenderContacts(searchQuery);
@@ -186,34 +221,62 @@ function filterAndRenderContacts(query = '') {
     if (actionBar) actionBar.style.display = 'block';
     currentEditRowIndex = null; // Reset edit state
 
-    let filteredData = [...allContactsData];
+    let filteredData = [];
     
     // Type Guard: strictly handle query as a string
     const safeQuery = typeof query === 'string' ? query : '';
     const searchTerm = safeQuery.toLowerCase();
 
-    if (searchTerm) {
-        filteredData = filteredData.filter(c =>
-            (c.name && c.name.toLowerCase().includes(searchTerm)) ||
-            (c.company && c.company.toLowerCase().includes(searchTerm))
-        );
+    // Branch filtering based on active tab and data source
+    if (currentContactsTab === 'core') {
+        filteredData = [...coreContactsData];
+        if (searchTerm) {
+            filteredData = filteredData.filter(c =>
+                (c.name && c.name.toLowerCase().includes(searchTerm)) ||
+                (c.companyName && c.companyName.toLowerCase().includes(searchTerm))
+            );
+        }
+        // [UX Polish] Sort CORE contacts by update time descending
+        filteredData.sort((a, b) => {
+            const timeA = new Date(a.lastUpdateTime || a.createdTime || 0).getTime();
+            const timeB = new Date(b.lastUpdateTime || b.createdTime || 0).getTime();
+            return timeB - timeA;
+        });
+    } else {
+        filteredData = [...allContactsData];
+        if (searchTerm) {
+            filteredData = filteredData.filter(c =>
+                (c.name && c.name.toLowerCase().includes(searchTerm)) ||
+                (c.company && c.company.toLowerCase().includes(searchTerm))
+            );
+        }
     }
     
-    // Update count display
+    // Update count display with appropriate label and hint
     if (countDisplay) {
-        countDisplay.textContent = `共 ${filteredData.length} 筆潛在客戶`;
+        const label = currentContactsTab === 'core' ? '正式聯絡人' : '潛在客戶';
+        let htmlContent = `共 ${filteredData.length} 筆${label}`;
+        
+        if (currentContactsTab === 'core') {
+            htmlContent += ` <span style="margin-left: 10px; font-size: 0.85em; background: var(--bg-hover, #f1f5f9); padding: 3px 8px; border-radius: 4px; color: var(--text-secondary);">「依最後更新時間排序（新到舊）」</span>`;
+        }
+        
+        countDisplay.innerHTML = htmlContent;
     }
 
+    // Render corresponding view
     if (currentContactsTab === 'list') {
         listContent.innerHTML = renderContactsTable(filteredData);
     } else if (currentContactsTab === 'cards') {
         listContent.innerHTML = renderBusinessCardList(filteredData);
+    } else if (currentContactsTab === 'core') {
+        listContent.innerHTML = renderCoreContactsTable(filteredData);
     }
 }
 
 // ==================== 專用渲染函式 ====================
 
-// --- Tab 1: 聯絡人列表 (No Upgrade, Full Name) ---
+// --- Tab 1: 聯絡人列表 (RAW) ---
 function renderContactsTable(data) {
     if (!data || data.length === 0) {
         return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到聯絡人資料</div>';
@@ -277,7 +340,7 @@ function renderContactsTable(data) {
     return listHTML;
 }
 
-// --- Tab 2: 名片列表 ---
+// --- Tab 2: 名片總覽 (RAW) ---
 function renderBusinessCardList(data) {
     if (!data || data.length === 0) {
         return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到名片資料</div>';
@@ -327,6 +390,67 @@ function renderBusinessCardList(data) {
                     ${previewBtn}
                     <button class="action-btn small primary" data-action="edit-card" data-contact='${contactJsonString}'>✏️ 編輯</button>
                 </td>
+            </tr>
+        `;
+    });
+
+    listHTML += `
+                </tbody>
+            </table>
+        </div>
+    `;
+    return listHTML;
+}
+
+// --- Tab 3: 正式聯絡人 (CORE - Read Only) ---
+function renderCoreContactsTable(data) {
+    if (!data || data.length === 0) {
+        return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到正式聯絡人資料</div>';
+    }
+
+    let listHTML = `
+        <style>
+            .core-list-table { width: 100%; border-collapse: collapse; min-width: 800px; }
+            .core-list-table th, .core-list-table td { padding: 12px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: middle; }
+            .core-list-table th { background-color: var(--glass-bg); color: var(--text-secondary); font-weight: 600; }
+            .core-list-table tr:hover { background-color: var(--bg-hover, #f8fafc); }
+            .core-name-cell { font-weight: 600; color: var(--text-main); white-space: normal; word-break: break-all; }
+        </style>
+        <div style="overflow-x: auto;">
+            <table class="core-list-table">
+                <thead>
+                    <tr>
+                        <th style="width: 60px; text-align: center;">項次</th>
+                        <th>姓名</th>
+                        <th>公司</th>
+                        <th>職位</th>
+                        <th>手機</th>
+                        <th>Email</th>
+                        <th>最後更新</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    data.forEach((contact, index) => {
+        let updateTimeStr = '-';
+        const rawTime = contact.lastUpdateTime || contact.createdTime;
+        if (rawTime) {
+            const d = new Date(rawTime);
+            if (!isNaN(d.getTime())) {
+                updateTimeStr = d.toLocaleDateString('zh-TW');
+            }
+        }
+
+        listHTML += `
+            <tr>
+                <td style="text-align: center; color: var(--text-muted); font-weight: 500;">${index + 1}</td>
+                <td class="core-name-cell">${contact.name || '-'}</td>
+                <td>${contact.companyName || '-'}</td>
+                <td>${contact.position || '-'}</td>
+                <td>${contact.mobile || '-'}</td>
+                <td>${contact.email || '-'}</td>
+                <td style="color: var(--text-muted); font-size: 0.9em;">${updateTimeStr}</td>
             </tr>
         `;
     });
