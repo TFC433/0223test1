@@ -2,11 +2,13 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.2.2 (Phase 8.2 CORE UX Polish)
+ * Version: v8.2.3 (Phase 8.2 CORE Light Edit Patch)
  * Date: 2026-03-13
  * Author: Gemini
  *
  * Change Log:
+ * - [Feature] Added Light Edit capability to CORE contacts ("正式聯絡人" tab).
+ * - [Feature] Added safe PUT /api/contacts/:contactId payload generation excluding relation fields.
  * - [UX Polish] Sorted CORE contacts by update time, added '最後更新' column and UI hint.
  * - [Bugfix] Implemented multi-page fetching loop for CORE contacts to ensure all SQL rows are loaded into the frontend.
  * - [Feature] Added "正式聯絡人" tab to view CORE (SQL) contacts in read-only mode.
@@ -16,12 +18,6 @@
  * - [UI Simplification] Removed Contacts Trend Chart and related dashboard fetch logic.
  * - [UX Patch] Added "項次" (index) column to the "名片列表" view.
  * - [UX Patch] Made "姓名" (name) an editable field in the RAW contact edit form.
- * - [Bugfix] Fixed `query.toLowerCase is not a function` crash by adding string type guards for routing params.
- * - [Bugfix] Fixed tab UI state resetting to "聯絡人列表" after saving an edit by binding DOM tab state to `currentContactsTab`.
- * - [Bugfix] Added `e.preventDefault()` in action handler to prevent unexpected UI jumps.
- * - [Phase 8.1] Removed "升級" (Upgrade to Opportunity) feature from RAW contacts page.
- * - [Phase 8.1] Ensured contact names are always fully visible (removed truncation).
- * - [Phase 8.1] Added "名片總覽" (Business Card List) tab.
  * - [Phase 8.1] Implemented inline edit mode for RAW contacts (Left: Preview, Right: Form).
  * - [Phase 8.1] Wired edit form to PUT /api/contacts/:rowIndex/raw.
  * * WORLD MODEL (UI LAYER):
@@ -31,8 +27,9 @@
  * - Action: View Card, Edit Card.
  * - Identity: Uses rowIndex (passed in payload) for handoff to update API.
  * 2. CORE Contact (Official):
- * - Rendered here in "正式聯絡人" tab (Read-Only).
+ * - Rendered here in "正式聯絡人" tab.
  * - Source: /api/contacts/list (SQL Read - Multi-page accumulation).
+ * - Action: Light Edit (Name, Position, Contact Info). NO relation mutations.
  * - Identity: contactId.
  * ============================================================================
  */
@@ -42,6 +39,29 @@ let allContactsData = [];
 let coreContactsData = [];
 let currentContactsTab = 'list'; // 'list' | 'cards' | 'core'
 let currentEditRowIndex = null;
+let currentCoreEditContactId = null;
+
+// ==================== API 輔助函式 ====================
+
+// Helper function to fetch all paginated CORE contacts (reusable)
+async function fetchAllCoreContacts() {
+    let accumulatedData = [];
+    let currentPage = 1;
+    let hasNext = true;
+    
+    while (hasNext) {
+        const res = await authedFetch(`/api/contacts/list?page=${currentPage}&limit=100`);
+        if (res && res.data) {
+            accumulatedData = accumulatedData.concat(res.data);
+        }
+        if (res && res.pagination && res.pagination.hasNext) {
+            currentPage++;
+        } else {
+            hasNext = false;
+        }
+    }
+    return accumulatedData;
+}
 
 // ==================== 主要功能函式 ====================
 
@@ -100,26 +120,6 @@ async function loadContacts(query = '') {
         if (allContactsData.length === 0 || coreContactsData.length === 0) {
             console.log('[Contacts] 首次載入，正在獲取潛在與正式客戶資料...');
             
-            // Helper function to fetch all paginated CORE contacts
-            const fetchAllCoreContacts = async () => {
-                let accumulatedData = [];
-                let currentPage = 1;
-                let hasNext = true;
-                
-                while (hasNext) {
-                    const res = await authedFetch(`/api/contacts/list?page=${currentPage}&limit=100`); // using 100 to be safe with standard pagination bounds
-                    if (res && res.data) {
-                        accumulatedData = accumulatedData.concat(res.data);
-                    }
-                    if (res && res.pagination && res.pagination.hasNext) {
-                        currentPage++;
-                    } else {
-                        hasNext = false;
-                    }
-                }
-                return accumulatedData;
-            };
-
             // [World Model] Fetching RAW Data and CORE Data in parallel
             const [listResult, fullCoreData] = await Promise.all([
                 authedFetch(`/api/contacts?q=`),
@@ -185,6 +185,7 @@ function handleContactListClick(e) {
             filterAndRenderContacts(currentQuery);
             break;
 
+        // RAW Contacts Edit Actions
         case 'edit-card':
             try {
                 const contactData = JSON.parse(payload.contact);
@@ -196,12 +197,32 @@ function handleContactListClick(e) {
 
         case 'cancel-edit':
             // Return to current tab view
-            const query = document.getElementById('contacts-page-search')?.value || '';
-            filterAndRenderContacts(query);
+            const rawQuery = document.getElementById('contacts-page-search')?.value || '';
+            filterAndRenderContacts(rawQuery);
             break;
             
         case 'save-edit':
             handleSaveCardEdit();
+            break;
+
+        // CORE Contacts Edit Actions
+        case 'edit-core':
+            try {
+                const coreData = JSON.parse(payload.contact);
+                renderCoreEditMode(coreData);
+            } catch (err) {
+                console.error('無法解析正式聯絡人資料進行編輯', err);
+            }
+            break;
+
+        case 'cancel-core-edit':
+            // Return to current tab view
+            const coreQuery = document.getElementById('contacts-page-search')?.value || '';
+            filterAndRenderContacts(coreQuery);
+            break;
+
+        case 'save-core-edit':
+            handleSaveCoreEdit();
             break;
     }
 }
@@ -219,7 +240,10 @@ function filterAndRenderContacts(query = '') {
 
     // Ensure search bar is visible when not in edit mode
     if (actionBar) actionBar.style.display = 'block';
-    currentEditRowIndex = null; // Reset edit state
+    
+    // Reset edit states safely
+    currentEditRowIndex = null; 
+    currentCoreEditContactId = null;
 
     let filteredData = [];
     
@@ -402,7 +426,7 @@ function renderBusinessCardList(data) {
     return listHTML;
 }
 
-// --- Tab 3: 正式聯絡人 (CORE - Read Only) ---
+// --- Tab 3: 正式聯絡人 (CORE - Light Edit Supported) ---
 function renderCoreContactsTable(data) {
     if (!data || data.length === 0) {
         return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到正式聯絡人資料</div>';
@@ -410,7 +434,7 @@ function renderCoreContactsTable(data) {
 
     let listHTML = `
         <style>
-            .core-list-table { width: 100%; border-collapse: collapse; min-width: 800px; }
+            .core-list-table { width: 100%; border-collapse: collapse; min-width: 900px; }
             .core-list-table th, .core-list-table td { padding: 12px; border-bottom: 1px solid var(--border-color); text-align: left; vertical-align: middle; }
             .core-list-table th { background-color: var(--glass-bg); color: var(--text-secondary); font-weight: 600; }
             .core-list-table tr:hover { background-color: var(--bg-hover, #f8fafc); }
@@ -427,6 +451,7 @@ function renderCoreContactsTable(data) {
                         <th>手機</th>
                         <th>Email</th>
                         <th>最後更新</th>
+                        <th style="text-align: right; width: 80px;">操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -442,6 +467,8 @@ function renderCoreContactsTable(data) {
             }
         }
 
+        const contactJsonString = JSON.stringify(contact).replace(/'/g, "&apos;").replace(/"/g, '&quot;');
+
         listHTML += `
             <tr>
                 <td style="text-align: center; color: var(--text-muted); font-weight: 500;">${index + 1}</td>
@@ -451,6 +478,9 @@ function renderCoreContactsTable(data) {
                 <td>${contact.mobile || '-'}</td>
                 <td>${contact.email || '-'}</td>
                 <td style="color: var(--text-muted); font-size: 0.9em;">${updateTimeStr}</td>
+                <td style="text-align: right; white-space: nowrap;">
+                    <button class="action-btn small primary" data-action="edit-core" data-contact='${contactJsonString}'>✏️ 編輯</button>
+                </td>
             </tr>
         `;
     });
@@ -463,7 +493,9 @@ function renderCoreContactsTable(data) {
     return listHTML;
 }
 
-// --- Edit Mode (Left Image / Right Form) ---
+// ==================== 編輯模式渲染函式 ====================
+
+// --- RAW Contacts Edit Mode (Left Image / Right Form) ---
 function renderEditCardMode(contact) {
     const listContent = document.getElementById('contacts-page-content');
     const actionBar = document.getElementById('contacts-action-bar');
@@ -546,7 +578,73 @@ function renderEditCardMode(contact) {
     `;
 }
 
-// --- Save Action ---
+// --- CORE Contacts Edit Mode (Centered Form) ---
+function renderCoreEditMode(contact) {
+    const listContent = document.getElementById('contacts-page-content');
+    const actionBar = document.getElementById('contacts-action-bar');
+    if (!listContent) return;
+
+    // Hide search bar during edit
+    if (actionBar) actionBar.style.display = 'none';
+    currentCoreEditContactId = contact.contactId;
+
+    // Safely escape values
+    const safeName = (contact.name || '').replace(/"/g, '&quot;');
+    const safePosition = (contact.position || '').replace(/"/g, '&quot;');
+    const safeMobile = (contact.mobile || '').replace(/"/g, '&quot;');
+    const safePhone = (contact.phone || '').replace(/"/g, '&quot;');
+    const safeEmail = (contact.email || '').replace(/"/g, '&quot;');
+    const displayCompany = contact.companyName || '-';
+
+    listContent.innerHTML = `
+        <div class="edit-core-container" style="display: flex; justify-content: center;">
+            <div class="edit-card-form" style="width: 100%; max-width: 600px; background: var(--card-bg, #fff); padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                    <h3 style="font-size: 1.1rem; margin: 0;">編輯正式聯絡人</h3>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 1rem; background: var(--bg-hover, #f8fafc); padding: 10px; border-radius: 6px;">
+                    <label style="display: block; margin-bottom: 0.25rem; font-weight: 500; color: var(--text-secondary); font-size: 0.85rem;">公司名稱 (不可編輯)</label>
+                    <div style="font-weight: 600; color: var(--text-main);">${displayCompany}</div>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">姓名</label>
+                    <input type="text" id="core-edit-name" class="form-input" value="${safeName}" style="width: 100%;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">職稱 (Position)</label>
+                    <input type="text" id="core-edit-position" class="form-input" value="${safePosition}" style="width: 100%;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">手機 (Mobile)</label>
+                    <input type="tel" id="core-edit-mobile" class="form-input" value="${safeMobile}" style="width: 100%;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">電話 (Phone)</label>
+                    <input type="tel" id="core-edit-phone" class="form-input" value="${safePhone}" style="width: 100%;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 2rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--text-secondary);">信箱 (Email)</label>
+                    <input type="email" id="core-edit-email" class="form-input" value="${safeEmail}" style="width: 100%;">
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button class="action-btn" data-action="cancel-core-edit" style="background: var(--glass-bg); color: var(--text-main); border: 1px solid var(--border-color);">取消</button>
+                    <button class="action-btn primary" data-action="save-core-edit" id="btn-save-core-edit">儲存變更</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ==================== 儲存處理函式 ====================
+
+// --- Save Action: RAW ---
 async function handleSaveCardEdit() {
     if (!currentEditRowIndex) {
         console.error('Missing rowIndex for save.');
@@ -589,8 +687,6 @@ async function handleSaveCardEdit() {
             filterAndRenderContacts(safeQuery);
             
             // Signal dashboard update. 
-            // Note: If refreshCurrentView clears the DOM, the new logic in loadContacts ensures 
-            // the tabs correctly respect currentContactsTab, keeping the user in the cards view.
             if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
                 window.dashboardManager.markStale();
             }
@@ -600,6 +696,68 @@ async function handleSaveCardEdit() {
         }
     } catch (error) {
         console.error('Save raw contact failed:', error);
+        if (typeof showNotification === 'function') {
+            showNotification(`儲存失敗: ${error.message}`, 'error');
+        } else {
+            alert(`儲存失敗: ${error.message}`);
+        }
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '儲存變更';
+        }
+    }
+}
+
+// --- Save Action: CORE ---
+async function handleSaveCoreEdit() {
+    if (!currentCoreEditContactId) {
+        console.error('Missing contactId for save.');
+        if (typeof showNotification === 'function') showNotification('無法儲存：缺少資料識別碼', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('btn-save-core-edit');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '儲存中...';
+    }
+
+    // STRICT PAYLOAD: Exclude companyId, companyName, department to protect relations.
+    const payload = {
+        name: document.getElementById('core-edit-name')?.value.trim() || '',
+        position: document.getElementById('core-edit-position')?.value.trim() || '',
+        mobile: document.getElementById('core-edit-mobile')?.value.trim() || '',
+        phone: document.getElementById('core-edit-phone')?.value.trim() || '',
+        email: document.getElementById('core-edit-email')?.value.trim() || ''
+    };
+
+    try {
+        const response = await authedFetch(`/api/contacts/${currentCoreEditContactId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+
+        if (response && response.success) {
+            if (typeof showNotification === 'function') showNotification('正式聯絡人已更新成功', 'success');
+            
+            // Re-fetch CORE data to reflect changes immediately
+            coreContactsData = await fetchAllCoreContacts();
+            
+            // Exit edit mode and return to CORE list view
+            currentCoreEditContactId = null;
+            const safeQuery = document.getElementById('contacts-page-search')?.value || '';
+            filterAndRenderContacts(safeQuery);
+            
+            // Signal dashboard update. 
+            if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                window.dashboardManager.markStale();
+            }
+
+        } else {
+            throw new Error(response.error || '更新失敗');
+        }
+    } catch (error) {
+        console.error('Save core contact failed:', error);
         if (typeof showNotification === 'function') {
             showNotification(`儲存失敗: ${error.message}`, 'error');
         } else {
