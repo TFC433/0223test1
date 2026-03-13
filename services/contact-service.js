@@ -2,9 +2,10 @@
 /**
  * services/contact-service.js
  * 聯絡人業務邏輯服務層
- * @version 8.8.0 (Phase 8.8: Architectural Fix - Delegate SQL to Reader)
- * @date 2026-03-11
+ * @version 8.8.1 (Phase 8.2 Safe Delete Patch)
+ * @date 2026-03-13
  * @changelog
+ * - [PHASE 8.2] Added relation validation block to deleteContact.
  * - [PHASE 8.8] Removed direct CompanySqlReader instantiation and Supabase calls. Fully delegated to ContactSqlReader.
  * - [PHASE 8.7] Refactored getLinkedContacts to use strict Supabase SQL JOIN, dropping all Google Sheet dependencies.
  * - [STRICT WRITE AUTHORITY]
@@ -306,7 +307,19 @@ class ContactService {
         if (!this.contactSqlWriter) {
             throw new Error('[ContactService] CRITICAL: ContactSqlWriter not configured. Delete disallowed.');
         }
+        if (!this.contactSqlReader) {
+            throw new Error('[ContactService] CRITICAL: ContactSqlReader not configured. Validation disallowed.');
+        }
 
+        // 1. Authoritative Validation: Check for relations
+        const hasLinks = await this.contactSqlReader.checkContactHasLinks(contactId);
+        
+        if (hasLinks) {
+            // Safe Block: Return error response payload instead of throwing a raw exception
+            return { success: false, error: '無法刪除：該聯絡人已關聯至機會案件' };
+        }
+
+        // 2. Perform Delete
         await this.contactSqlWriter.deleteContact(contactId);
 
         if (this.contactCoreReader && this.contactCoreReader.invalidateCache) {

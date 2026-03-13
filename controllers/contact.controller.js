@@ -1,11 +1,11 @@
 /**
  * controllers/contact.controller.js
  * 聯絡人模組控制器
- * * @version 8.0.1 (Phase 8.1 RAW Update Patch)
+ * * @version 8.0.2 (Phase 8.2 Regression Fix)
  * * @date 2026-03-13
  * * @description 負責處理聯絡人相關的 HTTP 請求，驗證參數，並呼叫對應的 Service。
- * * 修復了 API 回傳格式以符合前端 contacts.js 的預期 ({ data: [] })。
- * * [Phase 8.1] 增加了 updateRawContact 以支援從 CRM UI 編輯 RAW 聯絡人資料。
+ * * [Hotfix] Restored missing updateRawContact method for RAW edit flow regression.
+ * * [Phase 8.2] Added deleteContact method for conditional CORE deletions.
  *
  * ============================================================================
  * WORLD MODEL (CONTROLLER LAYER):
@@ -20,9 +20,9 @@
  * 2. CORE ZONE (Official Contacts)
  * - Source: SQL (Primary) via ContactService -> ContactSqlReader/Writer.
  * - Identity: contactId (Stable, UUID/C-prefixed).
- * - Routes: GET /list (searchContactList), PUT /:contactId.
+ * - Routes: GET /list (searchContactList), PUT /:contactId, DELETE /:contactId.
  * - Purpose: Clean, curated CRM entities linked to Companies/Opportunities.
- * - Writes: SQL ONLY (Strict Authority).
+ * - Writes: SQL ONLY (Strict Authority). Safe Delete logic active.
  *
  * 3. THE HANDOFF (Upgrade Flow)
  * - Route: POST /:rowIndex/upgrade.
@@ -61,9 +61,6 @@ class ContactController {
             const result = await this.contactService.getPotentialContacts();
             
             // 2. 格式化回傳
-            // ★★★ 關鍵修正 ★★★
-            // 前端 (contacts.js) 預期回傳格式為 { data: [...] }
-            // 若直接回傳陣列，前端會因為讀取不到 .data 而顯示空白
             res.json({ data: result });
         } catch (error) {
             handleApiError(res, error, 'Get Potential Contacts');
@@ -163,6 +160,28 @@ class ContactController {
             res.json(result);
         } catch (error) {
             handleApiError(res, error, 'Update Contact');
+        }
+    };
+
+    /**
+     * [ZONE: CORE / OFFICIAL]
+     * DELETE /api/contacts/:contactId
+     * 刪除正式聯絡人
+     * Identity: contactId
+     * Target: SQL
+     * Contract: Conditionally deletes only if no relations exist.
+     */
+    deleteContact = async (req, res) => {
+        try {
+            const contactId = req.params.contactId;
+            const user = req.user ? req.user.name : 'System';
+
+            const result = await this.contactService.deleteContact(contactId, user);
+            
+            // If relations blocked the deletion, result will contain { success: false, error: ... }
+            res.json(result);
+        } catch (error) {
+            handleApiError(res, error, 'Delete Contact');
         }
     };
 

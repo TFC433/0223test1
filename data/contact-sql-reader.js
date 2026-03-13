@@ -6,9 +6,10 @@
  * - Table: contacts
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.6.0 (Phase 8.9 Dashboard Optimization)
- * - Date: 2026-03-12
+ * - Version: 1.6.1 (Phase 8.2 Safe Delete Validation)
+ * - Date: 2026-03-13
  * - Changelog: 
+ * - Added checkContactHasLinks to support conditional delete validation.
  * - Removed Supabase relational join in getContactsByOpportunityId to fix schema cache crash.
  * - Implemented strict 2-step application-level join logic.
  * - Added getContactList adapter to abstract legacy method requirements.
@@ -21,6 +22,34 @@ class ContactSqlReader {
 
     constructor() {
         this.tableName = 'contacts';
+    }
+
+    /**
+     * [Phase 8.2 Safe Delete Validation]
+     * Check if a contact is actively linked to any opportunity.
+     * @param {string} contactId 
+     * @returns {Promise<boolean>} True if relations exist, false otherwise.
+     */
+    async checkContactHasLinks(contactId) {
+        if (!contactId) throw new Error('ContactSqlReader: contactId is required');
+
+        try {
+            const { data, error } = await supabase
+                .from('opportunity_contact_links')
+                .select('link_id')
+                .eq('contact_id', contactId)
+                .eq('status', 'active')
+                .limit(1);
+
+            if (error) {
+                throw new Error(`[ContactSqlReader] DB Error: ${error.message}`);
+            }
+
+            return data && data.length > 0;
+        } catch (error) {
+            console.error('[ContactSqlReader] checkContactHasLinks Error:', error);
+            throw error;
+        }
     }
 
     /**

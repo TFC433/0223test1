@@ -1,7 +1,7 @@
 /**
  * routes/contact.routes.js
  * 聯絡人/潛在客戶模組路由
- * * @version 6.1.2 (Added: RAW Contact Update Route)
+ * * @version 6.1.3 (Added: CORE Contact Safe Delete)
  * @date 2026-03-13
  */
 const express = require('express');
@@ -60,6 +60,13 @@ router.post('/:rowIndex/upgrade', async (req, res, next) => {
 router.put('/:contactId', async (req, res, next) => {
     try {
         await getController(req).updateContact(req, res);
+    } catch (e) { next(e); }
+});
+
+// DELETE /api/contacts/:contactId (刪除 - Safe conditional logic inside Service)
+router.delete('/:contactId', async (req, res, next) => {
+    try {
+        await getController(req).deleteContact(req, res);
     } catch (e) { next(e); }
 });
 

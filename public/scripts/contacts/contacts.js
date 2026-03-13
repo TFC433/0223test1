@@ -2,11 +2,15 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.2.3 (Phase 8.2 CORE Light Edit Patch)
- * Date: 2026-03-13
+ * Version: v8.2.6 (Phase 8.2 Delete Notification Verdict Patch)
+ * Date: 2026-03-14
  * Author: Gemini
  *
  * Change Log:
+ * - [UX Polish] Adjusted CORE delete notification wording to clearly show the verdict (Success, Blocked, Error).
+ * - [UX Polish] Enhanced delete CORE contact feedback to distinctly separate Success, Validation Blocked, and System Error states.
+ * - [Feature] Implemented safe delete UX for CORE contacts ("刪除" button delegating to backend block rules).
+ * - [UX Polish] Enhanced "正式聯絡人" tab with prominent red visual emphasis.
  * - [Feature] Added Light Edit capability to CORE contacts ("正式聯絡人" tab).
  * - [Feature] Added safe PUT /api/contacts/:contactId payload generation excluding relation fields.
  * - [UX Polish] Sorted CORE contacts by update time, added '最後更新' column and UI hint.
@@ -29,7 +33,7 @@
  * 2. CORE Contact (Official):
  * - Rendered here in "正式聯絡人" tab.
  * - Source: /api/contacts/list (SQL Read - Multi-page accumulation).
- * - Action: Light Edit (Name, Position, Contact Info). NO relation mutations.
+ * - Action: Light Edit (Name, Position, Contact Info). NO relation mutations. Safe Delete via relation validation.
  * - Identity: contactId.
  * ============================================================================
  */
@@ -77,6 +81,13 @@ async function loadContacts(query = '') {
     const isCardsActive = currentContactsTab === 'cards';
     const isCoreActive = currentContactsTab === 'core';
 
+    // Base styles for RAW tabs
+    const listBtnStyle = `background: ${isListActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isListActive ? '600' : '500'}; color: ${isListActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isListActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;`;
+    const cardsBtnStyle = `background: ${isCardsActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isCardsActive ? '600' : '500'}; color: ${isCardsActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isCardsActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;`;
+    
+    // RED emphasis style for CORE tab
+    const coreBtnStyle = `background: ${isCoreActive ? '#ef4444' : '#fef2f2'}; border: 1px solid ${isCoreActive ? '#dc2626' : '#fecaca'}; padding: 8px 16px; font-weight: ${isCoreActive ? '600' : '500'}; color: ${isCoreActive ? 'white' : '#ef4444'}; border-radius: 6px; box-shadow: ${isCoreActive ? '0 2px 4px rgba(239,68,68,0.3)' : 'none'}; cursor: pointer; transition: all 0.2s;`;
+
     // 1. 初始化容器與事件監聽 (加入頁籤 UI)
     container.innerHTML = `
         <div class="dashboard-widget">
@@ -85,9 +96,9 @@ async function loadContacts(query = '') {
                     <h2 class="widget-title" style="margin: 0;">潛在客戶</h2>
                 </div>
                 <div class="contacts-tabs" style="display: flex; gap: 4px; background: var(--bg-hover, #f1f5f9); padding: 4px; border-radius: 8px;">
-                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="background: ${isListActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isListActive ? '600' : '500'}; color: ${isListActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isListActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">聯絡人列表</button>
-                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="background: ${isCardsActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isCardsActive ? '600' : '500'}; color: ${isCardsActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isCardsActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">名片總覽</button>
-                    <button class="tab-btn ${isCoreActive ? 'active' : ''}" data-action="switch-tab" data-tab="core" style="background: ${isCoreActive ? 'white' : 'transparent'}; border: none; padding: 8px 16px; font-weight: ${isCoreActive ? '600' : '500'}; color: ${isCoreActive ? 'var(--accent-blue)' : 'var(--text-muted)'}; border-radius: 6px; box-shadow: ${isCoreActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'}; cursor: pointer; transition: all 0.2s;">正式聯絡人</button>
+                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="${listBtnStyle}">聯絡人列表</button>
+                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="${cardsBtnStyle}">名片總覽</button>
+                    <button class="tab-btn ${isCoreActive ? 'active' : ''}" data-action="switch-tab" data-tab="core" style="${coreBtnStyle}">正式聯絡人</button>
                 </div>
             </div>
             
@@ -165,20 +176,30 @@ function handleContactListClick(e) {
             const tabName = payload.tab;
             if (currentContactsTab === tabName) return; // No change
             
-            // Update UI state
             currentContactsTab = tabName;
+            
+            // Update UI state with Red Tab Emphasis Logic
             document.querySelectorAll('.contacts-tabs .tab-btn').forEach(t => {
-                t.classList.remove('active');
-                t.style.fontWeight = '500';
-                t.style.color = 'var(--text-muted)';
-                t.style.background = 'transparent';
-                t.style.boxShadow = 'none';
+                const isCoreBtn = t.dataset.tab === 'core';
+                const isActive = t.dataset.tab === currentContactsTab;
+                
+                if (isCoreBtn) {
+                    t.style.background = isActive ? '#ef4444' : '#fef2f2';
+                    t.style.border = isActive ? '1px solid #dc2626' : '1px solid #fecaca';
+                    t.style.color = isActive ? 'white' : '#ef4444';
+                    t.style.boxShadow = isActive ? '0 2px 4px rgba(239,68,68,0.3)' : 'none';
+                    t.style.fontWeight = isActive ? '600' : '500';
+                } else {
+                    t.style.background = isActive ? 'white' : 'transparent';
+                    t.style.border = 'none';
+                    t.style.color = isActive ? 'var(--accent-blue)' : 'var(--text-muted)';
+                    t.style.boxShadow = isActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none';
+                    t.style.fontWeight = isActive ? '600' : '500';
+                }
+                
+                if (isActive) t.classList.add('active');
+                else t.classList.remove('active');
             });
-            btn.classList.add('active');
-            btn.style.fontWeight = '600';
-            btn.style.color = 'var(--accent-blue)';
-            btn.style.background = 'white';
-            btn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
             
             // Re-apply current search
             const currentQuery = document.getElementById('contacts-page-search')?.value || '';
@@ -213,6 +234,10 @@ function handleContactListClick(e) {
             } catch (err) {
                 console.error('無法解析正式聯絡人資料進行編輯', err);
             }
+            break;
+
+        case 'delete-core':
+            handleDeleteCoreContact(payload.id, payload.name);
             break;
 
         case 'cancel-core-edit':
@@ -426,7 +451,7 @@ function renderBusinessCardList(data) {
     return listHTML;
 }
 
-// --- Tab 3: 正式聯絡人 (CORE - Light Edit Supported) ---
+// --- Tab 3: 正式聯絡人 (CORE - Light Edit & Delete Supported) ---
 function renderCoreContactsTable(data) {
     if (!data || data.length === 0) {
         return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到正式聯絡人資料</div>';
@@ -451,7 +476,7 @@ function renderCoreContactsTable(data) {
                         <th>手機</th>
                         <th>Email</th>
                         <th>最後更新</th>
-                        <th style="text-align: right; width: 80px;">操作</th>
+                        <th style="text-align: right; width: 120px;">操作</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -467,6 +492,7 @@ function renderCoreContactsTable(data) {
             }
         }
 
+        const safeName = (contact.name || '').replace(/"/g, '&quot;');
         const contactJsonString = JSON.stringify(contact).replace(/'/g, "&apos;").replace(/"/g, '&quot;');
 
         listHTML += `
@@ -480,6 +506,7 @@ function renderCoreContactsTable(data) {
                 <td style="color: var(--text-muted); font-size: 0.9em;">${updateTimeStr}</td>
                 <td style="text-align: right; white-space: nowrap;">
                     <button class="action-btn small primary" data-action="edit-core" data-contact='${contactJsonString}'>✏️ 編輯</button>
+                    <button class="action-btn small danger" data-action="delete-core" data-id="${contact.contactId}" data-name="${safeName}" style="margin-left: 4px; background: #fee2e2; color: #ef4444; border: 1px solid #fca5a5;">🗑️ 刪除</button>
                 </td>
             </tr>
         `;
@@ -642,7 +669,7 @@ function renderCoreEditMode(contact) {
     `;
 }
 
-// ==================== 儲存處理函式 ====================
+// ==================== 儲存與刪除處理函式 ====================
 
 // --- Save Action: RAW ---
 async function handleSaveCardEdit() {
@@ -766,6 +793,67 @@ async function handleSaveCoreEdit() {
         if (btn) {
             btn.disabled = false;
             btn.textContent = '儲存變更';
+        }
+    }
+}
+
+// --- Delete Action: CORE ---
+async function handleDeleteCoreContact(contactId, contactName) {
+    const msg = `您確定要永久刪除正式聯絡人「${contactName}」嗎？\n\n系統將進行關聯檢查，若該聯絡人已綁定任何機會案件，將無法刪除。`;
+    
+    const executeDelete = async () => {
+        try {
+            // Execute backend request
+            const response = await authedFetch(`/api/contacts/${contactId}`, {
+                method: 'DELETE'
+            });
+
+            // Parse standard successful deletion
+            if (response && response.success) {
+                if (typeof showNotification === 'function') {
+                    showNotification('刪除成功：正式聯絡人已移除', 'success');
+                } else {
+                    alert('刪除成功：正式聯絡人已移除');
+                }
+                
+                // Re-fetch CORE data fully to maintain pagination integrity
+                coreContactsData = await fetchAllCoreContacts();
+                
+                // Re-render current list preserving search keyword
+                const safeQuery = document.getElementById('contacts-page-search')?.value || '';
+                filterAndRenderContacts(safeQuery);
+                
+                // Refresh dashboard stats if available
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
+            } else {
+                // Backend gracefully blocked the deletion (e.g. relation validation failed)
+                const backendMsg = (response && (response.error || response.message)) || '無法刪除：該聯絡人已有關聯資料';
+                if (typeof showNotification === 'function') {
+                    showNotification(backendMsg, 'error');
+                } else {
+                    alert(backendMsg);
+                }
+            }
+        } catch (error) {
+            // Hard API/Network/System error
+            console.error('Delete core contact failed:', error);
+            if (typeof showNotification === 'function') {
+                showNotification('刪除失敗：系統錯誤，請稍後再試', 'error');
+            } else {
+                alert('刪除失敗：系統錯誤，請稍後再試');
+            }
+        }
+    };
+
+    // Use repo-standard confirm dialog if available
+    if (typeof showConfirmDialog === 'function') {
+        showConfirmDialog(msg, executeDelete);
+    } else {
+        // Fallback to browser native
+        if (confirm(msg)) {
+            executeDelete();
         }
     }
 }
