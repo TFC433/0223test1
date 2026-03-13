@@ -4,9 +4,10 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.10.1 (Phase 8.13: SQL Company + Contact Scaffold NULL Safe)
+ * @version 8.10.2 (Phase 8.14: Pure SQL Contact Linking)
  * @date 2026-03-13
  * @description 
+ * - [PHASE 8.14] Refactored addContactToOpportunity to pure SQL. Removed legacy RAW sheet writers (getOrCreateCompany, getOrCreateContact, updateContactStatus). Reused existing SQL contacts by name and companyId.
  * - [PHASE 8.13] Implemented SQL-only scaffolding for company and contact within createOpportunity. Injected contactSqlWriter.
  * - [PHASE 8.13] Added strict null-safe check for contact name matching during scaffold.
  * - [PHASE 8.12] Migrated systemReader.getSystemConfig to systemService.
@@ -316,15 +317,45 @@ class OpportunityService {
                 if (!contactData.company) throw new Error("無法關聯聯絡人：缺少公司名稱。");
                 
                 logTitle = '建立並關聯新聯絡人';
-                const contactCompanyData = await this.companyWriter.getOrCreateCompany(contactData.company, contactData, modifier, {});
-                contactToLink = await this.contactWriter.getOrCreateContact(contactData, contactCompanyData, modifier);
+                const normalizedComp = this._normalizeCompanyName(contactData.company);
+                const allCompanies = await this.companySqlReader.getCompanies();
+                const existingCompany = allCompanies.find(c => this._normalizeCompanyName(c.companyName) === normalizedComp);
+                let targetCompanyId;
 
-                if (contactData.rowIndex) {
-                    logTitle = '從潛在客戶關聯';
-                    await this.contactWriter.updateContactStatus(
-                        contactData.rowIndex,
-                        this.config.CONSTANTS.CONTACT_STATUS.UPGRADED
-                    );
+                if (existingCompany) {
+                    targetCompanyId = existingCompany.companyId;
+                } else {
+                    targetCompanyId = `COMP_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+                    await this.companyWriter.createCompany({
+                        companyId: targetCompanyId,
+                        companyName: contactData.company,
+                        county: contactData.county || ''
+                    }, modifier);
+                }
+
+                const normalizedContactName = (contactData.name || '').toLowerCase().trim();
+                const allContacts = await this.contactSqlReader.getContacts();
+                const existingContact = allContacts.find(c => 
+                    (c.name || '').toLowerCase().trim() === normalizedContactName && 
+                    c.companyId === targetCompanyId
+                );
+
+                if (existingContact) {
+                    logTitle = '關聯現有聯絡人';
+                    contactToLink = { id: existingContact.contactId, name: existingContact.name };
+                } else {
+                    const targetContactId = `CONT_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+                    await this.contactSqlWriter.createContact({
+                        contactId: targetContactId,
+                        name: contactData.name,
+                        companyId: targetCompanyId,
+                        phone: contactData.phone || contactData.mobile || '',
+                        email: contactData.email || '',
+                        jobTitle: contactData.position || contactData.jobTitle || '',
+                        department: contactData.department || ''
+                    }, modifier);
+                    
+                    contactToLink = { id: targetContactId, name: contactData.name };
                 }
             }
 

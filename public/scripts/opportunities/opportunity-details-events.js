@@ -4,9 +4,10 @@
 /**
  * Project: TFC CRM
  * File: public/scripts/opportunities/opportunity-details-events.js
- * Version: 8.1.3
- * Date: 2026-03-12
+ * Version: 8.1.4
+ * Date: 2026-03-13
  * Changelog:
+ * - [FIX] _getCompanyContacts now correctly resolves companyId from companyList before fetching company details, fixing ID-based routing.
  * - [FIX] Added window.dashboardManager.markStale() to save() success branch to force dashboard refresh upon return.
  * - [FIX] _initSpecQuantities: Robust handling for JSON string, CSV string, or Object to prevent .split() crash.
  * - [FIX] salesChannel/channelDetails conflict in save() payload.
@@ -129,7 +130,19 @@ const OpportunityInfoCardEvents = (() => {
     async function _getCompanyContacts(companyName) {
         if (!companyName) return [];
         try {
-            const res = await authedFetch(`/api/companies/${encodeURIComponent(companyName)}/details`);
+            let companies = window.CRM_APP && window.CRM_APP.companyList ? window.CRM_APP.companyList : [];
+            if (companies.length === 0) {
+                const compRes = await authedFetch('/api/companies');
+                if (compRes.success) {
+                    companies = compRes.data;
+                    if (window.CRM_APP) window.CRM_APP.companyList = companies;
+                }
+            }
+            
+            const company = companies.find(c => c.companyName === companyName);
+            if (!company || !company.companyId) return [];
+
+            const res = await authedFetch(`/api/companies/${encodeURIComponent(company.companyId)}/details`);
             if (res.success && res.data && Array.isArray(res.data.contacts)) {
                 return res.data.contacts;
             }
