@@ -1,29 +1,156 @@
 /**
  * public/scripts/services/ui.js
  * * 職責：管理所有全域 UI 元素，如彈窗、通知、面板、載入畫面和共用元件渲染器
- * * @version 6.1.7 (Hotfix: Restore renderPagination)
- * * @date 2026-01-23
+ * * @version 6.3.0 (Phase 8.3 Toast UI Top-Right & Colors)
+ * * @date 2026-03-16
  * @description
- * 1. 新增功能：名片預覽圖可點擊開啟 Google Drive 原檔 (Zoom In)。
- * 2. [鑑識修復] 補回 window.showNotification 與 window.showConfirmDialog 對應，解決前端 ReferenceError。
- * 3. [鑑識修復] 補回 window.renderPagination，解決互動頁面分頁 ReferenceError。
+ * 1. [UX Polish] Relocated toast notifications from bottom-right to top-right.
+ * 2. [UX Polish] Applied SaaS-style background colors to toast types (Success=White, Error/Info=Light Red, Warning=Light Orange).
+ * 3. [Bugfix] Auto-creation of `#toast-container` remains to prevent silent failures.
+ * 4. Retained legacy adapters (`renderPagination`, `showBusinessCardPreview`, `showConfirmDialog`).
  */
 
-// 【修改】將起始層級提高到 3000，確保系統彈窗永遠蓋在應用程式畫面(包含獨立編輯器)之上
 let zIndexCounter = 3000;
-
-// Global variable to store the callback for the confirm dialog
 window.confirmActionCallback = null;
 let currentPreviewDriveLink = null;
+
+// ==========================================
+// Toast Notification System (Modern UI)
+// ==========================================
+
+function injectToastStyles() {
+    if (document.getElementById('crm-toast-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'crm-toast-styles';
+    style.textContent = `
+        #toast-container {
+            position: fixed;
+            top: 28px;
+            right: 28px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            pointer-events: none;
+        }
+        .toast {
+            background: var(--card-bg, #ffffff);
+            color: var(--text-primary, #334155);
+            padding: 14px 20px;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--border-color, #e2e8f0);
+            border-left: 4px solid #cbd5e1;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 1.5;
+            pointer-events: auto;
+            transform: translateX(120%);
+            opacity: 0;
+            transition: transform 0.4s cubic-bezier(0.21, 1.02, 0.73, 1), opacity 0.4s ease;
+            max-width: 380px;
+            min-width: 250px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .toast.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        
+        /* Type Accents & Backgrounds */
+        .toast-success { border-left-color: #10b981; background: #ffffff; }
+        .toast-error { border-left-color: #ef4444; background: #fef2f2; }
+        .toast-info { border-left-color: #ef4444; background: #fef2f2; } /* visually mirrors error for block/warning UX */
+        .toast-warning { border-left-color: #f59e0b; background: #fffbeb; }
+
+        /* Dark Mode Support Overrides */
+        [data-theme="dark"] .toast {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+        [data-theme="dark"] .toast-success { background: #1e293b; color: #f8fafc; border-color: #334155; }
+        [data-theme="dark"] .toast-error, [data-theme="dark"] .toast-info { background: #450a0a; color: #fecaca; border-color: #7f1d1d; }
+        [data-theme="dark"] .toast-warning { background: #451a03; color: #fde68a; border-color: #78350f; }
+        
+        /* Inline SVG Icons for Polish */
+        .toast::before {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            margin-top: 1px;
+        }
+        .toast-success::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2310b981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 11.08V12a10 10 0 1 1-5.93-9.14'%3E%3C/path%3E%3Cpolyline points='22 4 12 14.01 9 11.01'%3E%3C/polyline%3E%3C/svg%3E");
+        }
+        .toast-error::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ef4444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3Cline x1='15' y1='9' x2='9' y2='15'%3E%3C/line%3E%3Cline x1='9' y1='9' x2='15' y2='15'%3E%3C/line%3E%3C/svg%3E");
+        }
+        .toast-info::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ef4444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3Cline x1='12' y1='16' x2='12' y2='12'%3E%3C/line%3E%3Cline x1='12' y1='8' x2='12.01' y2='8'%3E%3C/line%3E%3C/svg%3E");
+        }
+        .toast-warning::before {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f59e0b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'%3E%3C/path%3E%3Cline x1='12' y1='9' x2='12' y2='13'%3E%3C/line%3E%3Cline x1='12' y1='17' x2='12.01' y2='17'%3E%3C/line%3E%3C/svg%3E");
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function showToast(message, type = 'info') {
+    // 1. Ensure our modern CSS is injected
+    injectToastStyles();
+
+    let toastContainer = document.getElementById('toast-container');
+    
+    // 2. Auto-create the toast container if it does not exist in the layout
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'toast-container';
+        document.body.appendChild(toastContainer);
+    }
+
+    // 3. Create the toast element
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    // 4. Content wrapper to ensure text aligns properly next to the injected ::before icon
+    const textWrapper = document.createElement('div');
+    textWrapper.style.flex = '1';
+    textWrapper.textContent = message;
+    toast.appendChild(textWrapper);
+
+    toastContainer.appendChild(toast);
+
+    // 5. Trigger reflow for slide-in animation
+    void toast.offsetWidth;
+    toast.classList.add('show');
+
+    // 6. Auto-dismiss
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            toast.remove();
+        }, 400); // Matches the new 0.4s CSS transition
+    }, 3000);
+}
+
+// ==========================================
+// Shared Modals & UI Loaders
+// ==========================================
 
 function showModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) {
-        zIndexCounter++; // Increment z-index for the new modal
-        modal.style.zIndex = zIndexCounter; // Apply it
+        zIndexCounter++; 
+        modal.style.zIndex = zIndexCounter; 
         modal.style.display = 'block';
-        document.body.style.overflow = 'hidden'; // Prevent background scrolling
-        console.log(`[UI] Modal shown: #${modalId} (z-index: ${zIndexCounter})`);
+        document.body.style.overflow = 'hidden'; 
     } else {
         console.error(`[UI] Error: Modal with ID "${modalId}" not found.`);
     }
@@ -33,35 +160,11 @@ function closeModal(modalId) {
     const modal = document.getElementById(modalId);
     if (modal) {
         modal.style.display = 'none';
-        console.log(`[UI] Modal closed: #${modalId}`);
         const anyModalOpen = document.querySelector('.modal[style*="display: block"]');
         if (!anyModalOpen) {
-            document.body.style.overflow = ''; // Restore background scrolling only if no other modals are open
-            console.log('[UI] Restored body scroll.');
+            document.body.style.overflow = ''; 
         }
     }
-}
-
-function showToast(message, type = 'info') {
-    const toastContainer = document.getElementById('toast-container');
-    if (!toastContainer) return;
-
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-
-    toastContainer.appendChild(toast);
-
-    // Trigger reflow for animation
-    void toast.offsetWidth;
-    toast.classList.add('show');
-
-    setTimeout(() => {
-        toast.classList.remove('show');
-        setTimeout(() => {
-            toast.remove();
-        }, 300);
-    }, 3000);
 }
 
 function showLoading(message = '載入中...') {
@@ -70,7 +173,6 @@ function showLoading(message = '載入中...') {
     if (overlay && text) {
         text.textContent = message;
         overlay.style.display = 'flex';
-        console.log(`[UI] Loading shown: ${message}`);
     }
 }
 
@@ -78,7 +180,6 @@ function hideLoading() {
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
         overlay.style.display = 'none';
-        console.log('[UI] Loading hidden.');
     }
 }
 
@@ -90,7 +191,6 @@ function confirmAction(message, callback) {
     if (modal && msgElement && confirmBtn) {
         msgElement.textContent = message;
 
-        // Remove existing listener to prevent multiple firings
         const newBtn = confirmBtn.cloneNode(true);
         confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
 
@@ -101,22 +201,19 @@ function confirmAction(message, callback) {
 
         showModal('confirm-modal');
     } else {
-        // Fallback if modal elements are missing
         if (confirm(message)) {
             if (callback) callback();
         }
     }
 }
 
-/**
- * 渲染狀態標籤 (Chip)
- * @param {string} status - 狀態文字
- * @returns {string} HTML string
- */
+// ==========================================
+// Status Chips & Renderers
+// ==========================================
+
 function renderStatusChip(status) {
     if (!status) return '';
 
-    // 定義狀態顏色映射 (可根據需求擴充)
     const statusColors = {
         'New': 'bg-blue-100 text-blue-800',
         'Contacted': 'bg-yellow-100 text-yellow-800',
@@ -130,11 +227,6 @@ function renderStatusChip(status) {
     return `<span class="px-2 py-1 rounded-full text-xs font-medium ${colorClass}">${status}</span>`;
 }
 
-/**
- * 渲染優先級標籤
- * @param {string} priority
- * @returns {string} HTML
- */
 function renderPriorityChip(priority) {
     if (!priority) return '';
 
@@ -148,32 +240,17 @@ function renderPriorityChip(priority) {
     return `<span class="${classStr}">${priority}</span>`;
 }
 
-// -----------------------------------------------------
-// ⚠️ 以下為本次修復的核心區域：名片預覽功能 (v6.1.5)
-// -----------------------------------------------------
-
-/**
- * 顯示名片預覽 (v6.1.5 Refactored)
- * * @version 6.1.5
- * @description
- * 1. 使用後端串流 (/api/drive/thumbnail) 取得高清圖。
- * 2. 圖片可點擊 (Wrap in <a>)，在新分頁開啟 Google Drive 原檔。
- * 3. 自動適應視窗大小，無卷軸。
- */
 async function showBusinessCardPreview(driveLink) {
-    // 1. 狀態鎖定
     currentPreviewDriveLink = driveLink;
 
     const contentArea = document.getElementById('business-card-preview-content');
     const modalId = 'business-card-preview-modal';
 
     if (!contentArea) {
-        console.error('[UI] 系統錯誤：找不到預覽容器 #business-card-preview-content');
         showToast('無法開啟預覽：UI 元件缺失', 'error');
         return;
     }
 
-    // 2. 顯示 Loading
     contentArea.innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem;">
             <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
@@ -183,31 +260,26 @@ async function showBusinessCardPreview(driveLink) {
         </div>
     `;
 
-    // 3. 開啟 Modal
     showModal(modalId);
 
-    // 4. 準備 URL
     const proxyUrl = `/api/drive/thumbnail?link=${encodeURIComponent(driveLink)}`;
     const img = new Image();
 
-    // 5. 載入成功處理
     img.onload = () => {
         if (currentPreviewDriveLink !== driveLink) return;
 
-        contentArea.innerHTML = ''; // 清除 Loading
+        contentArea.innerHTML = ''; 
 
-        // --- 建立點擊連結 (<a> Wrapper) ---
         const linkWrapper = document.createElement('a');
-        linkWrapper.href = driveLink;   // 指向 Google Drive 原檔
-        linkWrapper.target = '_blank';  // 開啟新分頁
+        linkWrapper.href = driveLink;   
+        linkWrapper.target = '_blank';  
         linkWrapper.title = '點擊開啟原始檔案 (Google Drive)';
         linkWrapper.style.display = 'block';
         linkWrapper.style.textAlign = 'center';
-        linkWrapper.style.cursor = 'zoom-in'; // 游標變更為放大鏡
+        linkWrapper.style.cursor = 'zoom-in'; 
 
-        // --- 圖片樣式設定 ---
         img.style.maxWidth = '100%';
-        img.style.maxHeight = '70vh'; // 留白給標題與下方提示
+        img.style.maxHeight = '70vh'; 
         img.style.width = 'auto';
         img.style.height = 'auto';
         img.style.objectFit = 'contain';
@@ -215,20 +287,15 @@ async function showBusinessCardPreview(driveLink) {
         img.style.borderRadius = '4px';
         img.style.border = '1px solid #eee';
 
-        // --- 組合元素 ---
         linkWrapper.appendChild(img);
         contentArea.appendChild(linkWrapper);
 
-        // --- 加入下方提示文字 ---
         const hint = document.createElement('div');
         hint.innerHTML = '<small style="color: #888; margin-top: 8px; display: block;"><i class="fas fa-external-link-alt"></i> 點擊圖片可開啟原檔</small>';
         hint.style.textAlign = 'center';
         contentArea.appendChild(hint);
-
-        console.log('[UI] 名片預覽載入成功 (Stream Mode + Link)');
     };
 
-    // 6. 載入失敗處理
     img.onerror = () => {
         if (currentPreviewDriveLink !== driveLink) return;
         console.warn('[UI] 名片預覽載入失敗');
@@ -244,7 +311,6 @@ async function showBusinessCardPreview(driveLink) {
         `;
     };
 
-    // 7. 觸發載入
     img.src = proxyUrl;
 }
 
@@ -253,14 +319,12 @@ function closeBusinessCardPreview() {
 
     const contentArea = document.getElementById('business-card-preview-content');
 
-    // 清理可能殘留的 iframe (舊版相容)
     const iframe = document.getElementById('business-card-iframe');
     if (iframe) {
         iframe.src = 'about:blank';
         iframe.remove();
     }
 
-    // 清理圖片與內容
     if (contentArea) {
         contentArea.innerHTML = '';
     }
@@ -268,16 +332,6 @@ function closeBusinessCardPreview() {
     closeModal('business-card-preview-modal');
 }
 
-/**
- * 渲染分頁元件 (Adapter for legacy calls)
- * - 目的：補回 interactions.js 等頁面腳本依賴的全域 renderPagination
- * - 設計：不假設 callback 的參數格式，只保證「至少傳 page」；
- *         若 callback 接受更多參數，它自己可從 DOM 讀取（例如搜尋框）。
- *
- * @param {string} containerId - 容器 ID
- * @param {object} pagination - 分頁物件 { current, total, totalItems, hasNext, hasPrev }
- * @param {string} callbackName - 全域回呼函式名稱 (e.g. 'loadAllInteractionsPage')
- */
 function renderPagination(containerId, pagination, callbackName) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -292,7 +346,6 @@ function renderPagination(containerId, pagination, callbackName) {
     const hasNext = !!pagination.hasNext;
     const hasPrev = !!pagination.hasPrev;
 
-    // 建立 DOM（避免 inline onclick 字串拼接造成注入/跳脫問題）
     container.innerHTML = `
         <div class="pagination-wrap" style="display:flex; gap:12px; align-items:center; justify-content:center;">
             <button type="button" class="pagination-btn" id="${containerId}-prev" ${hasPrev ? '' : 'disabled'}>
@@ -314,7 +367,6 @@ function renderPagination(containerId, pagination, callbackName) {
             console.warn(`[UI] renderPagination: callback "${callbackName}" not found on window.`);
             return;
         }
-        // 只保證傳 page；其他參數由 callback 自行從 DOM 取得（最不回歸）
         fn(page);
     };
 
@@ -333,11 +385,6 @@ function renderPagination(containerId, pagination, callbackName) {
     }
 }
 
-// =======================================================
-// [Critical Fix] Adapter Layer for Legacy Compatibility
-// 解決 company-list.js 等模組呼叫 showNotification 失敗的問題
-// =======================================================
-
 // Native Exports
 window.showModal = showModal;
 window.closeModal = closeModal;
@@ -350,11 +397,9 @@ window.renderPriorityChip = renderPriorityChip;
 window.showBusinessCardPreview = showBusinessCardPreview;
 window.closeBusinessCardPreview = closeBusinessCardPreview;
 
-// [Fix] Export pagination renderer (for interactions.js)
+// Adapter Layer
 window.renderPagination = renderPagination;
 
-// Legacy Aliases (The Fix)
-window.showNotification = showToast;         // Map showNotification to showToast
-window.showConfirmDialog = confirmAction;    // Map showConfirmDialog to confirmAction
-
-console.log('[UI] UI Services loaded with legacy adapters (showNotification, showConfirmDialog, renderPagination).');
+// Legacy Aliases
+window.showNotification = showToast;         
+window.showConfirmDialog = confirmAction;

@@ -2,39 +2,19 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.2.6 (Phase 8.2 Delete Notification Verdict Patch)
- * Date: 2026-03-14
+ * Version: v8.2.10 (Phase 8.2 Production Restore)
+ * Date: 2026-03-16
  * Author: Gemini
  *
  * Change Log:
- * - [UX Polish] Adjusted CORE delete notification wording to clearly show the verdict (Success, Blocked, Error).
- * - [UX Polish] Enhanced delete CORE contact feedback to distinctly separate Success, Validation Blocked, and System Error states.
- * - [Feature] Implemented safe delete UX for CORE contacts ("刪除" button delegating to backend block rules).
- * - [UX Polish] Enhanced "正式聯絡人" tab with prominent red visual emphasis.
- * - [Feature] Added Light Edit capability to CORE contacts ("正式聯絡人" tab).
- * - [Feature] Added safe PUT /api/contacts/:contactId payload generation excluding relation fields.
+ * - [Cleanup] Removed forensic trace logs and restored to clean production state.
+ * - [Bugfix] Maintained `skipRefresh: true` on DELETE request to securely handle relation-blocked scenarios locally.
+ * - [UX Polish] Maintained mapping of relation-blocked notifications to 'info' level for guaranteed CSS visibility.
+ * - [Bugfix] Maintained sequential fetching (no Promise.all) to prevent backend API deadlocks on first load.
+ * - [Feature] Safe PUT /api/contacts/:contactId payload generation excluding relation fields.
  * - [UX Polish] Sorted CORE contacts by update time, added '最後更新' column and UI hint.
- * - [Bugfix] Implemented multi-page fetching loop for CORE contacts to ensure all SQL rows are loaded into the frontend.
- * - [Feature] Added "正式聯絡人" tab to view CORE (SQL) contacts in read-only mode.
- * - [Feature] Integrated /api/contacts/list API fetch into the page load flow.
- * - [Feature] Split search logic to support `company` (RAW) vs `companyName` (CORE).
- * - [UI Polish] Enlarged tabs, simplified header, improved search placeholder, and added result count.
- * - [UI Simplification] Removed Contacts Trend Chart and related dashboard fetch logic.
- * - [UX Patch] Added "項次" (index) column to the "名片列表" view.
- * - [UX Patch] Made "姓名" (name) an editable field in the RAW contact edit form.
+ * - [Feature] Added "正式聯絡人" tab to view CORE (SQL) contacts in read-only & light-edit mode.
  * - [Phase 8.1] Implemented inline edit mode for RAW contacts (Left: Preview, Right: Form).
- * - [Phase 8.1] Wired edit form to PUT /api/contacts/:rowIndex/raw.
- * * WORLD MODEL (UI LAYER):
- * 1. RAW Contact (Potential):
- * - Rendered here (loadContacts) in "聯絡人列表" & "名片總覽" tabs.
- * - Source: /api/contacts (Sheet Read).
- * - Action: View Card, Edit Card.
- * - Identity: Uses rowIndex (passed in payload) for handoff to update API.
- * 2. CORE Contact (Official):
- * - Rendered here in "正式聯絡人" tab.
- * - Source: /api/contacts/list (SQL Read - Multi-page accumulation).
- * - Action: Light Edit (Name, Position, Contact Info). NO relation mutations. Safe Delete via relation validation.
- * - Identity: contactId.
  * ============================================================================
  */
 
@@ -131,13 +111,11 @@ async function loadContacts(query = '') {
         if (allContactsData.length === 0 || coreContactsData.length === 0) {
             console.log('[Contacts] 首次載入，正在獲取潛在與正式客戶資料...');
             
-            // [World Model] Fetching RAW Data and CORE Data in parallel
-            const [listResult, fullCoreData] = await Promise.all([
-                authedFetch(`/api/contacts?q=`),
-                fetchAllCoreContacts()
-            ]);
+            // [World Model] Fetching RAW Data and CORE Data sequentially to prevent backend API deadlocks
+            const listResult = await authedFetch(`/api/contacts?q=`);
+            allContactsData = (listResult && listResult.data) ? listResult.data : [];
             
-            allContactsData = listResult.data || [];
+            const fullCoreData = await fetchAllCoreContacts();
             coreContactsData = fullCoreData || [];
         }
         
@@ -696,7 +674,8 @@ async function handleSaveCardEdit() {
     try {
         const response = await authedFetch(`/api/contacts/${currentEditRowIndex}/raw`, {
             method: 'PUT',
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            skipRefresh: true
         });
 
         if (response && response.success) {
@@ -761,7 +740,8 @@ async function handleSaveCoreEdit() {
     try {
         const response = await authedFetch(`/api/contacts/${currentCoreEditContactId}`, {
             method: 'PUT',
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            skipRefresh: true
         });
 
         if (response && response.success) {
@@ -803,12 +783,12 @@ async function handleDeleteCoreContact(contactId, contactName) {
     
     const executeDelete = async () => {
         try {
-            // Execute backend request
+            // Include skipRefresh to prevent global interceptors from wiping the screen 
             const response = await authedFetch(`/api/contacts/${contactId}`, {
-                method: 'DELETE'
+                method: 'DELETE',
+                skipRefresh: true 
             });
 
-            // Parse standard successful deletion
             if (response && response.success) {
                 if (typeof showNotification === 'function') {
                     showNotification('刪除成功：正式聯絡人已移除', 'success');
@@ -830,8 +810,10 @@ async function handleDeleteCoreContact(contactId, contactName) {
             } else {
                 // Backend gracefully blocked the deletion (e.g. relation validation failed)
                 const backendMsg = (response && (response.error || response.message)) || '無法刪除：該聯絡人已有關聯資料';
+                
                 if (typeof showNotification === 'function') {
-                    showNotification(backendMsg, 'error');
+                    // Map to 'info' instead of 'warning' for reliable CSS visibility
+                    showNotification(backendMsg, 'info');
                 } else {
                     alert(backendMsg);
                 }

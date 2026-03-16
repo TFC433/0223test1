@@ -119,7 +119,9 @@ async function executeFetch(url, options, attempts) {
         }
 
         // --- Smart Refresh on Write ---
-        if (isWriteOperation && response.ok && !options.skipRefresh) {
+        // [Bugfix] Added `result?.success !== false` to prevent false positive success toasts 
+        // and forced reloads when the backend gracefully blocks an action (e.g., relation validation)
+        if (isWriteOperation && response.ok && result?.success !== false && !options.skipRefresh) {
             const successMsg = result?.message || (method === 'DELETE' ? '刪除成功！' : '操作成功！');
             showNotification(successMsg, 'success', 2000);
             if (window.CRM_APP && typeof window.CRM_APP.refreshCurrentView === 'function') {
