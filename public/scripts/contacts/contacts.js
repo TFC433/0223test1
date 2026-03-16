@@ -96,8 +96,8 @@ async function loadContacts(query = '') {
                     <h2 class="widget-title" style="margin: 0;">潛在客戶</h2>
                 </div>
                 <div class="contacts-tabs" style="display: flex; gap: 4px; background: var(--bg-hover, #f1f5f9); padding: 4px; border-radius: 8px;">
-                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="${listBtnStyle}">聯絡人列表</button>
-                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="${cardsBtnStyle}">名片總覽</button>
+                    <button class="tab-btn ${isListActive ? 'active' : ''}" data-action="switch-tab" data-tab="list" style="${listBtnStyle}">名片總覽</button>
+                    <button class="tab-btn ${isCardsActive ? 'active' : ''}" data-action="switch-tab" data-tab="cards" style="${cardsBtnStyle}">聯絡人列表</button>
                     <button class="tab-btn ${isCoreActive ? 'active' : ''}" data-action="switch-tab" data-tab="core" style="${coreBtnStyle}">正式聯絡人</button>
                 </div>
             </div>
