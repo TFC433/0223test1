@@ -2,9 +2,11 @@
 /**
  * services/contact-service.js
  * 聯絡人業務邏輯服務層
- * @version 8.8.1 (Phase 8.2 Safe Delete Patch)
- * @date 2026-03-13
+ * @version 8.9.1 (Phase 8.2 RAW Physical Delete & Cache Fix)
+ * @date 2026-03-16
  * @changelog
+ * - [PHASE 8.2] Added explicit cache invalidation to deletePotentialContact to fix frontend stale data.
+ * - [PHASE 8.2] Added deletePotentialContact for physical deletion of RAW Sheet rows.
  * - [PHASE 8.2] Added relation validation block to deleteContact.
  * - [PHASE 8.8] Removed direct CompanySqlReader instantiation and Supabase calls. Fully delegated to ContactSqlReader.
  * - [PHASE 8.7] Refactored getLinkedContacts to use strict Supabase SQL JOIN, dropping all Google Sheet dependencies.
@@ -358,6 +360,38 @@ class ContactService {
             return { success: true };
         } catch (error) {
             console.error('[ContactService] updatePotentialContact Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Physically deletes a RAW contact (Sheet Row)
+     * @param {number|string} rowIndex 
+     * @param {string} user 
+     */
+    async deletePotentialContact(rowIndex, user) {
+        try {
+            if (!this.contactWriter) {
+                throw new Error('[ContactService] CRITICAL: ContactWriter not configured. RAW Delete disallowed.');
+            }
+
+            const parsedRow = parseInt(rowIndex, 10);
+            
+            // Strict guardrail: Prevent deleting header or invalid rows
+            if (isNaN(parsedRow) || parsedRow <= 1) {
+                return { success: false, error: '無效的資料列索引，禁止刪除標題列或不存在的列' };
+            }
+
+            await this.contactWriter.deletePotentialContactRow(parsedRow);
+            
+            // [Bugfix] Explicitly invalidate the RAW reader cache so frontend gets fresh data
+            if (this.contactRawReader && this.contactRawReader.invalidateCache) {
+                this.contactRawReader.invalidateCache('contacts');
+            }
+            
+            return { success: true };
+        } catch (error) {
+            console.error('[ContactService] deletePotentialContact Error:', error);
             throw error;
         }
     }

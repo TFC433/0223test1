@@ -1,8 +1,8 @@
 /**
  * routes/contact.routes.js
  * 聯絡人/潛在客戶模組路由
- * * @version 6.1.3 (Added: CORE Contact Safe Delete)
- * @date 2026-03-13
+ * * @version 6.2.0 (Phase 8.2 RAW Physical Delete)
+ * @date 2026-03-16
  */
 const express = require('express');
 const router = express.Router();
@@ -74,6 +74,13 @@ router.delete('/:contactId', async (req, res, next) => {
 router.put('/:rowIndex/raw', async (req, res, next) => {
     try {
         await getController(req).updateRawContact(req, res);
+    } catch (e) { next(e); }
+});
+
+// DELETE /api/contacts/:rowIndex/raw (刪除 RAW 聯絡人 - Physical Sheet Delete)
+router.delete('/:rowIndex/raw', async (req, res, next) => {
+    try {
+        await getController(req).deleteRawContact(req, res);
     } catch (e) { next(e); }
 });
 

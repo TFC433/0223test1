@@ -2,18 +2,18 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.2.10 (Phase 8.2 Production Restore)
+ * Version: v8.2.15 (Phase 8.2 Tab Alignment & Operation Mode Polish)
  * Date: 2026-03-16
  * Author: Gemini
  *
  * Change Log:
+ * - [UX Polish] Aligned all internal comments to strictly match the UI tab order (Tab 1: 名片總覽, Tab 2: 聯絡人列表, Tab 3: 正式聯絡人).
+ * - [UX Polish] Removed Operation Mode toggle and delete buttons entirely from Tab 1 (名片總覽 / renderContactsTable) for safety.
+ * - [UX Polish] Maintained Operation Mode exclusively in Tab 2 (RAW table) and Tab 3 (CORE table).
+ * - [Feature] Operation Mode extended to apply consistently across all RAW and CORE list views.
+ * - [Feature] Implemented real handleDeleteRawContact flow wired to expected backend sheet deletion route, featuring strict UX guardrails and localized data refreshing.
  * - [Cleanup] Removed forensic trace logs and restored to clean production state.
- * - [Bugfix] Maintained `skipRefresh: true` on DELETE request to securely handle relation-blocked scenarios locally.
- * - [UX Polish] Maintained mapping of relation-blocked notifications to 'info' level for guaranteed CSS visibility.
- * - [Bugfix] Maintained sequential fetching (no Promise.all) to prevent backend API deadlocks on first load.
- * - [Feature] Safe PUT /api/contacts/:contactId payload generation excluding relation fields.
- * - [UX Polish] Sorted CORE contacts by update time, added '最後更新' column and UI hint.
- * - [Feature] Added "正式聯絡人" tab to view CORE (SQL) contacts in read-only & light-edit mode.
+ * - [Bugfix] Maintained `skipRefresh: true` on DELETE requests to securely handle relation-blocked scenarios locally.
  * - [Phase 8.1] Implemented inline edit mode for RAW contacts (Left: Preview, Right: Form).
  * ============================================================================
  */
@@ -24,6 +24,7 @@ let coreContactsData = [];
 let currentContactsTab = 'list'; // 'list' | 'cards' | 'core'
 let currentEditRowIndex = null;
 let currentCoreEditContactId = null;
+let contactsOperationMode = false; // [Feature] Operation Mode State
 
 // ==================== API 輔助函式 ====================
 
@@ -131,6 +132,13 @@ async function loadContacts(query = '') {
 
 // --- 事件處理中心 (Central Handler) ---
 
+function toggleContactsOperationMode() {
+    contactsOperationMode = !contactsOperationMode;
+    // UI toggle manipulation is handled implicitly by re-rendering the list.
+    const currentQuery = document.getElementById('contacts-page-search')?.value || '';
+    filterAndRenderContacts(currentQuery);
+}
+
 function handleContactListClick(e) {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
@@ -141,6 +149,10 @@ function handleContactListClick(e) {
     const payload = btn.dataset;
 
     switch (action) {
+        case 'toggle-operations':
+            toggleContactsOperationMode();
+            break;
+
         case 'view-card':
             // 呼叫外部全域函式 (假設存在於 main.js 或 utils.js)
             if (window.showBusinessCardPreview) {
@@ -192,6 +204,10 @@ function handleContactListClick(e) {
             } catch (err) {
                 console.error('無法解析聯絡人資料進行編輯', err);
             }
+            break;
+
+        case 'delete-raw':
+            handleDeleteRawContact(payload.index, payload.name);
             break;
 
         case 'cancel-edit':
@@ -291,7 +307,7 @@ function filterAndRenderContacts(query = '') {
         countDisplay.innerHTML = htmlContent;
     }
 
-    // Render corresponding view
+    // Render corresponding view based on internal IDs vs UI mapping
     if (currentContactsTab === 'list') {
         listContent.innerHTML = renderContactsTable(filteredData);
     } else if (currentContactsTab === 'cards') {
@@ -303,10 +319,10 @@ function filterAndRenderContacts(query = '') {
 
 // ==================== 專用渲染函式 ====================
 
-// --- Tab 1: 聯絡人列表 (RAW) ---
+// --- Tab 1: 名片總覽 (RAW) ---
 function renderContactsTable(data) {
     if (!data || data.length === 0) {
-        return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到聯絡人資料</div>';
+        return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到名片資料</div>';
     }
 
     // Add specific style to ensure name wraps and does not truncate
@@ -367,11 +383,15 @@ function renderContactsTable(data) {
     return listHTML;
 }
 
-// --- Tab 2: 名片總覽 (RAW) ---
+// --- Tab 2: 聯絡人列表 (RAW) ---
 function renderBusinessCardList(data) {
     if (!data || data.length === 0) {
-        return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到名片資料</div>';
+        return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到聯絡人資料</div>';
     }
+
+    const toggleBtnStyle = contactsOperationMode 
+        ? 'background: var(--accent-blue, #3b82f6); color: white; border-color: var(--accent-blue, #3b82f6);' 
+        : 'background: white; color: var(--text-main); border-color: var(--border-color);';
 
     let listHTML = `
         <style>
@@ -391,7 +411,12 @@ function renderBusinessCardList(data) {
                         <th>職位</th>
                         <th>手機</th>
                         <th>Email</th>
-                        <th style="text-align: right;">操作</th>
+                        <th style="text-align: right; white-space: nowrap;">
+                            操作
+                            <button class="action-btn small" data-action="toggle-operations" style="margin-left: 6px; padding: 2px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid; cursor: pointer; transition: all 0.2s; ${toggleBtnStyle}">
+                                ${contactsOperationMode ? '完成' : '＋'}
+                            </button>
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
@@ -405,6 +430,12 @@ function renderBusinessCardList(data) {
             ? `<button class="action-btn small info" title="預覽名片" data-action="view-card" data-link="${safeDriveLink}" style="margin-right: 8px;">💳</button>`
             : '';
 
+        // [Feature] Conditional RAW Delete Button based on Operation Mode
+        let deleteBtn = '';
+        if (contactsOperationMode) {
+            deleteBtn = `<button class="action-btn small danger" data-action="delete-raw" data-index="${contact.rowIndex}" data-name="${contact.name || ''}" style="margin-left: 4px; background: #fee2e2; color: #ef4444; border: 1px solid #fca5a5;">🗑️ 刪除</button>`;
+        }
+
         listHTML += `
             <tr>
                 <td style="text-align: center; color: var(--text-muted); font-weight: 500;">${index + 1}</td>
@@ -416,6 +447,7 @@ function renderBusinessCardList(data) {
                 <td style="text-align: right; white-space: nowrap;">
                     ${previewBtn}
                     <button class="action-btn small primary" data-action="edit-card" data-contact='${contactJsonString}'>✏️ 編輯</button>
+                    ${deleteBtn}
                 </td>
             </tr>
         `;
@@ -429,11 +461,15 @@ function renderBusinessCardList(data) {
     return listHTML;
 }
 
-// --- Tab 3: 正式聯絡人 (CORE - Light Edit & Delete Supported) ---
+// --- Tab 3: 正式聯絡人 (CORE) ---
 function renderCoreContactsTable(data) {
     if (!data || data.length === 0) {
         return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到正式聯絡人資料</div>';
     }
+
+    const toggleBtnStyle = contactsOperationMode 
+        ? 'background: var(--accent-blue, #3b82f6); color: white; border-color: var(--accent-blue, #3b82f6);' 
+        : 'background: white; color: var(--text-main); border-color: var(--border-color);';
 
     let listHTML = `
         <style>
@@ -454,7 +490,12 @@ function renderCoreContactsTable(data) {
                         <th>手機</th>
                         <th>Email</th>
                         <th>最後更新</th>
-                        <th style="text-align: right; width: 120px;">操作</th>
+                        <th style="text-align: right; white-space: nowrap;">
+                            操作
+                            <button class="action-btn small" data-action="toggle-operations" style="margin-left: 6px; padding: 2px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid; cursor: pointer; transition: all 0.2s; ${toggleBtnStyle}">
+                                ${contactsOperationMode ? '完成' : '＋'}
+                            </button>
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
@@ -473,6 +514,11 @@ function renderCoreContactsTable(data) {
         const safeName = (contact.name || '').replace(/"/g, '&quot;');
         const contactJsonString = JSON.stringify(contact).replace(/'/g, "&apos;").replace(/"/g, '&quot;');
 
+        let deleteBtn = '';
+        if (contactsOperationMode) {
+            deleteBtn = `<button class="action-btn small danger" data-action="delete-core" data-id="${contact.contactId}" data-name="${safeName}" style="margin-left: 4px; background: #fee2e2; color: #ef4444; border: 1px solid #fca5a5;">🗑️ 刪除</button>`;
+        }
+
         listHTML += `
             <tr>
                 <td style="text-align: center; color: var(--text-muted); font-weight: 500;">${index + 1}</td>
@@ -484,7 +530,7 @@ function renderCoreContactsTable(data) {
                 <td style="color: var(--text-muted); font-size: 0.9em;">${updateTimeStr}</td>
                 <td style="text-align: right; white-space: nowrap;">
                     <button class="action-btn small primary" data-action="edit-core" data-contact='${contactJsonString}'>✏️ 編輯</button>
-                    <button class="action-btn small danger" data-action="delete-core" data-id="${contact.contactId}" data-name="${safeName}" style="margin-left: 4px; background: #fee2e2; color: #ef4444; border: 1px solid #fca5a5;">🗑️ 刪除</button>
+                    ${deleteBtn}
                 </td>
             </tr>
         `;
@@ -714,6 +760,66 @@ async function handleSaveCardEdit() {
     }
 }
 
+// --- Delete Action: RAW ---
+async function handleDeleteRawContact(rowIndex, contactName) {
+    const msg = `您確定要永久刪除潛在客戶「${contactName}」嗎？\n\n⚠️ 警告：此操作將會從 Google 試算表中永久移除該筆實體資料，且無法復原。`;
+    
+    const executeDelete = async () => {
+        try {
+            const response = await authedFetch(`/api/contacts/${rowIndex}/raw`, {
+                method: 'DELETE',
+                skipRefresh: true 
+            });
+
+            if (response && response.success) {
+                if (typeof showNotification === 'function') {
+                    showNotification('刪除成功：潛在客戶已從試算表中移除', 'success');
+                } else {
+                    alert('刪除成功：潛在客戶已從試算表中移除');
+                }
+                
+                // Re-fetch RAW data to reflect changes
+                const listResult = await authedFetch(`/api/contacts?q=`);
+                if (listResult && listResult.data) {
+                    allContactsData = listResult.data;
+                }
+                
+                // Re-render current list preserving search keyword
+                const safeQuery = document.getElementById('contacts-page-search')?.value || '';
+                filterAndRenderContacts(safeQuery);
+                
+                // Refresh dashboard stats if available
+                if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
+                    window.dashboardManager.markStale();
+                }
+            } else {
+                const backendMsg = (response && (response.error || response.message)) || '無法刪除：後端發生錯誤或尚未實作該路由';
+                
+                if (typeof showNotification === 'function') {
+                    showNotification(backendMsg, 'info'); 
+                } else {
+                    alert(backendMsg);
+                }
+            }
+        } catch (error) {
+            console.error('Delete raw contact failed:', error);
+            if (typeof showNotification === 'function') {
+                showNotification('刪除失敗：系統錯誤或後端 API 尚未實作此功能', 'error');
+            } else {
+                alert('刪除失敗：系統錯誤或後端 API 尚未實作此功能');
+            }
+        }
+    };
+
+    if (typeof showConfirmDialog === 'function') {
+        showConfirmDialog(msg, executeDelete);
+    } else {
+        if (confirm(msg)) {
+            executeDelete();
+        }
+    }
+}
+
 // --- Save Action: CORE ---
 async function handleSaveCoreEdit() {
     if (!currentCoreEditContactId) {
@@ -783,7 +889,6 @@ async function handleDeleteCoreContact(contactId, contactName) {
     
     const executeDelete = async () => {
         try {
-            // Include skipRefresh to prevent global interceptors from wiping the screen 
             const response = await authedFetch(`/api/contacts/${contactId}`, {
                 method: 'DELETE',
                 skipRefresh: true 
@@ -808,18 +913,15 @@ async function handleDeleteCoreContact(contactId, contactName) {
                     window.dashboardManager.markStale();
                 }
             } else {
-                // Backend gracefully blocked the deletion (e.g. relation validation failed)
                 const backendMsg = (response && (response.error || response.message)) || '無法刪除：該聯絡人已有關聯資料';
                 
                 if (typeof showNotification === 'function') {
-                    // Map to 'info' instead of 'warning' for reliable CSS visibility
                     showNotification(backendMsg, 'info');
                 } else {
                     alert(backendMsg);
                 }
             }
         } catch (error) {
-            // Hard API/Network/System error
             console.error('Delete core contact failed:', error);
             if (typeof showNotification === 'function') {
                 showNotification('刪除失敗：系統錯誤，請稍後再試', 'error');
@@ -829,11 +931,9 @@ async function handleDeleteCoreContact(contactId, contactName) {
         }
     };
 
-    // Use repo-standard confirm dialog if available
     if (typeof showConfirmDialog === 'function') {
         showConfirmDialog(msg, executeDelete);
     } else {
-        // Fallback to browser native
         if (confirm(msg)) {
             executeDelete();
         }

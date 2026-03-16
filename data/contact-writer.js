@@ -1,13 +1,14 @@
 /**
  * data/contact-writer.js
  * 聯絡人資料寫入器
- * * @version 7.0.0 (Standard A + S Refactor)
- * @date 2026-01-23
+ * * @version 7.1.0 (Phase 8.2 RAW Physical Delete)
+ * @date 2026-03-16
  * @description 
  * [SQL-Ready Refactor]
  * 1. 嚴格禁止呼叫 values.get (No Read)。
  * 2. 僅提供基於 rowIndex 的 Pure Write 方法。
  * 3. 使用 batchUpdate 實現精確的欄位更新。
+ * 4. [Feature] 支援 deletePotentialContactRow 實現物理列刪除。
  */
 const BaseWriter = require('./base-writer');
 
@@ -109,6 +110,26 @@ class ContactWriter extends BaseWriter {
         }
         
         console.log(`✅ [ContactWriter] Wrote potential contact row ${rowIndex}`);
+        return true;
+    }
+
+    /**
+     * [Pure Write] 刪除潛在客戶 (物理刪除 Row)
+     * 利用 BaseWriter 提供的 _deleteRow 進行整列刪除
+     * @param {number} rowIndex
+     */
+    async deletePotentialContactRow(rowIndex) {
+        const parsedRow = parseInt(rowIndex, 10);
+        
+        if (isNaN(parsedRow) || parsedRow <= 1) {
+            throw new Error(`無效的 rowIndex: ${rowIndex}，禁止刪除標題列或無效列`);
+        }
+
+        console.log(`🗑️ [ContactWriter] Physically deleting RAW contact at Row ${parsedRow}`);
+        
+        // Calls the _deleteRow helper inherited from BaseWriter
+        await this._deleteRow(this.SHEET_POTENTIAL, parsedRow, this.contactReader);
+        
         return true;
     }
 
