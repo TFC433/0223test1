@@ -1,8 +1,9 @@
 /**
- * controllers/line-leads.controller.js
+ * File: controllers/line-leads.controller.js
+ * Version: 7.1.4
+ * Date: 2026-03-16
+ * Changelog: Fix localhost bypass logic in getAllLeads to prevent 401 fallthrough.
  * LINE LIFF 潛在客戶控制器
- * * @version 7.1.3 (Line-Leads L1→L2)
- * @date 2026-01-26
  * @description Line-Leads L1→L2：移除 Controller 內 Token 驗證實作與 Writer 直接依賴，改由 AuthService + ContactService 承擔。
  * @contract 遵守契約 v1.0：DOM/API/localStorage 不變。
  */
@@ -32,11 +33,15 @@ class LineLeadsController {
             if (token === 'TEST_LOCAL_TOKEN') {
                 // 🚧 本地開發模式：維持原日誌行為
                 console.log('🚧 [Dev] 本地模式：跳過 LINE 驗證');
-            }
-
-            user = await this.authService.verifyLineIdToken(token);
-            if (!user) {
-                return res.status(401).json({ success: false, message: 'LINE Token 驗證失敗' });
+                user = {
+                    userId: 'dev-user',
+                    displayName: 'Local Dev User'
+                };
+            } else {
+                user = await this.authService.verifyLineIdToken(token);
+                if (!user) {
+                    return res.status(401).json({ success: false, message: 'LINE Token 驗證失敗' });
+                }
             }
 
             // 3. 執行業務邏輯

@@ -1,6 +1,7 @@
-// public/scripts/leads-view.js
-// v7.0.2 (Fixed: Unlock Edit Permission for Local Dev)
-// Date: 2026-01-15
+// File: public/scripts/leads-view.js
+// Version: 7.0.3
+// Date: 2026-03-16
+// Changelog: Stop infinite reload loop on 401 response in loadLeadsData.
 // Description: 
 // 1. [Fix] createCardHTML: 為本地測試帳號 (TEST_LOCAL_USER) 解鎖編輯按鈕權限，
 //    允許在任何視圖編輯任何人的名片。
@@ -218,9 +219,8 @@ async function loadLeadsData() {
         }
 
         if (response.status === 401) {
-            alert('登入憑證過期或無效，請重新登入');
-            liff.logout();
-            location.reload();
+            alert('登入驗證失敗，請重新登入 LINE');
+            console.error('[Auth] 401 Unauthorized');
             return;
         }
 
