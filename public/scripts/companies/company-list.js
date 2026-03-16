@@ -1,18 +1,23 @@
 /**
  * public/scripts/companies/company-list.js
  * 職責：管理「公司總覽列表頁」
- * * @version 7.5.1
- * * @date 2026-03-12
+ * * @version 7.6.3
+ * * @date 2026-03-16
  * * @description 
  * * 1. [Fix] handleCompanyListClick: Navigation payload must use companyId.
  * * 2. [Fix] submitQuickCreateCompany: Navigation after create uses companyId.
  * * 3. [Contract] All operations (delete, navigate) use companyId exclusively.
  * * 4. [Patch] Added dashboardManager.markStale() on successful mutations (create, delete).
+ * * 5. [Patch] Removed dashboard charts section, related HTML, API calls, and rendering logic.
+ * * 6. [UX Polish] Aligned list layout (Search, Tabs, Count) with Potential Contacts UI.
+ * * 7. [UX Polish] Reorganized top control area into 3 distinct rows for better hierarchy.
+ * * 8. [UX Polish] Layout Correction: Strict placement of Tabs, Select Filters, Search+CTA, and Count.
+ * * 9. [UX Polish] Removed Stage and Rating filters and cleaned up layout.
  */
 
 // ==================== 全域變數 ====================
 let allCompaniesData = [];
-let companyListFilters = { type: 'all', stage: 'all', rating: 'all' };
+let companyListFilters = { type: 'all' };
 let currentSort = { field: 'lastActivity', direction: 'desc' };
 
 // ==================== 1. 動態樣式注入 ====================
@@ -143,32 +148,35 @@ async function loadCompaniesListPage() {
     container.onclick = handleCompanyListClick;
     container.onkeydown = handleCompanyListKeydown;
 
-    // 渲染 UI 骨架
+    // 渲染 UI 骨架 [UX Polish] Strict layout hierarchy applied
     container.innerHTML = `
         <div id="company-list-root">
-            <div id="companies-dashboard-container" class="dashboard-grid-flexible" style="margin-bottom: 24px;">
-                <div class="loading show" style="grid-column: span 12;"><div class="spinner"></div><p>載入分析圖表中...</p></div>
-            </div>
             <div class="dashboard-widget">
-                <div class="widget-header">
+                
+                <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
                     <div style="display: flex; align-items: baseline; gap: 15px;">
-                        <h2 class="widget-title">公司總覽</h2>
-                        <span style="font-size: 0.9rem; color: var(--text-muted);">共 <span id="companies-count-display">0</span> 筆</span>
+                        <h2 class="widget-title" style="margin: 0;">公司總覽</h2>
+                    </div>
+                    <div id="company-type-tabs" class="companies-tabs" style="display: flex; gap: 4px; background: var(--bg-hover, #f1f5f9); padding: 4px; border-radius: 8px;">
+                        <button class="tab-btn active" data-action="switch-type-tab" data-value="all" style="background: white; border: none; padding: 8px 16px; font-weight: 600; color: var(--accent-blue); border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; transition: all 0.2s;">全部</button>
                     </div>
                 </div>
                 
-                <div class="search-pagination" style="padding: 0 1.5rem 1rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; position: relative;">
-                    <input type="text" class="search-box" id="company-list-search" placeholder="搜尋公司名稱..." style="flex-grow: 1;">
+                <div id="company-action-bar" style="padding: 1.5rem 1.5rem 0.5rem;">
                     
-                    <button class="action-btn small primary" data-action="toggle-quick-create" data-show="true" id="btn-toggle-create" style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
-                        <span style="font-size: 1.2em; line-height: 1;">+</span> 快速新增
-                    </button>
-
-                    <div id="company-list-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <select id="company-type-filter" class="form-select-sm" data-filter="type"><option value="all">所有類型</option></select>
-                        <select id="company-stage-filter" class="form-select-sm" data-filter="stage"><option value="all">所有階段</option></select>
-                        <select id="company-rating-filter" class="form-select-sm" data-filter="rating"><option value="all">所有評級</option></select>
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <div style="flex: 1; max-width: 400px;">
+                            <input type="text" class="search-box" id="company-list-search" placeholder="搜尋公司名稱..." style="width: 100%;">
+                        </div>
+                        <button class="action-btn primary" data-action="toggle-quick-create" data-show="true" id="btn-toggle-create" style="font-size: 0.95rem; padding: 8px 18px; flex-shrink: 0; white-space: nowrap; font-weight: 600; display: inline-flex; justify-content: center; align-items: center;">
+                            + 快速新增公司
+                        </button>
                     </div>
+
+                    <div style="margin-bottom: 0.5rem;display: flex; justify-content: flex-end;">
+                        <div id="companies-count-display" style="font-size: 0.9rem; color: var(--text-muted); font-weight: 500;">共 0 筆</div>
+                    </div>
+
                 </div>
 
                 <div id="company-quick-create-card" style="display: none; margin: 0 1.5rem 1.5rem; padding: 1.25rem; background-color: var(--secondary-bg); border: 2px solid var(--accent-blue); border-radius: var(--rounded-lg); box-shadow: 0 4px 12px rgba(0,0,0,0.1); animation: slideDown 0.3s ease-out;">
@@ -192,8 +200,7 @@ async function loadCompaniesListPage() {
     `;
 
     try {
-        const [dashboardResult, listResult, oppsResult, systemConfigResult] = await Promise.all([
-            authedFetch(`/api/companies/dashboard`),
+        const [listResult, oppsResult, systemConfigResult] = await Promise.all([
             authedFetch(`/api/companies`), 
             authedFetch(`/api/opportunities?page=0`), 
             authedFetch(`/api/config`) 
@@ -202,17 +209,9 @@ async function loadCompaniesListPage() {
         if (systemConfigResult) {
             window.CRM_APP = window.CRM_APP || {};
             window.CRM_APP.systemConfig = systemConfigResult;
-            populateFilterOptions('company-type-filter', systemConfigResult['公司類型'], '所有類型');
-            populateFilterOptions('company-stage-filter', systemConfigResult['客戶階段'], '所有階段');
-            populateFilterOptions('company-rating-filter', systemConfigResult['互動評級'], '所有評級');
             
-            document.querySelectorAll('#company-list-filters select').forEach(select => {
-                select.addEventListener('change', handleCompanyFilterChange);
-            });
-        }
-
-        if (dashboardResult.success && dashboardResult.data.chartData) {
-            renderCompaniesDashboardCharts(dashboardResult.data.chartData);
+            // Render Tab Filters instead of Select Box for Company Type
+            renderCompanyTypeTabs(systemConfigResult['公司類型'] || []);
         }
 
         if (listResult.success) {
@@ -252,6 +251,20 @@ function handleCompanyListClick(e) {
     e.stopPropagation();
 
     switch (action) {
+        case 'switch-type-tab': 
+            companyListFilters.type = payload.value;
+            // Update tab visuals immediately
+            document.querySelectorAll('#company-type-tabs .tab-btn').forEach(tBtn => {
+                const isActive = tBtn.dataset.value === companyListFilters.type;
+                tBtn.style.background = isActive ? 'white' : 'transparent';
+                tBtn.style.fontWeight = isActive ? '600' : '500';
+                tBtn.style.color = isActive ? 'var(--accent-blue)' : 'var(--text-muted)';
+                tBtn.style.boxShadow = isActive ? '0 1px 3px rgba(0,0,0,0.1)' : 'none';
+                if (isActive) tBtn.classList.add('active');
+                else tBtn.classList.remove('active');
+            });
+            filterAndRenderCompanyList(); 
+            break;
         case 'sort': handleCompanySort(payload.field); break;
         case 'toggle-quick-create': toggleQuickCreateCard(payload.show === 'true'); break;
         case 'submit-quick-create': submitQuickCreateCompany(); break;
@@ -283,15 +296,13 @@ function handleCompanyListKeydown(e) {
 
 function filterAndRenderCompanyList() {
     const query = document.getElementById('company-list-search')?.value.toLowerCase() || '';
-    const { type, stage, rating } = companyListFilters;
+    const { type } = companyListFilters;
     const countDisplay = document.getElementById('companies-count-display');
 
     let filtered = allCompaniesData.filter(c => {
         const nameMatch = query ? (c.companyName || '').toLowerCase().includes(query) : true;
         const typeMatch = type === 'all' ? true : c.companyType === type;
-        const stageMatch = stage === 'all' ? true : c.customerStage === stage;
-        const ratingMatch = rating === 'all' ? true : c.engagementRating === rating;
-        return nameMatch && typeMatch && stageMatch && ratingMatch;
+        return nameMatch && typeMatch;
     });
 
     filtered.sort((a, b) => {
@@ -311,7 +322,8 @@ function filterAndRenderCompanyList() {
             : valBStr.localeCompare(valAStr, 'zh-Hant');
     });
 
-    if (countDisplay) countDisplay.textContent = filtered.length;
+    // [UX Polish] Match contacts format
+    if (countDisplay) countDisplay.innerHTML = `共 ${filtered.length} 筆`;
     const listContent = document.getElementById('companies-list-content');
     if (listContent) listContent.innerHTML = renderCompaniesTable(filtered);
 }
@@ -447,48 +459,31 @@ async function submitQuickCreateCompany() {
     }
 }
 
-function populateFilterOptions(selectId, options, defaultText) {
-    const el = document.getElementById(selectId);
-    if (!el) return;
-    el.innerHTML = `<option value="all">${defaultText}</option>` + (options || []).map(opt => `<option value="${opt.value}">${opt.note || opt.value}</option>`).join('');
+function renderCompanyTypeTabs(options = []) {
+    const tabsContainer = document.getElementById('company-type-tabs');
+    if (!tabsContainer) return;
+    
+    const tabs = [{ value: 'all', label: '全部' }];
+    options.forEach(opt => tabs.push({ value: opt.value, label: opt.note || opt.value }));
+    
+    let html = '';
+    tabs.forEach(t => {
+        const isActive = companyListFilters.type === t.value;
+        const style = isActive 
+            ? `background: white; border: none; padding: 8px 16px; font-weight: 600; color: var(--accent-blue); border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; transition: all 0.2s;` 
+            : `background: transparent; border: none; padding: 8px 16px; font-weight: 500; color: var(--text-muted); border-radius: 6px; box-shadow: none; cursor: pointer; transition: all 0.2s;`;
+        
+        html += `<button class="tab-btn ${isActive ? 'active' : ''}" data-action="switch-type-tab" data-value="${t.value}" style="${style}">${t.label}</button>`;
+    });
+    
+    tabsContainer.innerHTML = html;
 }
 
-function handleCompanyFilterChange(e) { companyListFilters[e.target.dataset.filter] = e.target.value; filterAndRenderCompanyList(); }
 function handleCompanyListSearch() { 
     if (typeof handleSearch === 'function') handleSearch(() => filterAndRenderCompanyList()); 
     else filterAndRenderCompanyList();
 }
 function handleCompanySort(f) { if (currentSort.field === f) { currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc'; } else { currentSort.field = f; currentSort.direction = 'desc'; } filterAndRenderCompanyList(); }
-
-function renderCompaniesDashboardCharts(chartData) {
-    const container = document.getElementById('companies-dashboard-container');
-    if (!container) return;
-    container.innerHTML = `<div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">公司新增趨勢</h2></div><div id="company-trend-chart" class="widget-content" style="height: 250px;"></div></div><div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">公司類型分佈</h2></div><div id="company-type-chart" class="widget-content" style="height: 250px;"></div></div><div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">客戶階段分佈</h2></div><div id="customer-stage-chart" class="widget-content" style="height: 250px;"></div></div><div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">互動評級</h2></div><div id="engagement-rating-chart" class="widget-content" style="height: 250px;"></div></div>`;
-    
-    const cfg = window.CRM_APP?.systemConfig;
-    const typeMap = new Map((cfg?.['公司類型'] || []).map(i => [i.value, i.note]));
-    const stageMap = new Map((cfg?.['客戶階段'] || []).map(i => [i.value, i.note]));
-    const ratingMap = new Map((cfg?.['互動評級'] || []).map(i => [i.value, i.note]));
-    
-    setTimeout(() => {
-        if (typeof Highcharts !== 'undefined' && chartData) {
-            renderCompanyTrendChart(chartData.trend);
-            const renderChart = (typeof createThemedChart === 'function') ? createThemedChart : (id, opts) => Highcharts.chart(id, opts);
-            
-            renderChart('company-type-chart', getCompanyPieChartOptions('類型', chartData.type, 'companyType', typeMap));
-            renderChart('customer-stage-chart', getCompanyPieChartOptions('階段', chartData.stage, 'customerStage', stageMap));
-            renderChart('engagement-rating-chart', getCompanyBarChartOptions('評級', chartData.rating, 'engagementRating', ratingMap));
-        }
-    }, 0);
-}
-
-function renderCompanyTrendChart(data) { 
-    const renderChart = (typeof createThemedChart === 'function') ? createThemedChart : (id, opts) => Highcharts.chart(id, opts);
-    renderChart('company-trend-chart', { chart: { type: 'line' }, title: { text: '' }, xAxis: { categories: (data || []).map(d => d[0]?.substring(5) || '') }, yAxis: { title: { text: '數量' }, allowDecimals: false }, legend: { enabled: false }, series: [{ name: '新增公司數', data: (data || []).map(d => d[1] || 0) }] }); 
-}
-function getCompanyPieChartOptions(n, d, k, m) { return { chart: { type: 'pie' }, title: { text: '' }, tooltip: { pointFormat: '{series.name}: <b>{point.percentage:.1f}%</b> ({point.y} 家)' }, plotOptions: { pie: { allowPointSelect: true, cursor: 'pointer', dataLabels: { enabled: true, format: '<b>{point.name}</b>: {point.percentage:.1f} %', distance: 20 }, point: { events: { click: function() { handleCompanyChartClick(this, k); } } } } }, series: [{ name: '家數', data: (d || []).map(item => ({ name: m.get(item.name) || item.name || '未分類', y: item.y || 0, internalValue: item.name })) }] }; }
-function getCompanyBarChartOptions(n, d, k, m) { const chartD = (d || []).map(item => ({ name: m.get(item.name) || item.name || '未分類', y: item.y || 0, internalValue: item.name })); return { chart: { type: 'bar' }, title: { text: '' }, xAxis: { categories: chartD.map(item => item.name), title: { text: null } }, yAxis: { min: 0, title: { text: '公司數量', align: 'high' }, allowDecimals: false }, legend: { enabled: false }, series: [{ name: '數量', data: chartD }], plotOptions: { bar: { cursor: 'pointer', point: { events: { click: function() { handleCompanyChartClick(this, k, true); } } } } } }; }
-function handleCompanyChartClick(p, k, b=false) { const val = b ? p.options.internalValue : p.internalValue; const sel = document.getElementById(`company-${k.replace('company', '').toLowerCase()}-filter`); if (!sel) return; if (p.selected) { companyListFilters[k] = 'all'; sel.value = 'all'; p.select(false, true); } else { companyListFilters[k] = val; sel.value = val; p.select(true, true); } filterAndRenderCompanyList(); }
 
 // Router Registration
 window.loadCompaniesPage = loadCompaniesListPage;
