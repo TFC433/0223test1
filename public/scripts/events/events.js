@@ -1,10 +1,16 @@
 // File: public/scripts/events/events.js
 // views/scripts/events.js (重構後的主控制器)
 
+/**
+ * @version 1.0.5
+ * @date 2026-03-16
+ * @purpose UI Visual Alignment: Matched CRM list page segmented tabs and CTA conventions.
+ */
+
 // 全域變數，用於跨模組共享數據
 let eventLogPageData = {
     eventList: [],
-    chartData: {}
+    chartData: {} // 保留結構以符合後端合約
 };
 
 /**
@@ -15,17 +21,16 @@ async function loadEventLogsPage() {
     const dashboardContainer = document.getElementById('event-log-dashboard-container');
     const listContainer = document.getElementById('event-log-list-container');
     
-    // 顯示載入中的畫面
-    if(dashboardContainer) dashboardContainer.innerHTML = '<div class="loading show"><div class="spinner"></div></div>';
+    // 清除/隱藏儀表板區塊，並顯示列表載入畫面
+    if(dashboardContainer) dashboardContainer.innerHTML = '';
     if(listContainer) listContainer.innerHTML = '<div class="loading show"><div class="spinner"></div><p>載入紀錄中...</p></div>';
     
     try {
-        // 一次性獲取所有頁面需要的資料
+        // 一次性獲取所有頁面需要的資料 (維持 API Contract 不變)
         const result = await authedFetch('/api/events/dashboard');
         if (!result.success) throw new Error(result.details || '讀取資料失敗');
         
         // [Phase 8 Fix] Robust Data Normalization
-        // Ensures frontend doesn't crash if backend returns Array or partial Object
         const rawData = result.data || {};
         
         eventLogPageData = {
@@ -33,14 +38,7 @@ async function loadEventLogsPage() {
             chartData: rawData.chartData || {}
         };
 
-        // 協調呼叫各個模組進行渲染
-        // Safe check for render functions presence
-        if (typeof renderEventsDashboardCharts === 'function') {
-            renderEventsDashboardCharts(dashboardContainer, eventLogPageData.chartData);
-        } else if (dashboardContainer) {
-            dashboardContainer.innerHTML = ''; // Clear loading if renderer missing
-        }
-
+        // 僅渲染列表 (圖表渲染已移除)
         if (typeof renderEventLogList === 'function') {
             renderEventLogList(listContainer, eventLogPageData.eventList);
         } else if (listContainer) {
@@ -50,7 +48,6 @@ async function loadEventLogsPage() {
     } catch (error) {
         if (error.message !== 'Unauthorized') {
             console.error('❌ 載入事件紀錄頁面失敗:', error);
-            if(dashboardContainer) dashboardContainer.innerHTML = '';
             if(listContainer) listContainer.innerHTML = `<div class="alert alert-error">讀取事件列表失敗: ${error.message}</div>`;
         }
     }
@@ -68,8 +65,7 @@ function showEventLogForCreation() {
     }
 }
 
-// [Refactor] Restored to minimal responsibility (removed customerCompany)
-// This helper is for simple usages; Opportunity Detail should call Modal Manager directly.
+// 輔助函式：供其他模組呼叫
 function showEventLogModalByOpp(opportunityId, opportunityName) {
     if (typeof showEventLogFormModal === 'function') {
         showEventLogFormModal({ opportunityId, opportunityName });

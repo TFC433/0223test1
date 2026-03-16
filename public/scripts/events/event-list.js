@@ -2,9 +2,9 @@
 // 職責：渲染並管理「事件紀錄」頁面的主列表 (含搜尋、篩選、統計、圖示化操作)
 // (Systematic Refactor: Event Delegation - 統一事件處理機制)
 /**
- * @version 1.0.3
- * @date 2026-01-22
- * @description [Forensics Probe] Added debug counters and call traces.
+ * @version 1.0.6
+ * @date 2026-03-16
+ * @description [Layout Recovery] Rolled back to stable .dashboard-widget skeleton while retaining minimal Tab/CTA visual alignments.
  */
 
 // 模組內部狀態
@@ -30,34 +30,38 @@ function renderEventLogList(container, eventList) {
     // 2. 注入 CSS 樣式
     _injectEventListStyles();
 
-    // 3. 渲染介面骨架 (包裹 root class 以便委派)
-    // 注意：每次呼叫 render 都會重建這個結構，這保證了事件監聽器的生命週期是正確的
+    // 3. 渲染介面骨架 (包裹 root class 以便委派，恢復穩定 dashboard-widget 結構)
     container.innerHTML = `
         <div class="event-list-root dashboard-widget" style="margin-top: 24px;">
-            <div class="widget-header">
-                <div style="display: flex; align-items: baseline; gap: 12px;">
-                    <h2 class="widget-title">事件紀錄明細</h2>
-                    <span style="font-size: 0.9rem; color: var(--text-muted);">共 <span id="event-list-count">0</span> 筆</span>
-                </div>
+            
+            <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <h2 class="widget-title" style="margin: 0; font-size: 1.25rem;">事件總覽</h2>
+                <div class="crm-tabs" id="event-type-tabs">
+                    </div>
             </div>
 
-            <div class="search-pagination" style="padding: 0 1.5rem 1rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;">
+            <div class="search-pagination" style="padding: 1rem 1.5rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; border-bottom: 1px solid var(--border-color);">
                 <input type="text" class="search-box" id="event-list-search" placeholder="搜尋事件、對象或建立者..." style="flex-grow: 1; min-width: 200px;">
                 
-                <button class="action-btn small primary" data-action="create-event" style="flex-shrink: 0; display: flex; align-items: center; gap: 4px;">
-                    <span style="font-size: 1.1em; line-height: 1;">+</span> 新增紀錄
-                </button>
-
                 <div id="event-list-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    <select id="event-filter-type" class="form-select-sm"><option value="all">所有類型</option></select>
                     <select id="event-filter-time" class="form-select-sm">
                         <option value="all">所有時間</option>
                         <option value="7">近 7 天</option>
                         <option value="30">近 30 天</option>
                         <option value="90">近 90 天</option>
                     </select>
-                    <select id="event-filter-creator" class="form-select-sm"><option value="all">所有建立者</option></select>
+                    <select id="event-filter-creator" class="form-select-sm">
+                        <option value="all">所有建立者</option>
+                    </select>
                 </div>
+
+                <button class="action-btn primary" data-action="create-event" style="flex-shrink: 0;">
+                    ＋ 新增紀錄
+                </button>
+            </div>
+
+            <div id="event-list-count-container" style="text-align: right; padding: 0.75rem 1.5rem 0.5rem; font-size: 0.95rem; color: var(--text-muted); font-weight: 500;">
+                共 0 筆
             </div>
 
             <div class="widget-content" style="padding: 0;">
@@ -65,31 +69,22 @@ function renderEventLogList(container, eventList) {
                     <div class="loading show"><div class="spinner"></div></div>
                 </div>
             </div>
+
         </div>
     `;
 
-    // 4. 綁定事件委派 (針對剛建立的 Widget Root)
+    // 4. 綁定事件委派
     const widgetRoot = container.querySelector('.event-list-root');
     if (widgetRoot) {
-        // [Forensics Probe] Log binding
         window._DEBUG_EVENT_LIST_BIND_COUNT++;
-        console.log(`[Forensics] BIND event-list click (Count: ${window._DEBUG_EVENT_LIST_BIND_COUNT})`, {
-            container: container,
-            widgetRoot: widgetRoot,
-            hasOldListener: !!widgetRoot.onclick // simple check
-        });
-        // print stack trace to see who called render
-        console.trace('[Forensics] BIND Trace');
-
-        // 確保移除舊的 (雖然後面 innerHTML 覆蓋了 DOM，但好習慣)
         widgetRoot.removeEventListener('click', handleEventListClick);
         widgetRoot.addEventListener('click', handleEventListClick);
     }
 
-    // 5. 初始化篩選選項
+    // 5. 初始化篩選選項 (包含產生 Tabs)
     _populateEventFilterOptions();
 
-    // 6. 綁定輸入與 Select 事件 (這些元素在上面 HTML 剛剛生成，可以直接綁定)
+    // 6. 綁定輸入與 Select 事件
     const searchInput = document.getElementById('event-list-search');
     if (searchInput) {
         searchInput.addEventListener('keyup', (e) => {
@@ -98,7 +93,7 @@ function renderEventLogList(container, eventList) {
         });
     }
     
-    ['type', 'time', 'creator'].forEach(key => {
+    ['time', 'creator'].forEach(key => {
         const el = document.getElementById(`event-filter-${key}`);
         if (el) {
             el.addEventListener('change', (e) => {
@@ -116,15 +111,8 @@ function renderEventLogList(container, eventList) {
  * 事件處理中心 (Delegation Hub)
  */
 function handleEventListClick(e) {
-    // [Forensics Probe] Log click firing
     window._DEBUG_EVENT_LIST_CLICK_COUNT++;
     const btn = e.target.closest('[data-action]');
-    console.log(`[Forensics] CLICK fired (Total: ${window._DEBUG_EVENT_LIST_CLICK_COUNT})`, {
-        target: e.target,
-        btn: btn,
-        action: btn ? btn.dataset.action : 'N/A',
-        eventId: btn ? btn.dataset.id : 'N/A'
-    });
 
     if (!btn) return;
 
@@ -137,8 +125,15 @@ function handleEventListClick(e) {
     }
 
     switch (action) {
+        case 'filter-type':
+            // 處理 Tab 切換
+            _eventFilters.type = payload.value;
+            document.querySelectorAll('#event-type-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            _filterAndRenderEvents();
+            break;
+
         case 'create-event':
-            // 呼叫全域事件建立函式 (通常在 events.js 或 event-modal-manager.js)
             if (typeof window.showEventLogForCreation === 'function') {
                 window.showEventLogForCreation();
             } else {
@@ -147,7 +142,6 @@ function handleEventListClick(e) {
             break;
 
         case 'view-report':
-            // 呼叫全域報告檢視函式
             if (typeof window.showEventLogReport === 'function') {
                 window.showEventLogReport(payload.id);
             } else {
@@ -156,7 +150,6 @@ function handleEventListClick(e) {
             break;
             
         case 'edit-event':
-            // 呼叫獨立編輯器
              if (window.EventEditorStandalone && window.EventEditorStandalone.open) {
                 window.EventEditorStandalone.open(payload.id);
             } else {
@@ -165,7 +158,6 @@ function handleEventListClick(e) {
             break;
             
         case 'delete-event':
-             // 呼叫刪除邏輯 (假設使用 EventEditorStandalone 中的邏輯或全域邏輯，這裡示範呼叫全域刪除)
              if (window.EventEditorStandalone && window.EventEditorStandalone.open) {
                 window.EventEditorStandalone.open(payload.id);
             }
@@ -174,7 +166,7 @@ function handleEventListClick(e) {
         case 'navigate':
             // 處理 SPA 導航
             if (payload.page) {
-                e.preventDefault(); // 阻止 href="#"
+                e.preventDefault();
                 const params = payload.params ? JSON.parse(payload.params) : {};
                 if (window.CRM_APP && window.CRM_APP.navigateTo) {
                     window.CRM_APP.navigateTo(payload.page, params);
@@ -189,7 +181,7 @@ function handleEventListClick(e) {
  */
 function _filterAndRenderEvents() {
     const tableContainer = document.getElementById('event-list-table-container');
-    const countDisplay = document.getElementById('event-list-count');
+    const countDisplay = document.getElementById('event-list-count-container');
     if (!tableContainer) return;
 
     // --- 篩選邏輯 ---
@@ -197,13 +189,13 @@ function _filterAndRenderEvents() {
     const timeMap = { '7': 7, '30': 30, '90': 90 };
     
     let filtered = _fullEventData.filter(evt => {
-        // 1. 搜尋 (比對：事件名、機會名、公司名、建立者)
+        // 1. 搜尋
         if (_eventSearchQuery) {
             const searchContent = `${evt.eventName} ${evt.opportunityName||''} ${evt.companyName||''} ${evt.creator}`.toLowerCase();
             if (!searchContent.includes(_eventSearchQuery)) return false;
         }
 
-        // 2. 類型篩選
+        // 2. 類型篩選 (Tabs)
         if (_eventFilters.type !== 'all' && evt.eventType !== _eventFilters.type) return false;
 
         // 3. 時間篩選
@@ -219,8 +211,8 @@ function _filterAndRenderEvents() {
         return true;
     });
 
-    // 更新統計
-    if (countDisplay) countDisplay.textContent = filtered.length;
+    // 更新統計 (單一區塊文字)
+    if (countDisplay) countDisplay.textContent = `共 ${filtered.length} 筆`;
 
     // --- 渲染表格 ---
     if (filtered.length === 0) {
@@ -247,21 +239,17 @@ function _filterAndRenderEvents() {
             <tbody>`;
 
     filtered.forEach((event, index) => {
-        // 類型 Tag
         const typeInfo = eventTypeConfig.get(event.eventType) || { note: (event.eventType || 'unknown').toUpperCase(), color: '#9ca3af' };
         const typeHtml = `<span class="common-chip" style="background-color: ${typeInfo.color};">${typeInfo.note}</span>`;
 
-        // 日期
         const displayTime = event.lastModifiedTime || event.createdTime;
         const dateStr = displayTime ? new Date(displayTime).toLocaleDateString('zh-TW') : '-';
 
-        // 關聯對象處理 (優先機會，其次公司)
         let objTagHtml = '<span style="color:#d1d5db;">-</span>';
         let objNameHtml = '<span style="color:#d1d5db;">-</span>';
 
         if (event.opportunityId) {
             objTagHtml = `<span class="common-chip" style="background-color: #3b82f6;">機會</span>`;
-            // data-action 導航
             const params = JSON.stringify({ opportunityId: event.opportunityId }).replace(/"/g, '&quot;');
             objNameHtml = `<a href="#" class="text-link text-truncate" title="${event.opportunityName || event.opportunityId}" 
                             data-action="navigate" 
@@ -272,7 +260,6 @@ function _filterAndRenderEvents() {
         } else if (event.companyName || event.companyId) {
             const cName = event.companyName || event.companyId;
             objTagHtml = `<span class="common-chip" style="background-color: #6b7280;">公司</span>`;
-            // data-action 導航
             const params = JSON.stringify({ companyName: encodeURIComponent(cName) }).replace(/"/g, '&quot;');
             objNameHtml = `<a href="#" class="text-link text-truncate" title="${cName}" 
                             data-action="navigate" 
@@ -319,23 +306,20 @@ function _filterAndRenderEvents() {
 }
 
 /**
- * 輔助：填入篩選選單
+ * 輔助：填入篩選選單與建立 Tabs
  */
 function _populateEventFilterOptions() {
-    const typeSelect = document.getElementById('event-filter-type');
+    const tabsContainer = document.getElementById('event-type-tabs');
     const creatorSelect = document.getElementById('event-filter-creator');
     
-    // 1. 類型 (從 System Config)
+    // 1. 類型 Tabs (從 System Config)
     const types = window.CRM_APP?.systemConfig?.['事件類型'] || [];
-    if (typeSelect) {
-        // 清空並重新填充
-        typeSelect.innerHTML = '<option value="all">所有類型</option>'; 
+    if (tabsContainer) {
+        let html = `<button class="tab-btn active" data-action="filter-type" data-value="all">全部</button>`;
         types.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t.value;
-            opt.textContent = t.note || t.value;
-            typeSelect.appendChild(opt);
+            html += `<button class="tab-btn" data-action="filter-type" data-value="${t.value}">${t.note || t.value}</button>`;
         });
+        tabsContainer.innerHTML = html;
     }
 
     // 2. 建立者 (從資料中提取唯一值)
@@ -361,7 +345,37 @@ function _injectEventListStyles() {
     const style = document.createElement('style');
     style.id = styleId;
     style.innerHTML = `
-            .event-list-container { width: 100%; overflow-x: auto; background: var(--card-bg, #fff); min-height: 200px; }
+        /* CRM 分段式 Tabs 樣式 (Segmented Tabs) */
+        .crm-tabs {
+            display: inline-flex;
+            background-color: var(--bg-locked, #f3f4f6);
+            padding: 4px;
+            border-radius: 8px;
+            gap: 4px;
+        }
+        .crm-tabs .tab-btn {
+            background: transparent;
+            border: none;
+            padding: 6px 16px;
+            font-size: 0.95rem;
+            color: var(--text-muted, #6b7280);
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        .crm-tabs .tab-btn:hover {
+            color: var(--text-main, #111827);
+        }
+        .crm-tabs .tab-btn.active {
+            background-color: #ffffff;
+            color: var(--primary-color, #2563eb);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            font-weight: 600;
+        }
+
+        /* 列表容器 */
+        .event-list-container { width: 100%; overflow-x: auto; background: var(--card-bg, #fff); min-height: 200px; }
         .event-list-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
         
         .event-list-table th { 
