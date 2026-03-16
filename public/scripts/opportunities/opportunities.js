@@ -1,14 +1,13 @@
 // public/scripts/opportunities/opportunities.js
 /**
- * 職責：管理「機會案件列表頁」的圖表、篩選、列表渲染與操作
- * @version 7.3.1 (Phase 8.14 - UX Simplification Patch)
- * @date 2026-03-13
- * @description [UX Simplification Patch] Removed clickable links from company names in the Opportunities List table to prevent mis-clicks and simplify routing.
+ * 職責：管理「機會案件列表頁」的篩選、列表渲染與操作
+ * @version 8.3.0 (Hierarchy Fix Patch)
+ * @date 2026-03-16
+ * @description [Hierarchy Fix Patch] Reordered top controls to strictly follow: Tabs -> Dropdowns -> Search -> Status/Count -> Table. Decoupled filter status from dropdown row.
  */
 
 // ==================== 全域變數 (此頁面專用) ====================
 let opportunitiesData = [];
-let reverseNameMaps = {};
 
 // 篩選與排序狀態
 let opportunitiesListFilters = { 
@@ -16,10 +15,7 @@ let opportunitiesListFilters = {
     type: 'all', 
     source: 'all', 
     time: 'all', 
-    stage: 'all',
-    probability: 'all', 
-    channel: 'all', 
-    scale: 'all' 
+    stage: 'all'
 };
 let currentOppSort = { field: 'effectiveLastActivity', direction: 'desc' };
 
@@ -33,53 +29,55 @@ async function loadOpportunities(query = '') {
     const container = document.getElementById('page-opportunities');
     if (!container) return;
 
-    // 1. 渲染頁面骨架
+    // 1. 渲染頁面骨架 (Corrected Hierarchy Pattern)
     container.innerHTML = `
-        <div id="opportunities-dashboard-container" class="dashboard-grid-flexible" style="margin-bottom: 24px;">
-            <div class="loading show" style="grid-column: span 12;"><div class="spinner"></div><p>載入分析圖表中...</p></div>
-        </div>
-
-        <div id="opportunity-chip-wall-container" class="dashboard-widget" style="margin-bottom: 24px; display: none;">
-            <div class="widget-header"><h2 class="widget-title">機會階段總覽 (晶片牆)</h2></div>
-            <div class="widget-content">
-                <div class="loading show"><div class="spinner"></div><p>載入晶片牆資料中...</p></div>
-            </div>
-        </div>
-
-        <div class="dashboard-widget">
-            <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; padding-bottom: 15px;">
-                <div style="display: flex; align-items: baseline; gap: 15px;">
-                    <h2 class="widget-title">機會案件列表</h2>
-                    <span style="font-size: 0.9rem; color: var(--text-muted);">共 <span id="opportunities-count-display">0</span> 筆</span>
-                </div>
+        <div id="opportunities-list-root">
+            <div class="dashboard-widget">
                 
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <div id="opportunities-filter-status" style="display: none; align-items: center; gap: 8px;">
-                        <span id="opportunities-filter-text" style="font-size: 0.85rem; font-weight: 600; color: var(--accent-blue);"></span>
-                        <button class="action-btn small danger" data-action="clear-filters" style="padding: 2px 8px;">清除</button>
+                <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                    <div style="display: flex; align-items: baseline; gap: 15px;">
+                        <h2 class="widget-title" style="margin: 0;">機會總覽</h2>
                     </div>
-
-                    <div id="opportunity-list-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <select id="opp-year-filter" class="form-select-sm" data-filter="year"><option value="all">所有年份</option></select>
-                        <select id="opp-type-filter" class="form-select-sm" data-filter="type"><option value="all">所有種類</option></select>
-                        <select id="opp-source-filter" class="form-select-sm" data-filter="source"><option value="all">所有來源</option></select>
-                        <select id="opp-time-filter" class="form-select-sm" data-filter="time">
-                            <option value="all">活動日期 (全部)</option>
-                            <option value="7">近 7 天</option>
-                            <option value="30">近 30 天</option>
-                            <option value="90">近 90 天</option>
-                        </select>
-                        <select id="opp-stage-filter" class="form-select-sm" data-filter="stage"><option value="all">所有階段</option></select>
+                    <div id="opportunity-type-tabs" class="opportunity-tabs" style="display: flex; gap: 4px; background: var(--bg-hover, #f1f5f9); padding: 4px; border-radius: 8px; overflow-x: auto;">
+                        <button class="tab-btn active" data-action="switch-type-tab" data-value="all" style="background: white; border: none; padding: 8px 16px; font-weight: 600; color: var(--accent-blue); border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; transition: all 0.2s; white-space: nowrap;">全部</button>
                     </div>
                 </div>
-            </div>
 
-            <div class="search-row" style="padding: 0 1.5rem 1.25rem;">
-                <input type="text" class="search-box" id="opportunities-list-search" placeholder="搜尋機會名稱或客戶公司..." style="width: 100%; max-width: none;" value="${query}">
-            </div>
+                <div id="opportunity-action-bar" style="padding: 1.5rem 1.5rem 0.5rem;">
+                    
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                        <div id="opportunity-list-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                            <select id="opp-year-filter" class="form-select-sm" data-filter="year"><option value="all">所有年份</option></select>
+                            <select id="opp-source-filter" class="form-select-sm" data-filter="source"><option value="all">所有來源</option></select>
+                            <select id="opp-time-filter" class="form-select-sm" data-filter="time">
+                                <option value="all">活動日期 (全部)</option>
+                                <option value="7">近 7 天</option>
+                                <option value="30">近 30 天</option>
+                                <option value="90">近 90 天</option>
+                            </select>
+                            <select id="opp-stage-filter" class="form-select-sm" data-filter="stage"><option value="all">所有階段</option></select>
+                        </div>
+                    </div>
 
-            <div id="opportunities-page-content" class="widget-content" style="padding: 0;">
-                <div class="loading show"><div class="spinner"></div><p>載入機會資料中...</p></div>
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <div style="flex: 1; max-width: 400px;">
+                            <input type="text" class="search-box" id="opportunities-list-search" placeholder="搜尋機會名稱或客戶公司..." style="width: 100%;" value="${query}">
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; min-height: 24px;">
+                        <div id="opportunities-filter-status" style="display: none; align-items: center; gap: 8px;">
+                            <span id="opportunities-filter-text" style="font-size: 0.85rem; font-weight: 600; color: var(--accent-blue);"></span>
+                            <button class="action-btn small danger" data-action="clear-filters" style="padding: 2px 8px;">清除</button>
+                        </div>
+                        
+                        <div id="opportunities-count-display" style="font-size: 0.9rem; color: var(--text-muted); font-weight: 500; margin-left: auto;">共 0 筆</div>
+                    </div>
+                </div>
+
+                <div id="opportunities-page-content" class="widget-content" style="padding: 0;">
+                    <div class="loading show"><div class="spinner"></div><p>載入機會資料中...</p></div>
+                </div>
             </div>
         </div>
     `;
@@ -96,17 +94,20 @@ async function loadOpportunities(query = '') {
     }
 
     try {
-        const [dashboardResult, opportunitiesResult, systemConfigResult] = await Promise.all([
-            authedFetch(`/api/opportunities/dashboard`),
-            authedFetch(`/api/opportunities?page=0`), // page=0 is strictly reserved to fetch raw array for ChipWall/Dashboard
+        // 取得動態配置與原始年份計算資料 (保留 page=0 以計算 yearSet，符合後端現存契約)
+        const [opportunitiesResult, systemConfigResult] = await Promise.all([
+            authedFetch(`/api/opportunities?page=0`), 
             authedFetch(`/api/config`)
         ]);
 
         if (systemConfigResult) {
+            window.CRM_APP = window.CRM_APP || {};
             window.CRM_APP.systemConfig = systemConfigResult;
             
+            // --- 建立 Opportunity Type Tabs ---
+            renderOpportunityTypeTabs(systemConfigResult['機會種類'] || []);
+
             // 填充下拉選單選項
-            populateOppFilterOptions('opp-type-filter', systemConfigResult['機會種類'], '所有種類');
             populateOppFilterOptions('opp-source-filter', systemConfigResult['機會來源'], '所有來源');
             populateOppFilterOptions('opp-stage-filter', systemConfigResult['機會階段'], '所有階段');
             
@@ -116,27 +117,10 @@ async function loadOpportunities(query = '') {
             });
         }
 
-        if (dashboardResult.success && dashboardResult.data && dashboardResult.data.chartData) {
-            const systemConfig = window.CRM_APP?.systemConfig; 
-            if (systemConfig) {
-                reverseNameMaps = {
-                    opportunitySource: new Map((systemConfig['機會來源'] || []).map(i => [i.note || i.value, i.value])), 
-                    opportunityType: new Map((systemConfig['機會種類'] || []).map(i => [i.note || i.value, i.value])),
-                    currentStage: new Map((systemConfig['機會階段'] || []).map(i => [i.note || i.value, i.value])),
-                    orderProbability: new Map((systemConfig['下單機率'] || []).map(i => [i.note || i.value, i.value])),
-                    potentialSpecification: new Map((systemConfig['可能下單規格'] || []).map(i => [i.note || i.value, i.value])),
-                    salesChannel: new Map((systemConfig['可能銷售管道'] || []).map(i => [i.note || i.value, i.value])),
-                    deviceScale: new Map((systemConfig['設備規模'] || []).map(i => [i.note || i.value, i.value]))
-                };
-            }
-            renderOpportunityCharts(dashboardResult.data.chartData);
-        }
-
         let opportunities = opportunitiesResult || [];
 
         const yearSet = new Set();
         opportunities.forEach(opp => {
-             // Strict guard: rely on backend computation, deploy strict legacy fallback just in case
              if (typeof opp.effectiveLastActivity !== 'number' || Number.isNaN(opp.effectiveLastActivity)) {
                  opp.effectiveLastActivity = new Date(opp.lastUpdateTime || opp.createdTime || 0).getTime();
              }
@@ -156,42 +140,12 @@ async function loadOpportunities(query = '') {
                 opt.textContent = `${y} 年`;
                 yearFilter.appendChild(opt);
             });
+            yearFilter.value = opportunitiesListFilters.year;
         }
 
         opportunitiesData = opportunities;
 
-        // 保留晶片牆邏輯
-        const chipWallContainer = document.getElementById('opportunity-chip-wall-container');
-        if (typeof ChipWall !== 'undefined' && chipWallContainer) {
-            const ongoingOpportunities = opportunitiesData.filter(opp => opp.currentStatus === '進行中');
-            const chipWall = new ChipWall('#opportunity-chip-wall-container', {
-                stages: window.CRM_APP?.systemConfig?.['機會階段'] || [], 
-                items: ongoingOpportunities,
-                colorConfigKey: '機會種類',
-                useDynamicSize: true,
-                isCollapsible: true,
-                isDraggable: true,
-                showControls: true, 
-                onItemUpdate: () => {
-                    // Phase 8.10: Unify stale signaling via dashboardManager contract
-                    if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
-                        window.dashboardManager.markStale();
-                    } else if (window.CRM_APP?.pageConfig?.dashboard) {
-                        window.CRM_APP.pageConfig.dashboard.loaded = false; 
-                    }
-                },
-                onFilterChange: (filters) => {
-                    opportunitiesListFilters.year = filters.year;
-                    opportunitiesListFilters.type = filters.type; 
-                    opportunitiesListFilters.source = filters.source;
-                    opportunitiesListFilters.time = filters.time;
-                    filterAndRenderOpportunities(); 
-                }
-            });
-            chipWall.render();
-        }
-
-        // 執行初始表格 API 渲染 (Decoupled from opportunitiesData)
+        // 執行初始表格 API 渲染
         fetchAndRenderOpportunitiesTable();
 
     } catch (error) {
@@ -214,6 +168,11 @@ function handleOpportunitiesClick(e) {
     const payload = btn.dataset;
 
     switch (action) {
+        case 'switch-type-tab':
+            opportunitiesListFilters.type = payload.value;
+            renderOpportunityTypeTabs(window.CRM_APP?.systemConfig?.['機會種類'] || []);
+            fetchAndRenderOpportunitiesTable();
+            break;
         case 'sort':
             handleOppSort(payload.field);
             break;
@@ -238,6 +197,26 @@ function handleOpportunitiesClick(e) {
     }
 }
 
+function renderOpportunityTypeTabs(options = []) {
+    const tabsContainer = document.getElementById('opportunity-type-tabs');
+    if (!tabsContainer) return;
+    
+    const tabs = [{ value: 'all', label: '全部' }];
+    options.forEach(opt => tabs.push({ value: opt.value, label: opt.note || opt.value }));
+    
+    let html = '';
+    tabs.forEach(t => {
+        const isActive = opportunitiesListFilters.type === t.value;
+        const style = isActive 
+            ? `background: white; border: none; padding: 8px 16px; font-weight: 600; color: var(--accent-blue); border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; transition: all 0.2s; white-space: nowrap;` 
+            : `background: transparent; border: none; padding: 8px 16px; font-weight: 500; color: var(--text-muted); border-radius: 6px; box-shadow: none; cursor: pointer; transition: all 0.2s; white-space: nowrap;`;
+        
+        html += `<button class="tab-btn ${isActive ? 'active' : ''}" data-action="switch-type-tab" data-value="${t.value}" style="${style}">${t.label}</button>`;
+    });
+    
+    tabsContainer.innerHTML = html;
+}
+
 function populateOppFilterOptions(selectId, options, defaultText) {
     const el = document.getElementById(selectId);
     if (!el) return;
@@ -248,48 +227,21 @@ function populateOppFilterOptions(selectId, options, defaultText) {
 function handleOppFilterDropdownChange(e) {
     const filterKey = e.target.dataset.filter;
     opportunitiesListFilters[filterKey] = e.target.value;
-    filterAndRenderOpportunities(); // State mapping -> Table Fetch
+    fetchAndRenderOpportunitiesTable(); 
 }
 
 function clearAllOppFilters() {
     opportunitiesListFilters = { 
-        year: 'all', type: 'all', source: 'all', time: 'all', 
-        stage: 'all', probability: 'all', channel: 'all', scale: 'all' 
+        year: 'all', type: 'all', source: 'all', time: 'all', stage: 'all' 
     };
     
+    // 重設下拉選單
     document.querySelectorAll('#opportunity-list-filters select').forEach(select => {
         select.value = 'all';
     });
 
-    if (typeof Highcharts !== 'undefined') {
-        Highcharts.charts.forEach(chart => {
-            if (chart && chart.series && chart.series[0] && chart.series[0].points) {
-                 chart.series[0].points.forEach(point => {
-                     if (point && typeof point.select === 'function') point.select(false, true);
-                 });
-            }
-        });
-    }
-    fetchAndRenderOpportunitiesTable(); // Direct fetch
-}
-
-/**
- * [Phase 8.11 Decoupling]
- * State Updater Wrapper. Translates chart clicks and widget interactions into state, then fetches the Table via API.
- */
-function filterAndRenderOpportunities(filterKey, filterDisplayValue) {
-    if (filterKey && filterDisplayValue) {
-        const filterValue = reverseNameMaps[filterKey]?.get(filterDisplayValue) || filterDisplayValue;
-        if (opportunitiesListFilters[filterKey] === filterValue) {
-             opportunitiesListFilters[filterKey] = 'all'; 
-        } else {
-             opportunitiesListFilters[filterKey] = filterValue;
-        }
-        
-        const uiKey = filterKey.replace('opportunity', '').toLowerCase();
-        const selectEl = document.querySelector(`#opportunity-list-filters select[data-filter="${uiKey}"]`);
-        if (selectEl) selectEl.value = opportunitiesListFilters[filterKey];
-    }
+    // 重設 Tabs
+    renderOpportunityTypeTabs(window.CRM_APP?.systemConfig?.['機會種類'] || []);
 
     fetchAndRenderOpportunitiesTable();
 }
@@ -307,8 +259,8 @@ async function fetchAndRenderOpportunitiesTable() {
 
     if (!listContent) return;
 
-    // Update UI for active filters
-    const activeFiltersCount = Object.entries(opportunitiesListFilters).filter(([k, v]) => v !== 'all' && v !== undefined).length;
+    // Update UI for active filters (exclude 'type' from chip count as it's handled by tabs)
+    const activeFiltersCount = Object.entries(opportunitiesListFilters).filter(([k, v]) => k !== 'type' && v !== 'all' && v !== undefined).length;
     if (activeFiltersCount > 0) {
         if (filterStatus) filterStatus.style.display = 'flex';
         if (filterText) filterText.textContent = `已套用 ${activeFiltersCount} 個篩選`;
@@ -344,7 +296,7 @@ async function fetchAndRenderOpportunitiesTable() {
         const tableData = result.data || result || [];
         const totalCount = result.total !== undefined ? result.total : tableData.length;
 
-        if (countDisplay) countDisplay.textContent = totalCount;
+        if (countDisplay) countDisplay.innerHTML = `共 ${totalCount} 筆`;
         listContent.innerHTML = renderOpportunitiesTable(tableData);
 
     } catch (error) {
@@ -470,79 +422,6 @@ function renderOpportunitiesTable(opportunities) {
     });
 
     return html + '</tbody></table></div>';
-}
-
-function renderOpportunityCharts(chartData) {
-    const container = document.getElementById('opportunities-dashboard-container');
-    if (!container) return;
-    
-    container.innerHTML = `
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">機會趨勢 (近30天)</h2></div><div id="opp-trend-chart" class="widget-content" style="height: 250px;"></div></div>
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">機會來源分佈</h2></div><div id="opp-source-chart" class="widget-content" style="height: 250px;"></div></div>
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">機會種類分佈</h2></div><div id="opp-type-chart" class="widget-content" style="height: 250px;"></div></div>
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">機會階段分佈</h2></div><div id="opp-stage-chart" class="widget-content" style="height: 250px;"></div></div>
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">下單機率</h2></div><div id="opp-probability-chart" class="widget-content" style="height: 250px;"></div></div>
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">可能下單規格</h2></div><div id="opp-spec-chart" class="widget-content" style="height: 250px;"></div></div>
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">可能銷售管道</h2></div><div id="opp-channel-chart" class="widget-content" style="height: 250px;"></div></div>
-        <div class="dashboard-widget grid-col-3"><div class="widget-header"><h2 class="widget-title">設備規模</h2></div><div id="opp-scale-chart" class="widget-content" style="height: 250px;"></div></div>
-    `;
-
-    setTimeout(() => {
-        if (typeof Highcharts !== 'undefined' && typeof createThemedChart === 'function' && chartData) {
-            renderOppTrendChart(chartData.trend);
-            createThemedChart('opp-source-chart', getPieChartOptions('來源', chartData.source, 'opportunitySource'));
-            createThemedChart('opp-type-chart', getPieChartOptions('種類', chartData.type, 'opportunityType'));
-            renderOppStageChart(chartData.stage);
-            createThemedChart('opp-probability-chart', getPieChartOptions('機率', chartData.probability, 'orderProbability'));
-            createThemedChart('opp-spec-chart', getPieChartOptions('規格', chartData.specification, 'potentialSpecification'));
-            createThemedChart('opp-channel-chart', getPieChartOptions('管道', chartData.channel, 'salesChannel'));
-            createThemedChart('opp-scale-chart', getPieChartOptions('規模', chartData.scale, 'deviceScale'));
-        }
-    }, 0);
-}
-
-function getPieChartOptions(seriesName, data, filterKey) {
-    if (!Array.isArray(data)) data = [];
-    return {
-        chart: { type: 'pie' },
-        title: { text: '' },
-        tooltip: { pointFormat: '{series.name}: <b>{point.percentage:.1f}%</b> ({point.y} 件)' },
-        plotOptions: {
-            pie: {
-                allowPointSelect: true,
-                cursor: 'pointer',
-                dataLabels: { enabled: true, format: '<b>{point.name}</b>: {point.percentage:.1f}%', distance: 20 },
-                point: { events: { click: function() { filterAndRenderOpportunities(filterKey, this.name); } } }
-            }
-        },
-        series: [{ name: seriesName, data: data.map(d => ({ name: d.name || '未分類', y: d.y || 0 })) }]
-    };
-}
-
-function renderOppTrendChart(data) {
-     if (!data || !Array.isArray(data)) return;
-     createThemedChart('opp-trend-chart', {
-        chart: { type: 'line' },
-        title: { text: '' },
-        xAxis: { categories: data.map(d => d[0] ? d[0].substring(5) : '') },
-        yAxis: { title: { text: '數量' }, allowDecimals: false },
-        legend: { enabled: false },
-        series: [{ name: '機會數', data: data.map(d => d[1] || 0) }]
-    });
-}
-
-function renderOppStageChart(data) {
-     if (!data || !Array.isArray(data)) return;
-     const validatedData = data.map(d => [d[0] || '未分類', d[1] || 0]);
-     createThemedChart('opp-stage-chart', {
-        chart: { type: 'bar' },
-        title: { text: '' },
-        xAxis: { categories: validatedData.map(d => d[0]), title: { text: null } },
-        yAxis: { min: 0, title: { text: '案件數量', align: 'high' }, allowDecimals: false },
-        legend: { enabled: false },
-        series: [{ name: '數量', data: validatedData.map(d => d[1]) }],
-        plotOptions: { bar: { cursor: 'pointer', point: { events: { click: function() { filterAndRenderOpportunities('currentStage', this.category); } } } } }
-    });
 }
 
 async function confirmDeleteOpportunity(oppId, opportunityName) {
