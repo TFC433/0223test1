@@ -2,9 +2,9 @@
 // views/scripts/events.js (重構後的主控制器)
 
 /**
- * @version 1.0.5
- * @date 2026-03-16
- * @purpose UI Visual Alignment: Matched CRM list page segmented tabs and CTA conventions.
+ * @version 1.0.6
+ * @date 2026-03-17
+ * @purpose [UI Alignment Patch] Hide empty dashboard container to remove ghost margin-bottom and fix excessive vertical gap.
  */
 
 // 全域變數，用於跨模組共享數據
@@ -22,7 +22,11 @@ async function loadEventLogsPage() {
     const listContainer = document.getElementById('event-log-list-container');
     
     // 清除/隱藏儀表板區塊，並顯示列表載入畫面
-    if(dashboardContainer) dashboardContainer.innerHTML = '';
+    if(dashboardContainer) {
+        dashboardContainer.innerHTML = '';
+        dashboardContainer.style.display = 'none';
+    }
+    
     if(listContainer) listContainer.innerHTML = '<div class="loading show"><div class="spinner"></div><p>載入紀錄中...</p></div>';
     
     try {

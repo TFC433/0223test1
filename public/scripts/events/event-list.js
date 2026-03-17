@@ -2,9 +2,9 @@
 // 職責：渲染並管理「事件紀錄」頁面的主列表 (含搜尋、篩選、統計、圖示化操作)
 // (Systematic Refactor: Event Delegation - 統一事件處理機制)
 /**
- * @version 1.0.12
+ * @version 1.0.13
  * @date 2026-03-17
- * @description [UI Alignment Patch] Fixed header flex-wrap collision by extracting filter selects into a secondary header-adjacent row immediately below the widget-header divider.
+ * @description [UI Alignment Patch] Removed hardcoded margin-top: 24px from event-list-root to fix double-gap layout issue and align with Opportunity page layout contract.
  */
 
 // 模組內部狀態
@@ -32,7 +32,7 @@ function renderEventLogList(container, eventList) {
 
     // 3. 渲染介面骨架 (包裹 root class 以便委派，恢復穩定 dashboard-widget 結構)
     container.innerHTML = `
-        <div class="event-list-root dashboard-widget" style="margin-top: 24px;">
+        <div class="event-list-root dashboard-widget">
             
             <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
                 <div style="display: flex; align-items: baseline; gap: 15px;">
