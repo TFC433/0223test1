@@ -1,13 +1,14 @@
 /**
  * public/scripts/services/ui.js
  * * 職責：管理所有全域 UI 元素，如彈窗、通知、面板、載入畫面和共用元件渲染器
- * * @version 6.3.0 (Phase 8.3 Toast UI Top-Right & Colors)
- * * @date 2026-03-16
+ * * @version 6.3.1 (Phase 8.3 Toast Extensibility Patch)
+ * * @date 2026-03-17
  * @description
  * 1. [UX Polish] Relocated toast notifications from bottom-right to top-right.
  * 2. [UX Polish] Applied SaaS-style background colors to toast types (Success=White, Error/Info=Light Red, Warning=Light Orange).
  * 3. [Bugfix] Auto-creation of `#toast-container` remains to prevent silent failures.
  * 4. Retained legacy adapters (`renderPagination`, `showBusinessCardPreview`, `showConfirmDialog`).
+ * 5. [Patch] Extended `showToast` to support optional HTML rendering and persistent display modes.
  */
 
 let zIndexCounter = 3000;
@@ -102,7 +103,7 @@ function injectToastStyles() {
     document.head.appendChild(style);
 }
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', duration = 3000, options = {}) {
     // 1. Ensure our modern CSS is injected
     injectToastStyles();
 
@@ -122,7 +123,13 @@ function showToast(message, type = 'info') {
     // 4. Content wrapper to ensure text aligns properly next to the injected ::before icon
     const textWrapper = document.createElement('div');
     textWrapper.style.flex = '1';
-    textWrapper.textContent = message;
+    
+    if (options.allowHtml) {
+        textWrapper.innerHTML = message;
+    } else {
+        textWrapper.textContent = message;
+    }
+    
     toast.appendChild(textWrapper);
 
     toastContainer.appendChild(toast);
@@ -131,13 +138,15 @@ function showToast(message, type = 'info') {
     void toast.offsetWidth;
     toast.classList.add('show');
 
-    // 6. Auto-dismiss
-    setTimeout(() => {
-        toast.classList.remove('show');
+    // 6. Auto-dismiss (only when not persistent and duration is positive)
+    if (!options.persistent && duration > 0) {
         setTimeout(() => {
-            toast.remove();
-        }, 400); // Matches the new 0.4s CSS transition
-    }, 3000);
+            toast.classList.remove('show');
+            setTimeout(() => {
+                toast.remove();
+            }, 400); // Matches the new 0.4s CSS transition
+        }, duration);
+    }
 }
 
 // ==========================================

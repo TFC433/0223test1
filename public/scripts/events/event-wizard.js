@@ -1,6 +1,11 @@
 // public/scripts/events/event-wizard.js
 // 職責：管理「新增事件精靈」的完整流程 (Step 1 -> 2 -> 3 -> Create)
 // 修改歷程：加入機會自動跳轉、公司防呆、完成後連結至獨立編輯器、新增我方人員手動輸入、Dashboard Stale Integration
+/**
+ * @version 1.1.2
+ * @date 2026-03-17
+ * @description [UX Patch] Opted into HTML rendering and persistent display for the create success notification, and corrected the manual dismiss selector to target `.toast`.
+ */
 
 const EventWizard = (() => {
     // 狀態儲存
@@ -205,7 +210,7 @@ const EventWizard = (() => {
         if (cardElement) {
             cardElement.classList.add('selected');
         } else {
-            // 若是程式呼叫，手動 highlight
+            // 若是程式呼叫，手手動 highlight
             const index = type === 'opportunity' ? 0 : 1;
             const cards = document.querySelectorAll('.event-entry-card');
             if(cards[index]) cards[index].classList.add('selected');
@@ -434,35 +439,26 @@ const EventWizard = (() => {
             });
 
             if (result.success) {
-                const newEventId = result.eventId;
+                const newEventId = result.eventId || result.id; // [Bugfix] Support both DTO keys
                 
                 // 1. 關閉 Wizard
                 closeModal('new-event-wizard-modal');
                 
-                // 2. 準備通知內容
-                const typeMap = {
-                    'general': '一般',
-                    'iot': 'IoT',
-                    'dt': 'DT',
-                    'dx': 'DX'
-                };
-                const typeCN = typeMap[state.eventType] || state.eventType;
-                
-                // 3. 組合訊息，連結指向新的獨立編輯器
-                const messageHtml = ` 已為 <strong>${state.targetName}</strong> 建立 <strong>${typeCN}</strong> 紀錄：<strong>${state.eventName}</strong>。<br>` +
+                // 2. 組合訊息，連結指向新的獨立編輯器
+                const messageHtml = `已建立事件紀錄：<strong>${state.eventName}</strong><br>` +
                                     `<a href="#" style="color: var(--accent-blue); text-decoration: underline; font-weight: bold; margin-left: 0; display: inline-block; margin-top: 5px;" ` +
-                                    `onclick="EventEditorStandalone.open('${newEventId}'); this.closest('.notification').remove(); return false;">` +
+                                    `onclick="EventEditorStandalone.open('${newEventId}'); this.closest('.toast').remove(); return false;">` +
                                     `👉 點此補充詳細內容</a>`;
 
-                // 4. 顯示永久通知
-                showNotification(messageHtml, 'success', 0); 
+                // 3. 顯示永久通知 (明確要求支援 HTML 且不會自動關閉)
+                showNotification(messageHtml, 'success', 0, { allowHtml: true, persistent: true }); 
                 
                 // [Phase 8.10 Stale-Refresh Fix] 標記 Dashboard 資料過期
                 if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
                     window.dashboardManager.markStale();
                 }
 
-                // 5. 觸發背景資料刷新
+                // 4. 觸發背景資料刷新
                 if (window.CRM_APP && window.CRM_APP.refreshCurrentView) {
                      window.CRM_APP.refreshCurrentView('資料同步中...');
                 }
