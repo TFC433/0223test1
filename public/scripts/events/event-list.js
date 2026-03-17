@@ -2,9 +2,9 @@
 // 職責：渲染並管理「事件紀錄」頁面的主列表 (含搜尋、篩選、統計、圖示化操作)
 // (Systematic Refactor: Event Delegation - 統一事件處理機制)
 /**
- * @version 1.0.6
- * @date 2026-03-16
- * @description [Layout Recovery] Rolled back to stable .dashboard-widget skeleton while retaining minimal Tab/CTA visual alignments.
+ * @version 1.0.12
+ * @date 2026-03-17
+ * @description [UI Alignment Patch] Fixed header flex-wrap collision by extracting filter selects into a secondary header-adjacent row immediately below the widget-header divider.
  */
 
 // 模組內部狀態
@@ -34,34 +34,45 @@ function renderEventLogList(container, eventList) {
     container.innerHTML = `
         <div class="event-list-root dashboard-widget" style="margin-top: 24px;">
             
-            <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                <h2 class="widget-title" style="margin: 0; font-size: 1.25rem;">事件總覽</h2>
-                <div class="crm-tabs" id="event-type-tabs">
-                    </div>
+            <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 15px;">
+                <div style="display: flex; align-items: baseline; gap: 15px;">
+                    <h2 class="widget-title" style="margin: 0;">事件總覽</h2>
+                </div>
+                <div id="event-type-tabs" class="event-tabs" style="display: flex; gap: 4px; background: var(--bg-hover, #f1f5f9); padding: 4px; border-radius: 8px; overflow-x: auto;">
+                </div>
             </div>
 
-            <div class="search-pagination" style="padding: 1rem 1.5rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; border-bottom: 1px solid var(--border-color);">
-                <input type="text" class="search-box" id="event-list-search" placeholder="搜尋事件、對象或建立者..." style="flex-grow: 1; min-width: 200px;">
+            <div id="event-filter-bar" style="padding: 1.25rem 1.5rem 0; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <select id="event-filter-time" class="form-select-sm" data-filter="time">
+                    <option value="all">所有時間</option>
+                    <option value="7">近 7 天</option>
+                    <option value="30">近 30 天</option>
+                    <option value="90">近 90 天</option>
+                </select>
+                <select id="event-filter-creator" class="form-select-sm" data-filter="creator">
+                    <option value="all">所有建立者</option>
+                </select>
+            </div>
+
+            <div id="event-action-bar" style="padding: 1rem 1.5rem 0.5rem;">
                 
-                <div id="event-list-filters" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    <select id="event-filter-time" class="form-select-sm">
-                        <option value="all">所有時間</option>
-                        <option value="7">近 7 天</option>
-                        <option value="30">近 30 天</option>
-                        <option value="90">近 90 天</option>
-                    </select>
-                    <select id="event-filter-creator" class="form-select-sm">
-                        <option value="all">所有建立者</option>
-                    </select>
+                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div style="flex: 1; max-width: 400px;">
+                        <input type="text" class="search-box" id="event-list-search" placeholder="搜尋事件、對象或建立者..." style="width: 100%;">
+                    </div>
                 </div>
 
-                <button class="action-btn primary" data-action="create-event" style="flex-shrink: 0;">
-                    ＋ 新增紀錄
-                </button>
-            </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; min-height: 24px;">
+                    <div id="event-filter-status" style="display: none; align-items: center; gap: 8px;">
+                        <span id="event-filter-text" style="font-size: 0.85rem; font-weight: 600; color: var(--accent-blue);"></span>
+                        <button class="action-btn small danger" data-action="clear-filters" style="padding: 2px 8px;">清除</button>
+                    </div>
+                    
+                    <div id="event-list-count-container" style="font-size: 0.9rem; color: var(--text-muted); font-weight: 500; margin-left: auto;">
+                        共 0 筆
+                    </div>
+                </div>
 
-            <div id="event-list-count-container" style="text-align: right; padding: 0.75rem 1.5rem 0.5rem; font-size: 0.95rem; color: var(--text-muted); font-weight: 500;">
-                共 0 筆
             </div>
 
             <div class="widget-content" style="padding: 0;">
@@ -126,10 +137,9 @@ function handleEventListClick(e) {
 
     switch (action) {
         case 'filter-type':
-            // 處理 Tab 切換
+            // 處理 Tab 切換，呼叫 renderEventTypeTabs 動態更新 inline style
             _eventFilters.type = payload.value;
-            document.querySelectorAll('#event-type-tabs .tab-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            renderEventTypeTabs(window.CRM_APP?.systemConfig?.['事件類型'] || []);
             _filterAndRenderEvents();
             break;
 
@@ -281,22 +291,24 @@ function _filterAndRenderEvents() {
                 <td class="col-obj-name">${objNameHtml}</td>
                 <td class="col-user" title="${event.creator}">${event.creator}</td>
                 <td class="col-actions">
-                    <button class="btn-mini-view" title="查看完整報告" 
-                            data-action="view-report" 
-                            data-id="${event.eventId}">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                            <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
-                    </button>
-                    <button class="btn-mini-view" title="編輯" 
-                            data-action="edit-event" 
-                            data-id="${event.eventId}">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                        </svg>
-                    </button>
+                    <div style="display: flex; justify-content: center; align-items: center; gap: 4px;">
+                        <button class="btn-mini-view" title="查看完整報告" 
+                                data-action="view-report" 
+                                data-id="${event.eventId}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </button>
+                        <button class="btn-mini-view" title="編輯" 
+                                data-action="edit-event" 
+                                data-id="${event.eventId}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </td>
             </tr>`;
     });
@@ -306,21 +318,36 @@ function _filterAndRenderEvents() {
 }
 
 /**
+ * 輔助：動態渲染事件類型 Tabs (對齊 Reference inline style pattern)
+ */
+function renderEventTypeTabs(options = []) {
+    const tabsContainer = document.getElementById('event-type-tabs');
+    if (!tabsContainer) return;
+    
+    const tabs = [{ value: 'all', label: '全部' }];
+    options.forEach(opt => tabs.push({ value: opt.value, label: opt.note || opt.value }));
+    
+    let html = '';
+    tabs.forEach(t => {
+        const isActive = _eventFilters.type === t.value;
+        const style = isActive 
+            ? `background: white; border: none; padding: 8px 16px; font-weight: 600; color: var(--accent-blue); border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; transition: all 0.2s; white-space: nowrap;` 
+            : `background: transparent; border: none; padding: 8px 16px; font-weight: 500; color: var(--text-muted); border-radius: 6px; box-shadow: none; cursor: pointer; transition: all 0.2s; white-space: nowrap;`;
+        
+        html += `<button class="tab-btn ${isActive ? 'active' : ''}" data-action="filter-type" data-value="${t.value}" style="${style}">${t.label}</button>`;
+    });
+    
+    tabsContainer.innerHTML = html;
+}
+
+/**
  * 輔助：填入篩選選單與建立 Tabs
  */
 function _populateEventFilterOptions() {
-    const tabsContainer = document.getElementById('event-type-tabs');
     const creatorSelect = document.getElementById('event-filter-creator');
     
     // 1. 類型 Tabs (從 System Config)
-    const types = window.CRM_APP?.systemConfig?.['事件類型'] || [];
-    if (tabsContainer) {
-        let html = `<button class="tab-btn active" data-action="filter-type" data-value="all">全部</button>`;
-        types.forEach(t => {
-            html += `<button class="tab-btn" data-action="filter-type" data-value="${t.value}">${t.note || t.value}</button>`;
-        });
-        tabsContainer.innerHTML = html;
-    }
+    renderEventTypeTabs(window.CRM_APP?.systemConfig?.['事件類型'] || []);
 
     // 2. 建立者 (從資料中提取唯一值)
     if (creatorSelect) {
@@ -345,35 +372,6 @@ function _injectEventListStyles() {
     const style = document.createElement('style');
     style.id = styleId;
     style.innerHTML = `
-        /* CRM 分段式 Tabs 樣式 (Segmented Tabs) */
-        .crm-tabs {
-            display: inline-flex;
-            background-color: var(--bg-locked, #f3f4f6);
-            padding: 4px;
-            border-radius: 8px;
-            gap: 4px;
-        }
-        .crm-tabs .tab-btn {
-            background: transparent;
-            border: none;
-            padding: 6px 16px;
-            font-size: 0.95rem;
-            color: var(--text-muted, #6b7280);
-            cursor: pointer;
-            border-radius: 6px;
-            transition: all 0.2s;
-            font-weight: 500;
-        }
-        .crm-tabs .tab-btn:hover {
-            color: var(--text-main, #111827);
-        }
-        .crm-tabs .tab-btn.active {
-            background-color: #ffffff;
-            color: var(--primary-color, #2563eb);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            font-weight: 600;
-        }
-
         /* 列表容器 */
         .event-list-container { width: 100%; overflow-x: auto; background: var(--card-bg, #fff); min-height: 200px; }
         .event-list-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
@@ -390,7 +388,7 @@ function _injectEventListStyles() {
         }
         
         .event-list-table td { 
-            padding: 10px 16px; 
+            padding: 12px 16px; /* Aligned with opportunities.js 12px padding */
             border-bottom: 1px solid var(--border-color); 
             vertical-align: middle; 
             font-size: 0.95rem; 
@@ -410,7 +408,7 @@ function _injectEventListStyles() {
         .col-obj-tag { width: 90px; text-align: center; }
         .col-obj-name { min-width: 180px; max-width: 250px; }
         .col-user { width: 120px; white-space: nowrap; }
-        .col-actions { width: 80px; text-align: center !important; }
+        .col-actions { width: 90px; text-align: center !important; } /* Widened to safely fit two flex buttons */
 
         /* Tag 標籤樣式 (統一風格) */
         .common-chip { 
@@ -421,7 +419,6 @@ function _injectEventListStyles() {
             color: white; 
             white-space: nowrap; 
             font-weight: 500; 
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
         
         /* 文字處理 */

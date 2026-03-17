@@ -1,9 +1,11 @@
 /**
  * services/system-service.js
  * 系統服務模組
- * * @version 2.0.0 (Refactored for Standard A+S)
- * @date 2026-01-26
+ * * @version 2.0.2
+ * @date 2026-03-17
  * @description 接管所有業務邏輯 (Defaults/Filter/Sort) 與 User 操作流程控制。
+ * @changelog
+ * - [Fix] Implemented case-insensitive, value-or-note matching for config merge to prevent duplicate pre-seeded defaults (e.g., Event Types).
  */
 
 class SystemService {
@@ -37,28 +39,43 @@ class SystemService {
         const rows = await this.systemReader.getSystemConfigRaw();
         const settings = JSON.parse(JSON.stringify(this.DEFAULT_SETTINGS)); // Deep copy
         
+        const normalize = (str) => (str || '').toString().trim().toLowerCase();
+        
         // 2. 處理資料 (Business Logic)
         if (rows.length > 1) {
             rows.slice(1).forEach(row => {
                 const [type, item, order, enabled, note, color, value2, value3, category] = row;
                 
-                if (enabled === 'TRUE' && type && item) {
-                    if (!settings[type]) settings[type] = [];
-                    
-                    const exists = settings[type].find(i => i.value === item);
-                    if (exists) {
-                        exists.note = note || item;
-                        exists.order = parseInt(order) || 99;
+                if (type && item) {
+                    const normalizedItem = normalize(item);
+                    const matchFn = (i) => normalize(i.value) === normalizedItem || normalize(i.note) === normalizedItem;
+
+                    if (enabled === 'TRUE') {
+                        if (!settings[type]) settings[type] = [];
+                        
+                        const exists = settings[type].find(matchFn);
+                        if (exists) {
+                            exists.note = note || item;
+                            exists.order = parseInt(order) || 99;
+                        } else {
+                            settings[type].push({
+                                value: item,
+                                note: note || item,
+                                order: parseInt(order) || 99,
+                                color: color || null,
+                                value2: value2 || null, 
+                                value3: value3 || null, 
+                                category: category || '其他' 
+                            });
+                        }
                     } else {
-                        settings[type].push({
-                            value: item,
-                            note: note || item,
-                            order: parseInt(order) || 99,
-                            color: color || null,
-                            value2: value2 || null, 
-                            value3: value3 || null, 
-                            category: category || '其他' 
-                        });
+                        // 當 enabled !== 'TRUE' 時，若該項目已存在於預設值中，將其移除
+                        if (settings[type]) {
+                            const index = settings[type].findIndex(matchFn);
+                            if (index !== -1) {
+                                settings[type].splice(index, 1);
+                            }
+                        }
                     }
                 }
             });

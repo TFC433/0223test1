@@ -1,10 +1,12 @@
 /**
  * data/system-reader.js
  * 專門負責讀取系統級資料的類別 (系統設定、使用者)
- * * @version HOTFIX-20260126
- * @date 2026-01-26
+ * * @version 2.0.2
+ * @date 2026-03-17
  * @reason Temporary Compatibility Adapter for Legacy Modules
  * @description 恢復 getSystemConfig 介面以支援舊模組 (Dashboard, Product)，但內部轉接至 Raw API。
+ * @changelog
+ * - [Fix] Synchronized backwards-compatibility adapter to use case-insensitive, value-or-note config item matching.
  */
 
 const BaseReader = require('./base-reader');
@@ -78,27 +80,42 @@ class SystemReader extends BaseReader {
             '日曆篩選規則': []
         };
         
+        const normalize = (str) => (str || '').toString().trim().toLowerCase();
+
         if (rows.length > 1) {
             rows.slice(1).forEach(row => {
                 const [type, item, order, enabled, note, color, value2, value3, category] = row;
                 
-                if (enabled === 'TRUE' && type && item) {
-                    if (!settings[type]) settings[type] = [];
-                    
-                    const exists = settings[type].find(i => i.value === item);
-                    if (exists) {
-                        exists.note = note || item;
-                        exists.order = parseInt(order) || 99;
+                if (type && item) {
+                    const normalizedItem = normalize(item);
+                    const matchFn = (i) => normalize(i.value) === normalizedItem || normalize(i.note) === normalizedItem;
+
+                    if (enabled === 'TRUE') {
+                        if (!settings[type]) settings[type] = [];
+                        
+                        const exists = settings[type].find(matchFn);
+                        if (exists) {
+                            exists.note = note || item;
+                            exists.order = parseInt(order) || 99;
+                        } else {
+                            settings[type].push({
+                                value: item,
+                                note: note || item,
+                                order: parseInt(order) || 99,
+                                color: color || null,
+                                value2: value2 || null, 
+                                value3: value3 || null, 
+                                category: category || '其他' 
+                            });
+                        }
                     } else {
-                        settings[type].push({
-                            value: item,
-                            note: note || item,
-                            order: parseInt(order) || 99,
-                            color: color || null,
-                            value2: value2 || null, 
-                            value3: value3 || null, 
-                            category: category || '其他' 
-                        });
+                        // 當 enabled !== 'TRUE' 時，若該項目已存在於預設值中，將其移除
+                        if (settings[type]) {
+                            const index = settings[type].findIndex(matchFn);
+                            if (index !== -1) {
+                                settings[type].splice(index, 1);
+                            }
+                        }
                     }
                 }
             });
