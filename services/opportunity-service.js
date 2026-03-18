@@ -4,9 +4,10 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.10.2 (Phase 8.14: Pure SQL Contact Linking)
- * @date 2026-03-13
+ * @version 8.10.3
+ * @date 2026-03-18
  * @description 
+ * - [PATCH] Unified interaction logging entry point: replaced direct interactionWriter calls with interactionService. No behavior change.
  * - [PHASE 8.14] Refactored addContactToOpportunity to pure SQL. Removed legacy RAW sheet writers (getOrCreateCompany, getOrCreateContact, updateContactStatus). Reused existing SQL contacts by name and companyId.
  * - [PHASE 8.13] Implemented SQL-only scaffolding for company and contact within createOpportunity. Injected contactSqlWriter.
  * - [PHASE 8.13] Added strict null-safe check for contact name matching during scaffold.
@@ -31,7 +32,7 @@ class OpportunityService {
         contactWriter,
         companyWriter,
         interactionReader,
-        interactionWriter,
+        interactionService,
         eventLogReader,
         systemService,
         opportunitySqlReader,
@@ -59,7 +60,7 @@ class OpportunityService {
         this.opportunityWriter = opportunityWriter;
         this.contactWriter = contactWriter;
         this.companyWriter = companyWriter;
-        this.interactionWriter = interactionWriter;
+        this.interactionService = interactionService;
         this.opportunitySqlWriter = opportunitySqlWriter;
         this.contactSqlWriter = contactSqlWriter;
     }
@@ -84,14 +85,14 @@ class OpportunityService {
 
     async _logOpportunityInteraction(opportunityId, title, summary, modifier) {
         try {
-            await this.interactionWriter.createInteraction({
+            await this.interactionService.createInteraction({
                 opportunityId: opportunityId,
                 eventType: '系統事件',
                 eventTitle: title,
                 contentSummary: summary,
                 recorder: modifier,
                 interactionTime: new Date().toISOString()
-            });
+            }, { displayName: modifier });
         } catch (logError) {
             console.warn(`[OpportunityService] 寫入機會日誌失敗 (OppID: ${opportunityId}): ${logError.message}`);
         }
@@ -423,14 +424,14 @@ class OpportunityService {
                     );
                     
                     if (company) {
-                        await this.interactionWriter.createInteraction({
+                        await this.interactionService.createInteraction({
                             companyId: company.companyId,
                             eventType: '系統事件',
                             eventTitle: '刪除機會案件',
                             contentSummary: `機會案件 "${opportunity.opportunityName}" (ID: ${opportunity.opportunityId}) 已被 ${modifier} 刪除。`,
                             recorder: modifier,
                             interactionTime: new Date().toISOString()
-                        });
+                        }, user);
                     }
                 } catch (logError) {
                      console.warn(`[OpportunityService] 寫入公司日誌失敗 (刪除機會時): ${logError.message}`);

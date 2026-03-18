@@ -6,9 +6,12 @@
  * - Table: interactions
  * - Schema: Strict adherence to provided schema list
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.1.0
- * - Date: 2026-03-11
- * - Changelog: Added getInteractionsByCompanyId & getInteractionsByOpportunityIds for Phase 8.1
+ * - Version: 1.1.2
+ * - Date: 2026-03-18
+ * - Changelog: 
+ * - [PATCH] SQL interaction reader is authoritative for reading interaction records.
+ * - [PATCH] DTO now exposes both interactionType and eventType alias to support frontend locking logic.
+ * - [PHASE 8.1] Added getInteractionsByCompanyId & getInteractionsByOpportunityIds for Phase 8.1
  */
 
 const { supabase } = require('../config/supabase');
@@ -146,6 +149,7 @@ class InteractionSqlReader {
             // Core Details
             interactionTime: row.interaction_time,
             interactionType: row.interaction_type,
+            eventType: row.interaction_type,
             eventTitle: row.event_title,
             contentSummary: row.content_summary,
 

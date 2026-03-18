@@ -1,9 +1,11 @@
 /*
  * FILE: data/interaction-sql-writer.js
- * VERSION: 7.0.0
- * DATE: 2026-02-06
+ * VERSION: 7.0.2
+ * DATE: 2026-03-18
  * CHANGELOG:
- * - Phase 7: Migrate Interaction Write Authority to SQL
+ * - [PATCH] SQL interaction writer is authoritative for interaction persistence.
+ * - [PATCH] Added support for eventType as an alias of interactionType to bridge legacy payloads.
+ * - [PHASE 7] Migrate Interaction Write Authority to SQL.
  */
 
 const { supabase } = require('../config/supabase');
@@ -23,7 +25,7 @@ class InteractionSqlWriter {
             opportunity_id: data.opportunityId || null,
             company_id: data.companyId || null,
             interaction_time: data.interactionTime || null,
-            interaction_type: data.interactionType || null,
+            interaction_type: data.interactionType || data.eventType || null,
             event_title: data.eventTitle || null,
             content_summary: data.contentSummary || null,
             participants: data.participants || null,

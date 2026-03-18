@@ -4,9 +4,11 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 9.3.2 (Phase 9.3.2: SQL Scaffolding Injection)
- * @date 2026-03-13
+ * @version 9.3.4
+ * @date 2026-03-18
  * @changelog
+ * - [PATCH] Enforced architectural rule: InteractionService is the single authoritative entry point for interaction creation. Removed deprecated `interactionWriter` from exported services. Cleaned up stale DI comments.
+ * - [PATCH] Updated dependency injection: replaced interactionWriter with interactionService for OpportunityService and CompanyService to unify interaction logging entry point.
  * - [PHASE 9.3.2] Injected contactSqlWriter into OpportunityService for SQL-safe contact scaffolding.
  * - [PHASE 9.3.1] Patched dependency injection wiring to securely provide systemService to OpportunityService, EventLogService, SalesAnalysisService, and ProductService.
  * - [PHASE 9.3] Verified and fixed all semantic RAW vs OFFICIAL mismatches in domain logic.
@@ -81,7 +83,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v9.3.2 SQL-Only CORE)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v9.3.4 SQL-Only CORE)...');
 
     try {
         // 1. Infrastructure
@@ -141,6 +143,14 @@ async function initializeServices() {
 
         // DI Constructor Mapping: 
         // Official slots strictly mapped to SQL variants.
+        
+        const interactionService = new InteractionService(
+            interactionSqlReader,
+            interactionSqlWriter,
+            opportunitySqlReader, 
+            companySqlReader      
+        );
+
         const contactService = new ContactService(
             contactRawReader, // explicit RAW
             contactSqlReader, // contactCoreReader => SQL Official
@@ -159,7 +169,7 @@ async function initializeServices() {
             opportunitySqlReader,  // opportunityReader => SQL
             opportunitySqlWriter,  // opportunityWriter => SQL
             interactionSqlReader,  // interactionReader => SQL
-            interactionSqlWriter,  // interactionWriter => SQL
+            interactionService,    // interactionService (Authoritative entry point)
             eventLogSqlReader,     // eventLogReader => SQL
             systemReader,
             companySqlReader,
@@ -178,7 +188,7 @@ async function initializeServices() {
             contactWriter,
             companyWriter: companySqlWriter, // companyWriter => SQL
             interactionReader: interactionSqlReader, // interactionReader => SQL
-            interactionWriter: interactionSqlWriter, // interactionWriter => SQL
+            interactionService, // interactionService (Authoritative entry point)
             eventLogReader: eventLogSqlReader, // eventLogReader => SQL
             systemReader,
             systemService, // [Patch 9.3.1] Wire newly required systemService
@@ -190,13 +200,6 @@ async function initializeServices() {
             contactSqlReader,
             contactSqlWriter // [PHASE 9.3.2] Inject for SQL contact scaffolding
         });
-
-        const interactionService = new InteractionService(
-            interactionSqlReader,
-            interactionSqlWriter,
-            opportunitySqlReader, 
-            companySqlReader      
-        );
 
         const eventLogService = new EventLogService(
             eventLogSqlReader, 
@@ -300,7 +303,6 @@ async function initializeServices() {
             weeklyBusinessReader: weeklyReader,
             weeklyBusinessWriter: weeklyWriter,
             systemReader, systemWriter,
-            interactionWriter: interactionSqlWriter, 
             eventLogReader: eventLogSqlReader 
         };
 

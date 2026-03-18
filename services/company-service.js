@@ -1,9 +1,10 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * @version 8.3.0 (Phase 9.3 Patch - Semantic Data World Isolation)
- * @date 2026-03-12
+ * @version 8.3.1
+ * @date 2026-03-18
  * @changelog 
+ * - [PATCH] Unified interaction logging entry point: replaced interactionWriter with interactionService. No behavior change.
  * - [PHASE 9.3] Fixed semantic mismatch: routed RAW potential contacts fetch explicitly to contactService.getPotentialContacts instead of ambiguously overloading contactReader.getContacts.
  * - [PHASE 9.3] Replaced fallback contactReader.getContactList() with robust contactSqlReader fallback.
  * - Phase 8.2.0: Removed InteractionReader dependency.
@@ -12,7 +13,7 @@
 class CompanyService {
     constructor(
         companyReader, companyWriter, contactReader, contactWriter,
-        opportunityReader, opportunityWriter, interactionReader, interactionWriter,
+        opportunityReader, opportunityWriter, interactionReader, interactionService,
         eventLogReader, systemReader, companySqlReader, contactService,
         companySqlWriter, // Inject SQL Writer (Phase 7 Requirement)
         eventLogSqlReader, // Inject SQL Reader (Phase 8 Requirement)
@@ -27,7 +28,7 @@ class CompanyService {
         this.opportunityReader = opportunityReader;
         this.opportunityWriter = opportunityWriter;
         this.interactionReader = interactionReader;
-        this.interactionWriter = interactionWriter;
+        this.interactionService = interactionService;
         this.eventLogReader = eventLogReader;
         this.systemReader = systemReader;
         this.companySqlReader = companySqlReader;
@@ -119,15 +120,15 @@ class CompanyService {
 
     async _logCompanyInteraction(companyId, title, summary, modifier) {
         try {
-            if (this.interactionWriter && typeof this.interactionWriter.createInteraction === 'function') {
-                await this.interactionWriter.createInteraction({
+            if (this.interactionService && typeof this.interactionService.createInteraction === 'function') {
+                await this.interactionService.createInteraction({
                     companyId: companyId,
                     eventType: '系統事件',
                     eventTitle: title,
                     contentSummary: summary,
                     recorder: modifier,
                     interactionTime: new Date().toISOString()
-                }, modifier);
+                }, { displayName: modifier });
             }
         } catch (logError) {
             console.warn(`[CompanyService] Log Interaction Error: ${logError.message}`);
