@@ -1,10 +1,11 @@
-/**
- * services/auth-service.js
- * 使用者認證服務 (User Domain Layer)
- * * @version 5.2.3
- * @date 2026-01-26
- * @description Line-Leads L1→L2：新增 verifyLineIdToken，其餘既有登入/密碼流程保持不變。
- * @contract 遵守契約 v1.0：DOM/API/localStorage 不變。
+/*
+ * FILE: services/auth-service.js
+ * VERSION: 5.2.4
+ * DATE: 2026-03-19
+ * CHANGELOG:
+ * - [PATCH] Added displayName to JWT payload to fix recorder identity issue
+ * - [FIX] Ensure downstream services receive correct displayName instead of username fallback
+ * - Line-Leads L1→L2：新增 verifyLineIdToken，其餘既有登入/密碼流程保持不變。
  */
 
 const bcrypt = require('bcryptjs');
@@ -115,6 +116,7 @@ class AuthService {
         const payload = {
             username: user.username,
             name: user.displayName || user.username,
+            displayName: user.displayName || user.username,
             role: user.role || 'sales'
         };
 

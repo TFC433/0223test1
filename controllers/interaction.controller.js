@@ -1,9 +1,10 @@
-// controllers/interaction.controller.js
-/**
- * InteractionController
- * * @version 6.0.1 (Fix: Query Params Compatibility)
- * @date 2026-01-14
- * @description 互動紀錄控制器。修正前端參數 q/fetchAll 的相容性問題。
+/*
+ * FILE: controllers/interaction.controller.js
+ * VERSION: 6.0.2
+ * DATE: 2026-03-19
+ * CHANGELOG:
+ * - [CLEANUP] Removed temporary debug logs used for runtime forensics
+ * - [Fix] Query Params Compatibility
  */
 
 const { handleApiError } = require('../middleware/error.middleware');

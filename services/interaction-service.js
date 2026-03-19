@@ -1,8 +1,10 @@
 /*
  * FILE: services/interaction-service.js
- * VERSION: 8.2.0 (Phase 8.2 Patch)
- * DATE: 2026-03-11
+ * VERSION: 8.2.2
+ * DATE: 2026-03-19
  * CHANGELOG:
+ * - [CLEANUP] Removed temporary debug logs used for runtime forensics
+ * - [PATCH] Enforced recorder write authority: override recorder with user.name (displayName) from JWT. No longer trusts frontend payload.
  * - Phase 8.2 Patch: Replaced InteractionReader with InteractionSqlReader completely. Removed Sheet fallback.
  * - Phase 7: Migrate Interaction Write Authority to SQL
  */
@@ -175,7 +177,11 @@ class InteractionService {
     async createInteraction(data, user) {
         try {
             const safeUser = user || {};
-            const newId = await this.interactionSqlWriter.createInteraction(data, safeUser);
+            
+            const finalRecorder = safeUser.name || safeUser.displayName || data.recorder || 'System';
+            const secureData = { ...data, recorder: finalRecorder };
+
+            const newId = await this.interactionSqlWriter.createInteraction(secureData, safeUser);
             
             return { success: true, id: newId };
         } catch (error) {
