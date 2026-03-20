@@ -1,29 +1,22 @@
 // File: public/scripts/leads-view.js
-// Version: 7.0.3
-// Date: 2026-03-16
-// Changelog: Stop infinite reload loop on 401 response in loadLeadsData.
-// Description: 
-// 1. [Fix] createCardHTML: 為本地測試帳號 (TEST_LOCAL_USER) 解鎖編輯按鈕權限，
-//    允許在任何視圖編輯任何人的名片。
-// 2. 包含 v7.0.1 的 Stream 圖片預覽修復。
+// Version: 15.3.0
+// Date: 2026-03-20
+// Changelog: 
+//   - V6.3 Refinement: Moved top-right control pills out of item-image to v6-list-item root.
+//   - Retained V6.1 edit button wording and V6.2 ratio fixes.
+// Description: Logic controller for Lead View V6.3 (Reading Structure + Desktop Pill Position).
 
-// 全域變數
 let allLeads = [];
 let currentUser = {
     userId: null,
     displayName: '訪客',
     pictureUrl: null
 };
-let currentView = 'all'; // 'all' or 'mine'
+let currentView = 'all'; 
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // 1. 初始化頁面狀態：先隱藏內容，只顯示 Header
     toggleContentVisibility(false);
-
-    // 2. 初始化 LIFF
     await initLIFF();
-
-    // 3. 綁定事件
     bindEvents();
 });
 
@@ -33,7 +26,7 @@ function toggleContentVisibility(show) {
     const loginPrompt = document.getElementById('login-prompt'); 
 
     if (show) {
-        if(controls) controls.style.display = 'block';
+        if(controls) controls.style.display = 'flex';
         if(main) main.style.display = 'block';
         if(loginPrompt) loginPrompt.style.display = 'none';
     } else {
@@ -90,7 +83,7 @@ async function initLIFF() {
         currentUser.userId = 'TEST_LOCAL_USER';
         currentUser.displayName = '測試員 (Local)';
         updateUserUI(true);
-        loadLeadsData(); // 本地直接載入
+        loadLeadsData(); 
         return; 
     }
 
@@ -109,7 +102,6 @@ async function initLIFF() {
             currentUser.pictureUrl = profile.pictureUrl;
             updateUserUI(true);
             
-            // 登入成功後，嘗試載入資料
             loadLeadsData();
         } else {
             updateUserUI(false);
@@ -150,7 +142,7 @@ function bindEvents() {
         btn.onclick = () => {
             document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            currentView = btn.dataset.view; // 更新當前視圖狀態
+            currentView = btn.dataset.view; 
             renderLeads();
         };
     });
@@ -177,8 +169,11 @@ function bindEvents() {
             document.getElementById('edit-modal').style.display = 'none';
         };
     });
-    window.onclick = (e) => { if (e.target.classList.contains('modal')) e.target.style.display = 'none'; };
     
+    window.onclick = (e) => { 
+        if (e.target.classList.contains('modal')) e.target.style.display = 'none'; 
+    };
+
     const editForm = document.getElementById('edit-form');
     if (editForm) editForm.onsubmit = handleEditSubmit;
 }
@@ -224,11 +219,10 @@ async function loadLeadsData() {
             return;
         }
 
-        // v7.0.1 修正後的格式檢查
         if (result.success) {
             allLeads = result.data;
             if(loadingEl) loadingEl.style.display = 'none';
-            if(gridEl) gridEl.style.display = 'grid';
+            if(gridEl) gridEl.style.display = 'flex'; 
             updateCounts();
             renderLeads();
         } else {
@@ -242,10 +236,16 @@ async function loadLeadsData() {
 
 function updateCounts() {
     document.getElementById('count-all').textContent = allLeads.length;
-    if (currentUser.userId) {
-        const myCount = allLeads.filter(l => l.lineUserId === currentUser.userId).length;
-        document.getElementById('count-mine').textContent = myCount;
-    }
+    
+    const myCount = allLeads.filter(l => l.lineUserId === currentUser.userId).length;
+    document.getElementById('count-mine').textContent = myCount;
+    
+    const pendingCount = allLeads.filter(l => {
+        const hasName = l.name && l.name.trim() !== '';
+        const hasCompany = l.company && l.company.trim() !== '';
+        return !hasName || !hasCompany;
+    }).length;
+    document.getElementById('count-pending').textContent = pendingCount;
 }
 
 function renderLeads() {
@@ -256,7 +256,13 @@ function renderLeads() {
     if (!grid) return;
 
     let filtered = allLeads.filter(lead => {
+        const hasName = lead.name && lead.name.trim() !== '';
+        const hasCompany = lead.company && lead.company.trim() !== '';
+        const isPending = !hasName || !hasCompany;
+
         if (currentView === 'mine' && lead.lineUserId !== currentUser.userId) return false;
+        if (currentView === 'pending' && !isPending) return false;
+
         if (searchTerm) {
             const text = `${lead.name} ${lead.company} ${lead.position}`.toLowerCase();
             return text.includes(searchTerm);
@@ -270,65 +276,77 @@ function renderLeads() {
         return;
     }
 
-    grid.style.display = 'grid';
+    grid.style.display = 'flex'; 
     if(emptyState) emptyState.style.display = 'none';
     grid.innerHTML = filtered.map(lead => createCardHTML(lead)).join('');
 }
 
 function createCardHTML(lead) {
     const isMine = (lead.lineUserId === currentUser.userId);
-    const ownerName = lead.userNickname || 'Unknown';
-    const ownerBadge = `👤 ${ownerName}`; 
+    
+    const hasName = lead.name && lead.name.trim() !== '';
+    const hasCompany = lead.company && lead.company.trim() !== '';
+    
+    let missingText = '';
+    if (!hasName && !hasCompany) missingText = '缺姓名 + 公司';
+    else if (!hasName) missingText = '缺姓名';
+    else if (!hasCompany) missingText = '缺公司';
 
     const safe = (str) => (str || '').replace(/"/g, '&quot;');
     const safeHtml = (str) => (str || '').replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const leadJson = JSON.stringify(lead).replace(/'/g, "&apos;").replace(/"/g, "&quot;");
 
-    const positionHtml = (lead.position && lead.position.trim() !== '') 
-        ? `<div class="lead-position">${safeHtml(lead.position)}</div>` 
-        : '';
-
-    // =======================================================
-    // ★★★ [Fixed] 本地開發權限解鎖 ★★★
-    // 條件 1: 本地測試帳號 (TEST_LOCAL_USER) -> 允許編輯所有卡片，不論 Tab
-    // 條件 2: 擁有者本人 (isMine) 且 在「我的」頁籤 -> 原始邏輯
-    // =======================================================
     const isLocalDev = (currentUser.userId === 'TEST_LOCAL_USER');
-    
-    const showEditBtn = isLocalDev || (isMine && (currentView === 'mine'));
+    const showEditBtn = isLocalDev || isMine;
 
-    const editBtnHtml = showEditBtn 
-        ? `<button class="card-btn secondary" onclick='openEdit(${leadJson})' title="編輯">✏️</button>` 
+    const ownerName = lead.userNickname || 'Unknown';
+    const ownerText = isMine ? `👤 我的` : `👤 ${ownerName}`;
+    
+    const statusBadgeHtml = missingText 
+        ? `<span class="badge warning-badge badge-top-left">⚠ ${missingText}</span>` 
         : '';
 
+    const imageUrl = lead.driveLink && lead.driveLink !== 'undefined' && lead.driveLink !== 'null'
+        ? `/api/drive/thumbnail?link=${encodeURIComponent(lead.driveLink)}`
+        : null;
+
+    const imageHtml = imageUrl 
+        ? `<img src="${imageUrl}" alt="名片" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`
+        : `<div class="placeholder">📇</div>`;
+
+    // V6.3 HTML Structure Change: image-top-right moved outside item-image
     return `
-        <div class="lead-card ${isMine ? 'is-mine' : ''}">
-            <div class="card-top-row">
-                <div class="lead-name">${safeHtml(lead.name)}</div>
-                <div class="owner-badge">${safeHtml(ownerBadge)}</div>
+        <div class="v6-list-item ${isMine ? 'is-mine' : ''}">
+            <div class="image-top-right">
+                <div class="owner-tag">${safeHtml(ownerText)}</div>
+                ${showEditBtn ? `<button class="edit-pill-btn" onclick='event.stopPropagation(); openEdit(${leadJson})'>✏️ 編輯</button>` : ''}
             </div>
             
-            <div class="card-info-row">
-                ${positionHtml}
-                <div class="lead-company">
-                    <span class="company-icon">🏢</span>
-                    ${safeHtml(lead.company)}
+            <div class="item-image" onclick='openPreview("${safe(lead.driveLink)}")' title="點擊看原圖">
+                ${statusBadgeHtml}
+                ${imageHtml}
+            </div>
+            
+            <div class="item-info">
+                <div class="identity-zone">
+                    <div class="info-name ${!hasName ? 'text-missing' : ''}">${hasName ? safeHtml(lead.name) : '未命名'}</div>
+                    <div class="company-row">
+                        ${lead.company ? `<span class="company-pill">${safeHtml(lead.company)}</span>` : ''}
+                        ${lead.position ? `<span class="position-text">${safeHtml(lead.position)}</span>` : ''}
+                    </div>
                 </div>
-            </div>
-            
-            <div class="card-actions">
-                <button class="card-btn secondary" onclick='openPreview("${safe(lead.driveLink)}")'>
-                    💳 預覽名片
-                </button>
-                ${editBtnHtml}
+                
+                <div class="info-body">
+                    ${lead.mobile ? `<div class="info-line">📱 ${safeHtml(lead.mobile)}</div>` : ''}
+                    ${lead.email ? `<div class="info-line">📧 ${safeHtml(lead.email)}</div>` : ''}
+                </div>
             </div>
         </div>
     `;
 }
 
-// v7.0.1 Stream Image Preview Logic
 function openPreview(driveLink) {
-    if (!driveLink) { 
+    if (!driveLink || driveLink === 'undefined' || driveLink === 'null') { 
         alert('此名片沒有圖片連結'); 
         return; 
     }
@@ -340,9 +358,7 @@ function openPreview(driveLink) {
     modal.style.display = 'block';
     container.innerHTML = '<div class="spinner"></div>';
     
-    // 直接指向 Stream 路由
     const previewUrl = `/api/drive/thumbnail?link=${encodeURIComponent(driveLink)}`;
-    
     const img = new Image();
     
     img.onload = () => {
@@ -357,12 +373,28 @@ function openPreview(driveLink) {
     
     img.src = previewUrl;
     img.alt = "名片預覽";
-    
     downloadLink.href = driveLink;
 }
 
 function openEdit(lead) {
     const modal = document.getElementById('edit-modal');
+    
+    let previewContainer = document.getElementById('edit-preview-container');
+    if (!previewContainer) {
+        previewContainer = document.createElement('div');
+        previewContainer.id = 'edit-preview-container';
+        previewContainer.className = 'edit-preview';
+        const form = document.getElementById('edit-form');
+        form.insertBefore(previewContainer, form.firstChild);
+    }
+    
+    if (lead.driveLink && lead.driveLink !== 'undefined' && lead.driveLink !== 'null') {
+        const previewUrl = `/api/drive/thumbnail?link=${encodeURIComponent(lead.driveLink)}`;
+        previewContainer.innerHTML = `<img src="${previewUrl}" alt="名片預覽" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`;
+    } else {
+        previewContainer.innerHTML = `<div class="placeholder">📇</div>`;
+    }
+
     document.getElementById('edit-rowIndex').value = lead.rowIndex;
     document.getElementById('edit-name').value = lead.name || '';
     document.getElementById('edit-position').value = lead.position || '';
@@ -375,7 +407,7 @@ function openEdit(lead) {
 
 async function handleEditSubmit(e) {
     e.preventDefault();
-    const btn = e.target.querySelector('button');
+    const btn = e.target.querySelector('button[type="submit"]');
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = '儲存中...';
