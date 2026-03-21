@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>名片待確認</title>
+    <title>名片總覽</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     
     <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -70,16 +70,6 @@
         </main>
     </div>
 
-    <div id="preview-modal" class="modal">
-        <div class="modal-content preview-content">
-            <span class="close-modal">&times;</span>
-            <div id="preview-image-container">
-                <div class="spinner"></div>
-            </div>
-            <a id="preview-download-link" href="#" target="_blank" class="download-link">在新視窗開啟原圖</a>
-        </div>
-    </div>
-
     <div id="edit-modal" class="modal">
         <div class="modal-content edit-content">
             <div class="modal-header">
@@ -116,6 +106,17 @@
                 </div>
                 <button type="submit" class="save-btn">儲存變更</button>
             </form>
+        </div>
+    </div>
+
+    <div id="preview-modal" class="modal" style="z-index: 1105;">
+        <button class="close-btn close-modal" style="position: absolute; top: 15px; right: 15px; z-index: 1110; border-radius: 50%; width: 44px; height: 44px; font-size: 1.5rem; background: var(--secondary-bg, #ffffff); box-shadow: 0 4px 12px rgba(0,0,0,0.3);">&times;</button>
+        
+        <div class="modal-content preview-content">
+            <div id="preview-image-container">
+                <div class="spinner"></div>
+            </div>
+            <a id="preview-download-link" href="#" target="_blank" class="download-link">在新視窗開啟原圖</a>
         </div>
     </div>
 

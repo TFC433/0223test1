@@ -1,10 +1,11 @@
 // File: public/scripts/leads-view.js
-// Version: 15.3.0
+// Version: 15.6.0
 // Date: 2026-03-20
 // Changelog: 
-//   - V6.3 Refinement: Moved top-right control pills out of item-image to v6-list-item root.
-//   - Retained V6.1 edit button wording and V6.2 ratio fixes.
-// Description: Logic controller for Lead View V6.3 (Reading Structure + Desktop Pill Position).
+//   - V15.6.0 UI/UX Patch: Fixed mobile modal close, decoupled modal dismissal, added preview from edit modal, injected logout button, smoothed login UX with 'verifying' state, and added pending reminder.
+//   - V15.5.0 Reliable Auth Fallback: Fixed 401 manual re-entry by utilizing liff.logout() + reload to clear stale LIFF state. Reverted UI header state on auth failure.
+//   - V15.4.0 Strict Auth Flow Redesign: Completely removed auto-login loop mechanisms. Implemented explicit manual fallback state on 401.
+// Description: Logic controller for Lead View V6.3 (Reading Structure + Desktop Pill Position) and simplified strict LIFF Auth.
 
 let allLeads = [];
 let currentUser = {
@@ -15,44 +16,89 @@ let currentUser = {
 let currentView = 'all'; 
 
 document.addEventListener('DOMContentLoaded', async () => {
-    toggleContentVisibility(false);
+    // [ITEM 5] Start with a neutral verifying state instead of jarring login prompt
+    toggleContentVisibility(false, 'verifying');
     await initLIFF();
     bindEvents();
 });
 
-function toggleContentVisibility(show) {
+window.manualLiffLogin = function() {
+    console.warn('[Auth] Manual login triggered.');
+    liff.login();
+};
+
+window.forceLiffRelogin = function() {
+    console.warn('[Auth] Forcing re-login: logging out and reloading to clear stale state.');
+    if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+        liff.logout();
+    }
+    location.reload();
+};
+
+function showAuthFailedFallback() {
+    console.warn('[Auth] 401 detected. Halting operations, clearing UI state, and displaying manual fallback.');
+    
+    updateUserUI(false);
+    currentUser.userId = null;
+    currentUser.displayName = '訪客';
+    currentUser.pictureUrl = null;
+
+    // [ITEM 5] Use the explicit expired state
+    toggleContentVisibility(false, 'expired'); 
+}
+
+function toggleContentVisibility(show, state = 'login') {
     const controls = document.querySelector('.controls-section');
     const main = document.querySelector('.leads-container');
-    const loginPrompt = document.getElementById('login-prompt'); 
+    let promptDiv = document.getElementById('login-prompt'); 
 
     if (show) {
         if(controls) controls.style.display = 'flex';
         if(main) main.style.display = 'block';
-        if(loginPrompt) loginPrompt.style.display = 'none';
+        if(promptDiv) promptDiv.style.display = 'none';
     } else {
         if(controls) controls.style.display = 'none';
         if(main) main.style.display = 'none';
-        if (!loginPrompt) createLoginPrompt();
-        else loginPrompt.style.display = 'flex';
-    }
-}
+        
+        // Dynamically create or update prompt structure
+        if (!promptDiv) {
+            promptDiv = document.createElement('div');
+            promptDiv.id = 'login-prompt';
+            promptDiv.className = 'empty-state'; 
+            promptDiv.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; height: 60vh; padding: 20px; text-align: center;';
+            
+            const header = document.querySelector('.main-header');
+            if(header && header.parentNode) {
+                header.parentNode.insertBefore(promptDiv, header.nextSibling);
+            }
+        }
+        
+        promptDiv.style.display = 'flex';
 
-function createLoginPrompt() {
-    const promptDiv = document.createElement('div');
-    promptDiv.id = 'login-prompt';
-    promptDiv.className = 'empty-state'; 
-    promptDiv.style.cssText = 'display: flex; flex-direction: column; align-items: center; justify-content: center; height: 60vh; padding: 20px; text-align: center;';
-    
-    promptDiv.innerHTML = `
-        <div class="empty-icon" style="font-size: 5rem; margin-bottom: 20px;">🔒</div>
-        <h2 style="margin-bottom: 10px; color: var(--text-main);">請先登入</h2>
-        <p style="color: var(--text-sub); margin-bottom: 20px;">此頁面僅限授權成員存取<br>請點擊右上角或下方的按鈕登入 LINE</p>
-        <button class="login-btn" onclick="liff.login()" style="padding: 10px 30px; font-size: 1rem;">LINE 登入</button>
-    `;
-    
-    const header = document.querySelector('.main-header');
-    if(header && header.parentNode) {
-        header.parentNode.insertBefore(promptDiv, header.nextSibling);
+        // [ITEM 5] Smooth UX State Handling
+        if (state === 'verifying') {
+            promptDiv.innerHTML = `
+                <div class="spinner" style="margin-bottom: 20px; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--primary-color, #00B900); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <h2 style="margin-bottom: 10px; color: var(--text-main);">身分驗證中...</h2>
+                <p style="color: var(--text-sub);">正在安全地檢查您的登入狀態</p>
+                <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+            `;
+        } else if (state === 'expired') {
+            promptDiv.innerHTML = `
+                <div class="empty-icon" style="font-size: 5rem; margin-bottom: 20px;">⚠️</div>
+                <h2 style="margin-bottom: 10px; color: var(--text-main);">登入憑證失效</h2>
+                <p style="color: var(--text-sub); margin-bottom: 20px;">您的登入狀態已過期或無效，請重新登入。</p>
+                <button class="login-btn" onclick="window.forceLiffRelogin()" style="padding: 10px 30px; font-size: 1rem;">重新登入</button>
+            `;
+        } else {
+            // Default manual login state
+            promptDiv.innerHTML = `
+                <div class="empty-icon" style="font-size: 5rem; margin-bottom: 20px;">🔒</div>
+                <h2 style="margin-bottom: 10px; color: var(--text-main);">請先登入</h2>
+                <p style="color: var(--text-sub); margin-bottom: 20px;">此頁面僅限授權成員存取<br>請點擊下方按鈕登入 LINE</p>
+                <button class="login-btn" onclick="window.manualLiffLogin()" style="padding: 10px 30px; font-size: 1rem;">LINE 登入</button>
+            `;
+        }
     }
 }
 
@@ -69,7 +115,7 @@ function showAccessDenied(userId) {
             <div style="background: #f1f5f9; padding: 10px; border-radius: 8px; font-family: monospace; user-select: all; margin-bottom: 20px;">
                 ${userId}
             </div>
-            <button class="action-btn" onclick="liff.logout(); location.reload();" style="width: auto; padding: 10px 20px;">登出並切換帳號</button>
+            <button class="action-btn" onclick="window.forceLiffRelogin();" style="width: auto; padding: 10px 20px;">登出並切換帳號</button>
         `;
         promptDiv.style.display = 'flex';
     }
@@ -105,37 +151,72 @@ async function initLIFF() {
             loadLeadsData();
         } else {
             updateUserUI(false);
-            toggleContentVisibility(false);
+            // [ITEM 5] Switch to login prompt once verification fails locally
+            toggleContentVisibility(false, 'login');
         }
     } catch (error) {
         console.error('LIFF Init Error:', error);
-        toggleContentVisibility(false);
+        toggleContentVisibility(false, 'login');
     }
 }
 
 function updateUserUI(isLoggedIn) {
     const userArea = document.getElementById('user-area');
     const loginBtn = document.getElementById('login-btn');
+    const userName = document.getElementById('user-name');
+    const userAvatar = document.getElementById('user-avatar');
     
     if (isLoggedIn) {
-        userArea.style.display = 'flex';
-        loginBtn.style.display = 'none';
-        
-        document.getElementById('user-name').textContent = `你好，${currentUser.displayName}`;
-        
-        if (currentUser.pictureUrl) {
-            document.getElementById('user-avatar').src = currentUser.pictureUrl;
-            document.getElementById('user-avatar').style.display = 'block';
+        if(userArea) {
+            userArea.style.display = 'flex';
+            userArea.style.alignItems = 'center';
+            userArea.style.gap = '10px';
         }
+        if(loginBtn) loginBtn.style.display = 'none';
+        
+        // [ITEM 6] Inject pending reminder DOM placeholder
+        if(userName) {
+            userName.innerHTML = `
+                <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                    <span>你好，${currentUser.displayName}</span>
+                    <span id="my-pending-reminder" style="display:none; color: var(--accent-red); font-size: 0.75rem; margin-top: 2px;"></span>
+                </div>
+            `;
+        }
+        
+        if (currentUser.pictureUrl && userAvatar) {
+            userAvatar.src = currentUser.pictureUrl;
+            userAvatar.style.display = 'block';
+        }
+
+        // [ITEM 4] Inject logout entry natively to user-area
+        if (userArea && !document.getElementById('header-logout-btn')) {
+            const logoutBtn = document.createElement('button');
+            logoutBtn.id = 'header-logout-btn';
+            logoutBtn.className = 'action-btn';
+            logoutBtn.textContent = '登出';
+            logoutBtn.style.cssText = 'padding: 4px 8px; font-size: 0.8rem; width: auto; background: var(--surface-bg, #fff); color: var(--text-main, #333); border: 1px solid var(--border-color, #ccc); cursor: pointer; border-radius: 4px;';
+            logoutBtn.onclick = window.forceLiffRelogin;
+            userArea.appendChild(logoutBtn);
+        }
+
     } else {
-        userArea.style.display = 'none';
-        loginBtn.style.display = 'block';
+        if(userArea) userArea.style.display = 'none';
+        if(loginBtn) loginBtn.style.display = 'block';
+        if(userAvatar) {
+            userAvatar.style.display = 'none';
+            userAvatar.src = '';
+        }
+        if(userName) userName.innerHTML = '載入中...';
+        
+        const logoutBtn = document.getElementById('header-logout-btn');
+        if(logoutBtn) logoutBtn.remove();
     }
 }
 
 function bindEvents() {
     document.getElementById('login-btn').onclick = () => {
-        if (typeof liff !== 'undefined' && LIFF_ID) liff.login();
+        if (typeof liff !== 'undefined' && LIFF_ID) window.manualLiffLogin(); 
     };
 
     document.querySelectorAll('.toggle-btn').forEach(btn => {
@@ -163,19 +244,40 @@ function bindEvents() {
         };
     }
 
+    // [ITEM 2] Decouple close logic. Close only the immediate parent modal
     document.querySelectorAll('.close-modal').forEach(el => {
-        el.onclick = () => {
-            document.getElementById('preview-modal').style.display = 'none';
-            document.getElementById('edit-modal').style.display = 'none';
+        el.onclick = function() {
+            const parentModal = this.closest('.modal');
+            if (parentModal) parentModal.style.display = 'none';
         };
     });
     
-    window.onclick = (e) => { 
-        if (e.target.classList.contains('modal')) e.target.style.display = 'none'; 
-    };
+    // [ITEM 1] Fix mobile close bug. Bind strictly to modal background (event.target === this)
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.style.display = 'none';
+            }
+        });
+    });
 
     const editForm = document.getElementById('edit-form');
     if (editForm) editForm.onsubmit = handleEditSubmit;
+}
+
+async function getValidIdToken() {
+    if (!liff.isLoggedIn()) {
+        console.warn('[Auth] Token 取得失敗: LIFF 尚未登入');
+        return null;
+    }
+
+    const token = liff.getIDToken();
+    if (!token) {
+        console.warn('[Auth] Token 取得失敗: ID Token 為空');
+        return null;
+    }
+
+    return token;
 }
 
 async function loadLeadsData() {
@@ -196,26 +298,28 @@ async function loadLeadsData() {
         if (currentUser.userId === 'TEST_LOCAL_USER') {
             headers['Authorization'] = 'Bearer TEST_LOCAL_TOKEN';
         } else {
-            const idToken = liff.getIDToken();
-            if (idToken) {
-                headers['Authorization'] = `Bearer ${idToken}`;
-            } else {
-                console.warn('無法取得 LIFF ID Token');
+            const idToken = await getValidIdToken();
+            if (!idToken) {
+                console.warn('[Auth] Missing token, skip request.');
+                if(loadingEl) loadingEl.style.display = 'none';
+                return;
             }
+            
+            headers['Authorization'] = `Bearer ${idToken}`;
         }
 
         const response = await fetch('/api/line/leads', { headers });
+        
+        if (response.status === 401) {
+            showAuthFailedFallback();
+            return;
+        }
+        
         const result = await response.json();
         
         if (response.status === 403) {
             toggleContentVisibility(false);
             showAccessDenied(result.yourUserId);
-            return;
-        }
-
-        if (response.status === 401) {
-            alert('登入驗證失敗，請重新登入 LINE');
-            console.error('[Auth] 401 Unauthorized');
             return;
         }
 
@@ -246,6 +350,24 @@ function updateCounts() {
         return !hasName || !hasCompany;
     }).length;
     document.getElementById('count-pending').textContent = pendingCount;
+
+    // [ITEM 6] Compute strictly owned pending leads for visual reminder
+    const myPendingCount = allLeads.filter(l => {
+        const isMine = l.lineUserId === currentUser.userId;
+        const hasName = l.name && l.name.trim() !== '';
+        const hasCompany = l.company && l.company.trim() !== '';
+        return isMine && (!hasName || !hasCompany);
+    }).length;
+
+    const reminderEl = document.getElementById('my-pending-reminder');
+    if (reminderEl) {
+        if (myPendingCount > 0) {
+            reminderEl.textContent = `⚠️ 你有 ${myPendingCount} 張待確認名片`;
+            reminderEl.style.display = 'block';
+        } else {
+            reminderEl.style.display = 'none';
+        }
+    }
 }
 
 function renderLeads() {
@@ -314,7 +436,6 @@ function createCardHTML(lead) {
         ? `<img src="${imageUrl}" alt="名片" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`
         : `<div class="placeholder">📇</div>`;
 
-    // V6.3 HTML Structure Change: image-top-right moved outside item-image
     return `
         <div class="v6-list-item ${isMine ? 'is-mine' : ''}">
             <div class="image-top-right">
@@ -390,7 +511,9 @@ function openEdit(lead) {
     
     if (lead.driveLink && lead.driveLink !== 'undefined' && lead.driveLink !== 'null') {
         const previewUrl = `/api/drive/thumbnail?link=${encodeURIComponent(lead.driveLink)}`;
-        previewContainer.innerHTML = `<img src="${previewUrl}" alt="名片預覽" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`;
+        const safeLink = (lead.driveLink || '').replace(/"/g, '&quot;');
+        // [ITEM 3] Thumbnail explicitly calls openPreview()
+        previewContainer.innerHTML = `<img src="${previewUrl}" alt="名片預覽" style="cursor: pointer;" onclick='openPreview("${safeLink}")' title="點擊放大預覽" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`;
     } else {
         previewContainer.innerHTML = `<div class="placeholder">📇</div>`;
     }
@@ -433,10 +556,14 @@ async function handleEditSubmit(e) {
         if (currentUser.userId === 'TEST_LOCAL_USER') {
             headers['Authorization'] = 'Bearer TEST_LOCAL_TOKEN';
         } else {
-            const idToken = liff.getIDToken();
-            if (idToken) {
-                headers['Authorization'] = `Bearer ${idToken}`;
+            const idToken = await getValidIdToken();
+            if (!idToken) {
+                console.warn('[Auth] Missing token, skip request.');
+                btn.disabled = false;
+                btn.textContent = originalText;
+                return;
             }
+            headers['Authorization'] = `Bearer ${idToken}`;
         }
 
         const res = await fetch(`/api/line/leads/${rowIndex}`, {
@@ -445,13 +572,14 @@ async function handleEditSubmit(e) {
             body: JSON.stringify(data)
         });
         
-        if (res.status === 403) {
-            alert('您沒有權限執行此操作');
+        if (res.status === 401) {
+            document.getElementById('edit-modal').style.display = 'none';
+            showAuthFailedFallback();
             return;
         }
 
-        if (res.status === 401) {
-            alert('登入憑證已過期');
+        if (res.status === 403) {
+            alert('您沒有權限執行此操作');
             return;
         }
 
