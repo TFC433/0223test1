@@ -1,10 +1,11 @@
-// services/contact-service.js
 /**
  * services/contact-service.js
  * 聯絡人業務邏輯服務層
- * @version 8.9.1 (Phase 8.2 RAW Physical Delete & Cache Fix)
- * @date 2026-03-16
+ * @version 8.10.0 (Phase 8.3 Exhibition Auto-Tag Support)
+ * @date 2026-03-21
  * @changelog
+ * - [PHASE 8.3] Added safe defensive fallback evaluation for is_exhibition logic inside updatePotentialContact. 
+ * System Service injection is explicitly required in constructor to ensure deterministic config retrieval.
  * - [PHASE 8.2] Added explicit cache invalidation to deletePotentialContact to fix frontend stale data.
  * - [PHASE 8.2] Added deletePotentialContact for physical deletion of RAW Sheet rows.
  * - [PHASE 8.2] Added relation validation block to deleteContact.
@@ -26,8 +27,9 @@ class ContactService {
      * @param {ContactSqlReader} [contactSqlReader]
      * @param {ContactSqlWriter} [contactSqlWriter]
      * @param {CompanySqlReader} [companySqlReader] - Optional DI for SQL Company Maps
+     * @param {SystemService} systemService         - Required DI to retrieve settings deterministically
      */
-    constructor(contactRawReader, contactCoreReader, contactWriter, companyReader, config, contactSqlReader, contactSqlWriter, companySqlReader) {
+    constructor(contactRawReader, contactCoreReader, contactWriter, companyReader, config, contactSqlReader, contactSqlWriter, companySqlReader, systemService) {
         this.contactRawReader = contactRawReader;
         this.contactCoreReader = contactCoreReader;
         this.contactWriter = contactWriter;
@@ -36,6 +38,12 @@ class ContactService {
         this.contactSqlReader = contactSqlReader;
         this.contactSqlWriter = contactSqlWriter;
         this.companySqlReader = companySqlReader;
+        
+        // Strict deterministic injection requirement
+        if (!systemService) {
+            throw new Error('[ContactService] CRITICAL: systemService is required but not provided.');
+        }
+        this.systemService = systemService;
     }
 
     // ============================================================
@@ -344,6 +352,45 @@ class ContactService {
             if (!target) throw new Error(`找不到潛在客戶 Row: ${rowIndex}`);
 
             const mergedData = { ...target, ...updateData };
+
+            // =========================================================
+            // [FALLBACK AUTO-TAG LOGIC]
+            // STRICT EVALUATION: Only execute when target.is_exhibition lacks a true/false state.
+            // Defensive Date Parsing: Catches structural issues without throwing to protect update pipeline.
+            // =========================================================
+            if (target.is_exhibition == null || target.is_exhibition === undefined || target.is_exhibition === '') {
+                try {
+                    const sysConfig = await this.systemService.getSystemConfig();
+                    const exConfig = sysConfig['展會設定'] || [];
+                    
+                    const enabledStr = (exConfig.find(c => c.value === 'exhibition_enabled') || {}).note || 'false';
+                    const isEnabled = String(enabledStr).toUpperCase() === 'TRUE';
+
+                    if (isEnabled) {
+                        const exName = (exConfig.find(c => c.value === 'exhibition_name') || {}).note || '';
+                        const startStr = (exConfig.find(c => c.value === 'exhibition_start_date') || {}).note;
+                        const endStr = (exConfig.find(c => c.value === 'exhibition_end_date') || {}).note;
+
+                        if (startStr && endStr && target.createdTime) {
+                            const createdDate = new Date(target.createdTime);
+                            const startDate = new Date(startStr);
+                            const endDate = new Date(endStr);
+                            endDate.setHours(23, 59, 59, 999); // Safe bounding inclusion
+
+                            // Proceed strictly if date parsing results in valid objects
+                            if (!isNaN(createdDate.getTime()) && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+                                if (createdDate >= startDate && createdDate <= endDate) {
+                                    mergedData.is_exhibition = true;
+                                    mergedData.exhibition_name = exName;
+                                }
+                            }
+                        }
+                    }
+                } catch (configError) {
+                    console.warn('[ContactService] Fallback auto-tag skipped safely due to error:', configError.message);
+                }
+            }
+            // =========================================================
 
             if (updateData.notes) {
                 const oldNotes = target.notes || '';

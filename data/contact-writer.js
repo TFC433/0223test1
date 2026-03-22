@@ -1,14 +1,17 @@
 /**
  * data/contact-writer.js
  * 聯絡人資料寫入器
- * * @version 7.1.0 (Phase 8.2 RAW Physical Delete)
- * @date 2026-03-16
+ * @version 7.2.0 (Phase 8.3 Exhibition Auto-Tag Support)
+ * @date 2026-03-21
  * @description 
  * [SQL-Ready Refactor]
  * 1. 嚴格禁止呼叫 values.get (No Read)。
  * 2. 僅提供基於 rowIndex 的 Pure Write 方法。
  * 3. 使用 batchUpdate 實現精確的欄位更新。
  * 4. [Feature] 支援 deletePotentialContactRow 實現物理列刪除。
+ * * Changelog:
+ * - [V7.2.0] Safely appended pushUpdate checks for repurposed EXHIBITION_NAME and IS_EXHIBITION 
+ * within writePotentialContactRow. Core column logic strictly unmodified.
  */
 const BaseWriter = require('./base-writer');
 
@@ -79,6 +82,7 @@ class ContactWriter extends BaseWriter {
         const updates = [];
         
         // Helper: Push update if field exists
+        // Strictly Unmodified core logic: respects 0-25 indexing constraint securely.
         const pushUpdate = (colIndex, val) => {
             if (val !== undefined) {
                 const colLetter = String.fromCharCode(65 + colIndex);
@@ -97,6 +101,15 @@ class ContactWriter extends BaseWriter {
         
         if (F.NOTES !== undefined) {
             pushUpdate(F.NOTES, data.notes);
+        }
+
+        // [Fallback Auto-Tag] Add non-breaking write support for repurposed columns
+        if (F.EXHIBITION_NAME !== undefined) {
+            pushUpdate(F.EXHIBITION_NAME, data.exhibition_name);
+        }
+
+        if (F.IS_EXHIBITION !== undefined) {
+            pushUpdate(F.IS_EXHIBITION, data.is_exhibition);
         }
 
         if (updates.length > 0) {

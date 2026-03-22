@@ -1,10 +1,11 @@
 // File: public/scripts/leads-view.js
-// Version: 15.6.0
-// Date: 2026-03-20
+// Version: 15.9.0
+// Date: 2026-03-22
 // Changelog: 
-//   - V15.6.0 UI/UX Patch: Fixed mobile modal close, decoupled modal dismissal, added preview from edit modal, injected logout button, smoothed login UX with 'verifying' state, and added pending reminder.
-//   - V15.5.0 Reliable Auth Fallback: Fixed 401 manual re-entry by utilizing liff.logout() + reload to clear stale LIFF state. Reverted UI header state on auth failure.
-//   - V15.4.0 Strict Auth Flow Redesign: Completely removed auto-login loop mechanisms. Implemented explicit manual fallback state on 401.
+//   - V15.9.0 UI Patch: Moved exhibition badge from company-row to image thumbnail top-left. Applied semi-transparent styling and dynamic top offset to avoid collision with existing warning badges.
+//   - V15.8.0 Fallback Auto-Tag Integration: Inserted conditional badge into createCardHTML. Implemented simple exhibition control block dynamically in openEdit ensuring layout stability, and extracted values carefully in handleEditSubmit to preserve exhibition string persistence.
+//   - V15.7.0 UI/UX Patch: Integrated Exhibition Auto-Tag visual badge into createCardHTML and added dynamic exhibition toggle to openEdit modal (with handleEditSubmit extraction).
+//   - V15.6.0 UI/UX Patch: Fixed mobile modal close, decoupled modal dismissal, added preview from edit modal, injected logout button, smoothed login UX.
 // Description: Logic controller for Lead View V6.3 (Reading Structure + Desktop Pill Position) and simplified strict LIFF Auth.
 
 let allLeads = [];
@@ -436,6 +437,14 @@ function createCardHTML(lead) {
         ? `<img src="${imageUrl}" alt="名片" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`
         : `<div class="placeholder">📇</div>`;
 
+    // [Fallback Auto-Tag] Conditional rendering for Exhibition Badge (relocated to thumbnail area)
+    const isExhibition = lead.is_exhibition === true || String(lead.is_exhibition).toUpperCase() === 'TRUE';
+    // Dynamic top offset ensures it doesn't overlap the warning badge if present
+    const exTopOffset = missingText ? '28px' : '8px';
+    const exhibitionBadgeHtml = isExhibition && lead.exhibition_name
+        ? `<span style="position: absolute; top: ${exTopOffset}; left: 8px; z-index: 10; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; background: rgba(2, 132, 199, 0.85); color: #fff; pointer-events: none;">📌 ${safeHtml(lead.exhibition_name)}</span>`
+        : '';
+
     return `
         <div class="v6-list-item ${isMine ? 'is-mine' : ''}">
             <div class="image-top-right">
@@ -443,8 +452,9 @@ function createCardHTML(lead) {
                 ${showEditBtn ? `<button class="edit-pill-btn" onclick='event.stopPropagation(); openEdit(${leadJson})'>✏️ 編輯</button>` : ''}
             </div>
             
-            <div class="item-image" onclick='openPreview("${safe(lead.driveLink)}")' title="點擊看原圖">
+            <div class="item-image" onclick='openPreview("${safe(lead.driveLink)}")' title="點擊看原圖" style="position: relative;">
                 ${statusBadgeHtml}
+                ${exhibitionBadgeHtml}
                 ${imageHtml}
             </div>
             
@@ -525,6 +535,36 @@ function openEdit(lead) {
     document.getElementById('edit-mobile').value = lead.mobile || '';
     document.getElementById('edit-email').value = lead.email || '';
     document.getElementById('edit-notes').value = ''; 
+
+    // [Fallback Auto-Tag] Conditional rendering of the Exhibition control UI
+    const oldDynamicGroup = document.getElementById('dynamic-exhibition-group');
+    if (oldDynamicGroup) oldDynamicGroup.remove();
+
+    if (lead.is_exhibition != null && lead.is_exhibition !== '') {
+        const form = document.getElementById('edit-form');
+        const notesEl = document.getElementById('edit-notes');
+        
+        if (form && notesEl && notesEl.parentNode) {
+            const isChecked = lead.is_exhibition === true || String(lead.is_exhibition).toUpperCase() === 'TRUE';
+            const safeExName = (lead.exhibition_name || '').replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            
+            const exGroup = document.createElement('div');
+            exGroup.id = 'dynamic-exhibition-group';
+            exGroup.className = 'form-group';
+            // Embedding hidden input to strictly preserve exhibition string payload against loss during update flow
+            exGroup.innerHTML = `
+                <input type="hidden" id="edit-exhibition-name" value="${safeExName}">
+                <label style="display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; margin-bottom: 4px;">
+                    <input type="checkbox" id="edit-is-exhibition" ${isChecked ? 'checked' : ''} style="width: auto; margin: 0;">
+                    <span>設為展會名片</span>
+                </label>
+                <div style="font-size: 0.85rem; color: var(--text-sub);">展會名稱: ${safeExName || '未指定'}</div>
+            `;
+            
+            form.insertBefore(exGroup, notesEl.parentNode);
+        }
+    }
+
     modal.style.display = 'block';
 }
 
@@ -547,6 +587,14 @@ async function handleEditSubmit(e) {
     
     const notes = document.getElementById('edit-notes').value.trim();
     if (notes) data.notes = notes;
+
+    // [Fallback Auto-Tag] Safely extraction to explicitly prevent exhibition string loss
+    const exToggle = document.getElementById('edit-is-exhibition');
+    const exNameInput = document.getElementById('edit-exhibition-name');
+    if (exToggle && exNameInput) {
+        data.is_exhibition = exToggle.checked;
+        data.exhibition_name = exNameInput.value;
+    }
 
     try {
         const headers = { 

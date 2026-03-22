@@ -1,10 +1,11 @@
 /**
  * services/system-service.js
  * 系統服務模組
- * * @version 2.0.2
- * @date 2026-03-17
+ * @version 2.1.0
+ * @date 2026-03-21
  * @description 接管所有業務邏輯 (Defaults/Filter/Sort) 與 User 操作流程控制。
- * @changelog
+ * * Changelog:
+ * - [V2.1.0] Appended exact '展會設定' keys to DEFAULT_SETTINGS to support safe fallback configuration.
  * - [Fix] Implemented case-insensitive, value-or-note matching for config merge to prevent duplicate pre-seeded defaults (e.g., Event Types).
  */
 
@@ -26,7 +27,14 @@ class SystemService {
                 { value: 'dx', note: 'DX', order: 4, color: '#ffc107' },
                 { value: 'legacy', note: '舊事件', order: 5, color: '#dc3545' }
             ],
-            '日曆篩選規則': []
+            '日曆篩選規則': [],
+            // [Fallback Auto-Tag] Default Exhibition Config Injection (Strict key structure)
+            '展會設定': [
+                { value: 'exhibition_enabled', note: 'false', order: 1, category: '設定' },
+                { value: 'exhibition_name', note: '預設展會', order: 2, category: '設定' },
+                { value: 'exhibition_start_date', note: '1970-01-01', order: 3, category: '設定' },
+                { value: 'exhibition_end_date', note: '1970-01-01', order: 4, category: '設定' }
+            ]
         };
     }
 

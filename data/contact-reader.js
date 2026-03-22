@@ -1,14 +1,17 @@
 /**
  * data/contact-reader.js
  * 專門負責讀取所有與「聯絡人」相關資料的類別
- * * @version 7.0.0 (Standard A + S Refactor)
- * @date 2026-01-23
+ * @version 7.1.0
+ * @date 2026-03-21
  * @description 
  * [SQL-Ready Refactor]
  * 1. 移除所有業務邏輯 (Filter, Sort, Pagination, Join)。
  * 2. 移除 Cross-Reader Coupling (不再 require company-reader)。
  * 3. 確保回傳 rowIndex，供 Service 傳遞給 Writer 進行 Update。
  * 4. 僅保留 Raw Data Access 方法。
+ * * Changelog:
+ * - [V7.1.0] Updated rowParser to explicitly extract EXHIBITION_NAME and IS_EXHIBITION from repurposed indexes 17 and 18.
+ * This enables safe verification of existing tags for the Fallback Auto-Tag mechanism.
  */
 
 const BaseReader = require('./base-reader');
@@ -52,6 +55,10 @@ class ContactReader extends BaseReader {
                 status: row[this.config.CONTACT_FIELDS.STATUS] || '',
                 notes: row[this.config.CONTACT_FIELDS.NOTES] || '', 
                 
+                // [Fallback Auto-Tag] Safely read the repurposed fields
+                exhibition_name: row[this.config.CONTACT_FIELDS.EXHIBITION_NAME] || '',
+                is_exhibition: row[this.config.CONTACT_FIELDS.IS_EXHIBITION] || '',
+
                 // 圖片連結
                 driveLink: driveLink,
                 cardImage: driveLink,

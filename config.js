@@ -1,10 +1,13 @@
 /**
  * config.js
  * 系統核心設定檔
- * * @version 5.0.0 (Phase 5 Refactoring)
- * @date 2026-01-09
+ * @version 5.1.0 (Phase 8.3 Auto-Tag Support)
+ * @date 2026-03-21
  * @description 定義全域環境變數、Sheet ID 路由表、資料源切換開關與系統常數。
  * 本次重構新增 IDS 與 DATA_SOURCES 物件以支援多資料源架構。
+ * * Changelog:
+ * - [V5.1.0] Repurposed CONTACT_FIELDS index 17 to EXHIBITION_NAME and index 18 to IS_EXHIBITION.
+ * This enables the Fallback Auto-Tag feature safely within the A-Z column constraint.
  */
 
 module.exports = {
@@ -151,8 +154,9 @@ module.exports = {
     },
 
     // 原始名片資料欄位對應
+    // [V5.1.0] Repurposed indexes 17 and 18 safely within 0-25 boundary limits
     CONTACT_FIELDS: {
-        TIME: 0, NAME: 1, COMPANY: 2, POSITION: 3, DEPARTMENT: 4, PHONE: 5, MOBILE: 6, FAX: 7, EMAIL: 8, WEBSITE: 9, ADDRESS: 10, CONFIDENCE: 11, PROCESSING_TIME: 12, DRIVE_LINK: 13, SMART_FILENAME: 14, LOCAL_PATH: 15, RAW_TEXT: 16, AI_PARSING: 17, AI_CONFIDENCE: 18, DATA_SOURCE: 19, LINE_USER_ID: 20, USER_NICKNAME: 21, USER_TAG: 22, ORIGINAL_ID: 23, STATUS: 24
+        TIME: 0, NAME: 1, COMPANY: 2, POSITION: 3, DEPARTMENT: 4, PHONE: 5, MOBILE: 6, FAX: 7, EMAIL: 8, WEBSITE: 9, ADDRESS: 10, CONFIDENCE: 11, PROCESSING_TIME: 12, DRIVE_LINK: 13, SMART_FILENAME: 14, LOCAL_PATH: 15, RAW_TEXT: 16, EXHIBITION_NAME: 17, IS_EXHIBITION: 18, DATA_SOURCE: 19, LINE_USER_ID: 20, USER_NICKNAME: 21, USER_TAG: 22, ORIGINAL_ID: 23, STATUS: 24
     },
     
     // 互動紀錄工作表欄位
