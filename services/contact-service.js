@@ -1,11 +1,11 @@
 /**
  * services/contact-service.js
  * 聯絡人業務邏輯服務層
- * @version 8.10.0 (Phase 8.3 Exhibition Auto-Tag Support)
- * @date 2026-03-21
+ * @version 8.11.0 (Phase 8.5 Exhibition Data Normalization)
+ * @date 2026-03-22
  * @changelog
- * - [PHASE 8.3] Added safe defensive fallback evaluation for is_exhibition logic inside updatePotentialContact. 
- * System Service injection is explicitly required in constructor to ensure deterministic config retrieval.
+ * - [PHASE 8.5] Normalized exhibition data display: Auto-tag fallback now explicitly formats the exhibition_name with its date range suffix before saving to the RAW sheet (Column R). This guarantees historical data integrity for past exhibitions.
+ * - [PHASE 8.3] Added safe defensive fallback evaluation for is_exhibition logic inside updatePotentialContact. System Service injection is explicitly required in constructor to ensure deterministic config retrieval.
  * - [PHASE 8.2] Added explicit cache invalidation to deletePotentialContact to fix frontend stale data.
  * - [PHASE 8.2] Added deletePotentialContact for physical deletion of RAW Sheet rows.
  * - [PHASE 8.2] Added relation validation block to deleteContact.
@@ -258,7 +258,7 @@ class ContactService {
 
             // 3. Format and return
             return linkedContacts.map(contact => {
-                const companyName = companyNameMap.get(contact.companyId) || contact.companyId || '';
+                const companyName = companyNameMap.get(contact.companyId) || companyNameMap.get(contact.companyId) || '';
 
                 return {
                     contactId: contact.contactId,
@@ -354,9 +354,9 @@ class ContactService {
             const mergedData = { ...target, ...updateData };
 
             // =========================================================
-            // [FALLBACK AUTO-TAG LOGIC]
+            // [FALLBACK AUTO-TAG LOGIC & NORMALIZATION]
             // STRICT EVALUATION: Only execute when target.is_exhibition lacks a true/false state.
-            // Defensive Date Parsing: Catches structural issues without throwing to protect update pipeline.
+            // Builds the final normalized display string (Name + Date suffix) and commits it to RAW R.
             // =========================================================
             if (target.is_exhibition == null || target.is_exhibition === undefined || target.is_exhibition === '') {
                 try {
@@ -380,8 +380,19 @@ class ContactService {
                             // Proceed strictly if date parsing results in valid objects
                             if (!isNaN(createdDate.getTime()) && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
                                 if (createdDate >= startDate && createdDate <= endDate) {
+                                    
+                                    // Parse config strings safely by splitting to avoid timezone drift on output
+                                    const startParts = startStr.split('-');
+                                    const endParts = endStr.split('-');
+                                    let formattedExName = exName;
+
+                                    if (startParts.length === 3 && endParts.length === 3) {
+                                        const suffix = `（${parseInt(startParts[1], 10)}/${parseInt(startParts[2], 10)}–${parseInt(endParts[1], 10)}/${parseInt(endParts[2], 10)}）`;
+                                        formattedExName = `${exName}${suffix}`;
+                                    }
+
                                     mergedData.is_exhibition = true;
-                                    mergedData.exhibition_name = exName;
+                                    mergedData.exhibition_name = formattedExName; // Raw R now stores the final display label
                                 }
                             }
                         }

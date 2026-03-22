@@ -1,10 +1,11 @@
 // File: public/scripts/leads-view.js
-// Version: 16.3.0
+// Version: 16.7.0
 // Date: 2026-03-22
 // Changelog: 
-//   - V16.3.0 Exhibition Banner Visual Upgrade: Upgraded banner to a two-line contextual mode design. Added light blue background tint, left accent border, and secondary explanation text while preserving compact sticky layout.
-//   - V16.2.0 Sticky Header Group: Injected banner INSIDE the sticky .controls-section so it remains anchored while scrolling. Compacted banner into a single-line layout with subtle inline separator.
-//   - V16.1.0 Exhibition UX Refinement: Moved banner above action controls, changed icon to 📢. Integrated filter toggle inline to the banner (removed standalone pill). Softened image thumbnail badge and removed its emoji.
+//   - V16.7.0 Exhibition Display Normalization: Stopped frontend date reconstruction for exhibition labels. The bottom info bar now purely renders the pre-formatted label from RAW column R, ensuring future/historical data integrity and multi-exhibition support without drift.
+//   - V16.6.0 Exhibition UX Polish: Fine-tuned corner triangle mode indicator and bottom info bar styling.
+//   - V16.5.0 Exhibition UX Refinement: Refined corner triangle size. Introduced bottom info bar.
+//   - V16.4.0 Exhibition UX Refinement: Added fixed corner triangle mode indicator ("展").
 // Description: Logic controller for Lead View V6.3 (Reading Structure + Desktop Pill Position) and simplified strict LIFF Auth.
 
 let allLeads = [];
@@ -566,12 +567,25 @@ function createCardHTML(lead) {
         ? `<img src="${imageUrl}" alt="名片" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`
         : `<div class="placeholder">📇</div>`;
 
-    // [Fallback Auto-Tag] Conditional rendering for Exhibition Badge (relocated to thumbnail area, subtle styling)
+    // [Fallback Auto-Tag] Layered exhibition indicator: Mode (Triangle) + Info (Bottom Bar) + De-emphasized Badge
     const isExhibition = lead.is_exhibition === true || String(lead.is_exhibition).toUpperCase() === 'TRUE';
-    // Dynamic top offset ensures it doesn't overlap the warning badge if present
-    const exTopOffset = missingText ? '28px' : '8px';
+    
+    // 1) Corner Triangle Tag (Fixed Mode Indicator) - Polished size, centering, and balanced blue tone
+    const exhibitionCornerTagHtml = isExhibition
+        ? `<div style="position: absolute; top: 0; left: 0; width: 44px; height: 44px; background: rgba(37, 99, 235, 0.85); clip-path: polygon(0 0, 100% 0, 0 100%); z-index: 9; pointer-events: none;">
+               <span style="position: absolute; top: 5px; left: 6px; color: white; font-size: 12px; font-weight: 700; line-height: 1;">展</span>
+           </div>`
+        : '';
+
+    // 2) Exhibition Info Badge (Pill) - Maintained for backwards compatibility but visually de-emphasized
+    const exTopOffset = missingText ? '30px' : '8px';
     const exhibitionBadgeHtml = isExhibition && lead.exhibition_name
-        ? `<span style="position: absolute; top: ${exTopOffset}; left: 8px; z-index: 10; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.55); color: #fff; pointer-events: none; backdrop-filter: blur(2px);">${safeHtml(lead.exhibition_name)}</span>`
+        ? `<span style="position: absolute; top: ${exTopOffset}; left: 8px; z-index: 8; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 999px; background: rgba(14, 165, 233, 0.05); color: rgba(3, 105, 161, 0.5); border: 1px solid rgba(14, 165, 233, 0.1); pointer-events: none; opacity: 0.3; transition: opacity 0.2s;">${safeHtml(lead.exhibition_name)}</span>`
+        : '';
+
+    // 3) Bottom Info Bar (Primary readable info) - Directly displaying normalized label stored in RAW Column R
+    const exhibitionBottomBarHtml = isExhibition && lead.exhibition_name
+        ? `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); color: white; font-size: 12px; font-weight: 500; letter-spacing: 0.3px; padding: 5px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 9; pointer-events: none; text-align: center;">${safeHtml(lead.exhibition_name)}</div>`
         : '';
 
     return `
@@ -582,8 +596,10 @@ function createCardHTML(lead) {
             </div>
             
             <div class="item-image" onclick='openPreview("${safe(lead.driveLink)}")' title="點擊看原圖" style="position: relative;">
+                ${exhibitionCornerTagHtml}
                 ${statusBadgeHtml}
                 ${exhibitionBadgeHtml}
+                ${exhibitionBottomBarHtml}
                 ${imageHtml}
             </div>
             
