@@ -1,8 +1,10 @@
 /**
  * routes/line-leads.routes.js
- * @version 1.1.0
- * @date 2026-01-26
- * @description Line-Leads L1→L2：改由 services 容器注入 authService（移除 contactWriter 直接注入）。
+ * @version 1.2.0 (Phase 8.4 Exhibition Support)
+ * @date 2026-03-22
+ * @description Line-Leads L1→L2：改由 services 容器注入 authService。新增 systemService 注入以支援展會設定讀取。
+ * @changelog 
+ * - [V1.2.0] Passed systemService into LineLeadsController constructor.
  */
 
 const express = require('express');
@@ -14,13 +16,13 @@ const getController = (req) => {
     const app = req.app;
     const services = app.get('services');
 
-    const { contactService, authService } = services;
+    const { contactService, authService, systemService } = services;
 
     if (!authService) {
         throw new Error("authService is not available in app.get('services'). Make sure services/index.js includes authService.");
     }
 
-    return new LineLeadsController(contactService, authService);
+    return new LineLeadsController(contactService, authService, systemService);
 };
 
 // GET /api/line/leads - 取得所有名片資料

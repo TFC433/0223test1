@@ -1,8 +1,10 @@
 /**
  * File: controllers/line-leads.controller.js
- * Version: 7.1.4
- * Date: 2026-03-16
- * Changelog: Fix localhost bypass logic in getAllLeads to prevent 401 fallthrough.
+ * Version: 7.2.0 (Phase 8.4 Exhibition Enhancements)
+ * Date: 2026-03-22
+ * Changelog: 
+ * - [V7.2.0] Added minimal injection of SystemService into the Controller to expose Exhibition Configuration to the frontend.
+ * - [Fix] Limited exposed config strictly to exhibition settings to prevent over-fetching or exposing unrelated system defaults.
  * LINE LIFF 潛在客戶控制器
  * @description Line-Leads L1→L2：移除 Controller 內 Token 驗證實作與 Writer 直接依賴，改由 AuthService + ContactService 承擔。
  * @contract 遵守契約 v1.0：DOM/API/localStorage 不變。
@@ -11,9 +13,20 @@
 const { handleApiError } = require('../middleware/error.middleware');
 
 class LineLeadsController {
-    constructor(contactService, authService) {
+    /**
+     * @param {ContactService} contactService 
+     * @param {AuthService} authService 
+     * @param {SystemService} systemService - [Phase 8.4] Added to fetch Exhibition Config deterministically
+     */
+    constructor(contactService, authService, systemService) {
         this.contactService = contactService;
         this.authService = authService;
+        
+        // Ensure deterministic access
+        if (!systemService) {
+            console.warn('[LineLeadsController] systemService not provided. Exhibition config will be skipped.');
+        }
+        this.systemService = systemService;
     }
 
     // GET /api/line/leads
@@ -51,10 +64,30 @@ class LineLeadsController {
 
             const leads = await this.contactService.getPotentialContacts(3000);
 
+            // [Phase 8.4] Safely extract and expose strictly necessary Exhibition Config for the frontend
+            let exhibitionConfig = null;
+            if (this.systemService) {
+                try {
+                    const sysConfig = await this.systemService.getSystemConfig();
+                    const exConfigRaw = sysConfig['展會設定'] || [];
+                    
+                    // Reconstruct into a flat object for easy frontend consumption, discarding irrelevant fields
+                    exhibitionConfig = {
+                        exhibition_enabled: (exConfigRaw.find(c => c.value === 'exhibition_enabled') || {}).note || 'false',
+                        exhibition_name: (exConfigRaw.find(c => c.value === 'exhibition_name') || {}).note || '',
+                        exhibition_start_date: (exConfigRaw.find(c => c.value === 'exhibition_start_date') || {}).note || '',
+                        exhibition_end_date: (exConfigRaw.find(c => c.value === 'exhibition_end_date') || {}).note || ''
+                    };
+                } catch (configErr) {
+                    console.warn('[LineLeadsController] Failed to fetch exhibition config:', configErr.message);
+                }
+            }
+
             // 包裹回傳格式以符合前端 result.success 檢查
             res.json({
                 success: true,
-                data: leads
+                data: leads,
+                exhibitionConfig // Explicitly added to payload
             });
 
         } catch (error) {

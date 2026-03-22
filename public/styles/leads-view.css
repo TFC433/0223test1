@@ -1,12 +1,13 @@
 /*
 File: public/styles/leads-view.css
-Version: 15.3.4 (V6.3d Single Info Divider Simplification)
-Date: 2026-03-20
+Version: 15.4.0 (V6.3e Sticky Header Visual Polish)
+Date: 2026-03-22
 Changelog: 
+  - V15.4.0 UI Polish: Upgraded .controls-section to act as a solid, anchored sticky header layer. Removed transparency to prevent card bleed and added a soft drop shadow for clear visual separation.
   - V6.3d Release: Simplified info section reading structure.
   - Kept single top divider on .info-body to separate identity from details.
   - Removed line-to-line separators for .info-line elements to achieve a cleaner look.
-Description: V6.3d Business Card Organizer styling with simplified single-divider reading structure.
+Description: V6.3e Business Card Organizer styling with anchored sticky header grouping.
 */
 
 :root {
@@ -82,16 +83,15 @@ body {
     cursor: pointer;
 }
 
-/* Controls Section */
+/* Controls Section (Sticky Header Group) */
 .controls-section {
     padding: 16px 20px;
-    background: var(--bg-color);
+    background: var(--bg-color); /* Solid background to prevent card bleed */
     position: sticky;
     top: 61px;
     z-index: 90;
-    backdrop-filter: blur(8px);
-    background: rgba(248, 250, 252, 0.95);
-    border-bottom: 1px solid rgba(0,0,0,0.05);
+    border-bottom: 1px solid var(--border-color);
+    box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.05); /* Soft visual separation layer */
     display: flex;
     flex-direction: column;
 }

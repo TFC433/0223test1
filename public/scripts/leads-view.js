@@ -1,11 +1,10 @@
 // File: public/scripts/leads-view.js
-// Version: 15.9.0
+// Version: 16.3.0
 // Date: 2026-03-22
 // Changelog: 
-//   - V15.9.0 UI Patch: Moved exhibition badge from company-row to image thumbnail top-left. Applied semi-transparent styling and dynamic top offset to avoid collision with existing warning badges.
-//   - V15.8.0 Fallback Auto-Tag Integration: Inserted conditional badge into createCardHTML. Implemented simple exhibition control block dynamically in openEdit ensuring layout stability, and extracted values carefully in handleEditSubmit to preserve exhibition string persistence.
-//   - V15.7.0 UI/UX Patch: Integrated Exhibition Auto-Tag visual badge into createCardHTML and added dynamic exhibition toggle to openEdit modal (with handleEditSubmit extraction).
-//   - V15.6.0 UI/UX Patch: Fixed mobile modal close, decoupled modal dismissal, added preview from edit modal, injected logout button, smoothed login UX.
+//   - V16.3.0 Exhibition Banner Visual Upgrade: Upgraded banner to a two-line contextual mode design. Added light blue background tint, left accent border, and secondary explanation text while preserving compact sticky layout.
+//   - V16.2.0 Sticky Header Group: Injected banner INSIDE the sticky .controls-section so it remains anchored while scrolling. Compacted banner into a single-line layout with subtle inline separator.
+//   - V16.1.0 Exhibition UX Refinement: Moved banner above action controls, changed icon to 📢. Integrated filter toggle inline to the banner (removed standalone pill). Softened image thumbnail badge and removed its emoji.
 // Description: Logic controller for Lead View V6.3 (Reading Structure + Desktop Pill Position) and simplified strict LIFF Auth.
 
 let allLeads = [];
@@ -15,6 +14,10 @@ let currentUser = {
     pictureUrl: null
 };
 let currentView = 'all'; 
+
+// [Phase 8.4 Exhibition UX] Independent filter state and globally stored config
+let showExhibitionOnly = false;
+let currentExhibitionConfig = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     // [ITEM 5] Start with a neutral verifying state instead of jarring login prompt
@@ -281,6 +284,113 @@ async function getValidIdToken() {
     return token;
 }
 
+// ============================================================================
+// [Phase 8.4/16.3.0] Exhibition Feature Methods
+// Contextual Mode Banner: Uses a distinct light-blue tint and left-accent border.
+// Two-Line Layout: Keeps inline filter subtle on line 1, adds descriptive text on line 2.
+// ============================================================================
+function isExhibitionActive(config) {
+    if (!config || String(config.exhibition_enabled).toUpperCase() !== 'TRUE') return false;
+    
+    if (!config.exhibition_start_date || !config.exhibition_end_date) return false;
+
+    // Use simple, normalized local date comparison to avoid timezone drift
+    const now = new Date();
+    // Reset time portions for strict date boundary comparison
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // Parse the config dates (assuming YYYY-MM-DD format)
+    const startDateParts = config.exhibition_start_date.split('-');
+    const endDateParts = config.exhibition_end_date.split('-');
+    
+    if (startDateParts.length !== 3 || endDateParts.length !== 3) return false;
+
+    const start = new Date(startDateParts[0], startDateParts[1] - 1, startDateParts[2]);
+    const end = new Date(endDateParts[0], endDateParts[1] - 1, endDateParts[2]);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+
+    return today >= start && today <= end;
+}
+
+function renderExhibitionBanner() {
+    const existingBanner = document.getElementById('exhibition-info-banner');
+    if (existingBanner) existingBanner.remove();
+
+    // Clean up old standalone pill if it exists
+    const oldPill = document.getElementById('exhibition-filter-pill');
+    if (oldPill) oldPill.remove();
+
+    if (!isExhibitionActive(currentExhibitionConfig)) return;
+
+    const startDateParts = currentExhibitionConfig.exhibition_start_date.split('-');
+    const endDateParts = currentExhibitionConfig.exhibition_end_date.split('-');
+    
+    // Format to M/D safely
+    const startMD = `${parseInt(startDateParts[1], 10)}/${parseInt(startDateParts[2], 10)}`;
+    const endMD = `${parseInt(endDateParts[1], 10)}/${parseInt(endDateParts[2], 10)}`;
+    const exName = (currentExhibitionConfig.exhibition_name || '').replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    // Create banner DOM
+    const bannerEl = document.createElement('div');
+    bannerEl.id = 'exhibition-info-banner';
+    // Two-line contextual mode styling: Light blue tint, strong left border, compact flex-column.
+    bannerEl.style.cssText = 'background-color: #f0f9ff; border: 1px solid #bae6fd; border-left: 4px solid #0ea5e9; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; width: 100%; box-sizing: border-box;';
+    
+    bannerEl.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <div style="font-weight: 600; color: #0f172a; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px;">
+                📢 ${exName} 展示會期間中（${startMD} - ${endMD}）
+            </div>
+            <div style="flex-shrink: 0;">
+                <span id="inline-exhibition-toggle" style="color: #0284c7; cursor: pointer; font-weight: 600; font-size: 0.8rem; padding: 4px 8px; border-radius: 4px; transition: background 0.2s;">
+                    只看本展會
+                </span>
+            </div>
+        </div>
+        <div style="font-size: 0.75rem; color: #64748b; line-height: 1.2;">
+            本期間掃描的名片將自動標記為展示會名片
+        </div>
+    `;
+
+    // Inject INSIDE the already-sticky controls-section at the very top (prepend)
+    const controlsContainer = document.querySelector('.controls-section');
+    if (controlsContainer) {
+        controlsContainer.prepend(bannerEl);
+    } else {
+        // Fallback injection if controls-section is missing structurally
+        const gridContainer = document.getElementById('leads-grid');
+        if (gridContainer && gridContainer.parentNode) {
+            gridContainer.insertAdjacentElement('beforebegin', bannerEl);
+        }
+    }
+
+    // Attach inline toggle event
+    const toggleBtn = bannerEl.querySelector('#inline-exhibition-toggle');
+    if (toggleBtn) {
+        toggleBtn.onclick = function() {
+            showExhibitionOnly = !showExhibitionOnly;
+            renderLeads();
+        };
+    }
+}
+
+// Minimal inline text update for the toggle
+function updateExhibitionInlineToggle(count) {
+    const toggleBtn = document.getElementById('inline-exhibition-toggle');
+    if (!toggleBtn) return;
+
+    if (showExhibitionOnly) {
+        toggleBtn.textContent = `顯示全部`;
+        toggleBtn.style.backgroundColor = '#e0f2fe'; // subtle active state
+    } else {
+        toggleBtn.textContent = `只看本展會`;
+        toggleBtn.style.backgroundColor = 'transparent';
+    }
+}
+// ============================================================================
+
+
 async function loadLeadsData() {
     const loadingEl = document.getElementById('loading-indicator');
     const gridEl = document.getElementById('leads-grid');
@@ -326,6 +436,13 @@ async function loadLeadsData() {
 
         if (result.success) {
             allLeads = result.data;
+            
+            // Extract config from payload and initialize UI enhancements safely
+            if (result.exhibitionConfig) {
+                currentExhibitionConfig = result.exhibitionConfig;
+                renderExhibitionBanner();
+            }
+
             if(loadingEl) loadingEl.style.display = 'none';
             if(gridEl) gridEl.style.display = 'flex'; 
             updateCounts();
@@ -383,15 +500,27 @@ function renderLeads() {
         const hasCompany = lead.company && lead.company.trim() !== '';
         const isPending = !hasName || !hasCompany;
 
+        // Core state machine evaluation
         if (currentView === 'mine' && lead.lineUserId !== currentUser.userId) return false;
         if (currentView === 'pending' && !isPending) return false;
 
+        // Search text evaluation
         if (searchTerm) {
             const text = `${lead.name} ${lead.company} ${lead.position}`.toLowerCase();
-            return text.includes(searchTerm);
+            if (!text.includes(searchTerm)) return false;
         }
+
+        // Layered Boolean Evaluation for Exhibition Filter
+        if (showExhibitionOnly) {
+            const isEx = lead.is_exhibition === true || String(lead.is_exhibition).toUpperCase() === 'TRUE';
+            if (!isEx) return false;
+        }
+
         return true;
     });
+
+    // Update the inline toggle state
+    updateExhibitionInlineToggle(filtered.length);
 
     if (filtered.length === 0) {
         grid.style.display = 'none';
@@ -437,12 +566,12 @@ function createCardHTML(lead) {
         ? `<img src="${imageUrl}" alt="名片" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`
         : `<div class="placeholder">📇</div>`;
 
-    // [Fallback Auto-Tag] Conditional rendering for Exhibition Badge (relocated to thumbnail area)
+    // [Fallback Auto-Tag] Conditional rendering for Exhibition Badge (relocated to thumbnail area, subtle styling)
     const isExhibition = lead.is_exhibition === true || String(lead.is_exhibition).toUpperCase() === 'TRUE';
     // Dynamic top offset ensures it doesn't overlap the warning badge if present
     const exTopOffset = missingText ? '28px' : '8px';
     const exhibitionBadgeHtml = isExhibition && lead.exhibition_name
-        ? `<span style="position: absolute; top: ${exTopOffset}; left: 8px; z-index: 10; font-size: 0.7rem; padding: 2px 6px; border-radius: 6px; background: rgba(2, 132, 199, 0.85); color: #fff; pointer-events: none;">📌 ${safeHtml(lead.exhibition_name)}</span>`
+        ? `<span style="position: absolute; top: ${exTopOffset}; left: 8px; z-index: 10; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: rgba(0, 0, 0, 0.55); color: #fff; pointer-events: none; backdrop-filter: blur(2px);">${safeHtml(lead.exhibition_name)}</span>`
         : '';
 
     return `
