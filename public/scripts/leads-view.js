@@ -1,11 +1,11 @@
 // File: public/scripts/leads-view.js
-// Version: 16.7.0
+// Version: 16.9.0
 // Date: 2026-03-22
 // Changelog: 
+//   - V16.9.0 Exhibition UI Cleanup: Surgically removed the legacy exhibition badge (pill) to eliminate visual clutter and ghosting. The visual system now strictly relies on the Corner Triangle (mode) and Bottom Info Bar (information) without redundancy.
+//   - V16.8.0 Exhibition UI Theming: Added dynamic color and opacity injection from System Config for the exhibition corner triangle and bottom info bar. Implemented robust hexToRgba helper and safe fallbacks to guarantee UI stability.
 //   - V16.7.0 Exhibition Display Normalization: Stopped frontend date reconstruction for exhibition labels. The bottom info bar now purely renders the pre-formatted label from RAW column R, ensuring future/historical data integrity and multi-exhibition support without drift.
-//   - V16.6.0 Exhibition UX Polish: Fine-tuned corner triangle mode indicator and bottom info bar styling.
-//   - V16.5.0 Exhibition UX Refinement: Refined corner triangle size. Introduced bottom info bar.
-//   - V16.4.0 Exhibition UX Refinement: Added fixed corner triangle mode indicator ("展").
+//   - V16.6.0 Exhibition UX Polish: Fine-tuned corner triangle mode indicator (size, color, text centering) and bottom info bar (centered text, softer backdrop blur, integrated date range formatting) for a balanced, production-ready visual finish.
 // Description: Logic controller for Lead View V6.3 (Reading Structure + Desktop Pill Position) and simplified strict LIFF Auth.
 
 let allLeads = [];
@@ -286,10 +286,31 @@ async function getValidIdToken() {
 }
 
 // ============================================================================
-// [Phase 8.4/16.3.0] Exhibition Feature Methods
-// Contextual Mode Banner: Uses a distinct light-blue tint and left-accent border.
-// Two-Line Layout: Keeps inline filter subtle on line 1, adds descriptive text on line 2.
+// [Phase 8.4/16.8.0] Exhibition Feature Methods
+// Contextual Mode Banner & Dynamic UI Theming
 // ============================================================================
+
+// Helper: Converts HEX to RGBA safely for dynamic theme injection
+function hexToRgba(hex, opacity) {
+    if (!hex || typeof hex !== 'string') return null;
+    hex = hex.replace('#', '');
+    if (hex.length !== 6) return null;
+    
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+    
+    const alpha = (opacity !== undefined && opacity !== null && opacity !== '') 
+        ? parseFloat(opacity) 
+        : 1;
+        
+    if (isNaN(alpha)) return null;
+    
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function isExhibitionActive(config) {
     if (!config || String(config.exhibition_enabled).toUpperCase() !== 'TRUE') return false;
     
@@ -567,25 +588,31 @@ function createCardHTML(lead) {
         ? `<img src="${imageUrl}" alt="名片" loading="lazy" onerror="this.style.display='none'; this.parentElement.innerHTML='<div class=\\'placeholder\\'>📇</div>';">`
         : `<div class="placeholder">📇</div>`;
 
-    // [Fallback Auto-Tag] Layered exhibition indicator: Mode (Triangle) + Info (Bottom Bar) + De-emphasized Badge
     const isExhibition = lead.is_exhibition === true || String(lead.is_exhibition).toUpperCase() === 'TRUE';
     
-    // 1) Corner Triangle Tag (Fixed Mode Indicator) - Polished size, centering, and balanced blue tone
+    // Dynamic Theming: Safe default colors
+    let triangleBgColor = 'rgba(37, 99, 235, 0.85)';
+    let bottomBarBgColor = 'rgba(15, 23, 42, 0.4)';
+    
+    // Dynamic Theming: Override with system config if valid HEX/opacity is present
+    if (isExhibition && currentExhibitionConfig) {
+        const customTriangle = hexToRgba(currentExhibitionConfig.exhibition_triangle_color, currentExhibitionConfig.exhibition_triangle_opacity);
+        if (customTriangle) triangleBgColor = customTriangle;
+        
+        const customBar = hexToRgba(currentExhibitionConfig.exhibition_bar_color, currentExhibitionConfig.exhibition_bar_opacity);
+        if (customBar) bottomBarBgColor = customBar;
+    }
+    
+    // 1) Corner Triangle Tag (Fixed Mode Indicator) - Colors dynamically injected
     const exhibitionCornerTagHtml = isExhibition
-        ? `<div style="position: absolute; top: 0; left: 0; width: 44px; height: 44px; background: rgba(37, 99, 235, 0.85); clip-path: polygon(0 0, 100% 0, 0 100%); z-index: 9; pointer-events: none;">
+        ? `<div style="position: absolute; top: 0; left: 0; width: 44px; height: 44px; background: ${triangleBgColor}; clip-path: polygon(0 0, 100% 0, 0 100%); z-index: 9; pointer-events: none;">
                <span style="position: absolute; top: 5px; left: 6px; color: white; font-size: 12px; font-weight: 700; line-height: 1;">展</span>
            </div>`
         : '';
 
-    // 2) Exhibition Info Badge (Pill) - Maintained for backwards compatibility but visually de-emphasized
-    const exTopOffset = missingText ? '30px' : '8px';
-    const exhibitionBadgeHtml = isExhibition && lead.exhibition_name
-        ? `<span style="position: absolute; top: ${exTopOffset}; left: 8px; z-index: 8; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 999px; background: rgba(14, 165, 233, 0.05); color: rgba(3, 105, 161, 0.5); border: 1px solid rgba(14, 165, 233, 0.1); pointer-events: none; opacity: 0.3; transition: opacity 0.2s;">${safeHtml(lead.exhibition_name)}</span>`
-        : '';
-
-    // 3) Bottom Info Bar (Primary readable info) - Directly displaying normalized label stored in RAW Column R
+    // 2) Bottom Info Bar (Primary readable info) - Colors dynamically injected, displaying normalized label from RAW R
     const exhibitionBottomBarHtml = isExhibition && lead.exhibition_name
-        ? `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); color: white; font-size: 12px; font-weight: 500; letter-spacing: 0.3px; padding: 5px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 9; pointer-events: none; text-align: center;">${safeHtml(lead.exhibition_name)}</div>`
+        ? `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: ${bottomBarBgColor}; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); color: white; font-size: 12px; font-weight: 500; letter-spacing: 0.3px; padding: 5px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 9; pointer-events: none; text-align: center;">${safeHtml(lead.exhibition_name)}</div>`
         : '';
 
     return `
@@ -598,7 +625,6 @@ function createCardHTML(lead) {
             <div class="item-image" onclick='openPreview("${safe(lead.driveLink)}")' title="點擊看原圖" style="position: relative;">
                 ${exhibitionCornerTagHtml}
                 ${statusBadgeHtml}
-                ${exhibitionBadgeHtml}
                 ${exhibitionBottomBarHtml}
                 ${imageHtml}
             </div>

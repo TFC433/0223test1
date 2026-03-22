@@ -1,10 +1,11 @@
 /**
  * File: controllers/line-leads.controller.js
- * Version: 7.2.0 (Phase 8.4 Exhibition Enhancements)
+ * Version: 7.3.0 (Phase 8.6 Exhibition Theme Config Exposure)
  * Date: 2026-03-22
  * Changelog: 
+ * - [V7.3.0] Exposed 4 new exhibition theme config keys (triangle color/opacity, bar color/opacity) to the frontend via the getAllLeads response payload.
  * - [V7.2.0] Added minimal injection of SystemService into the Controller to expose Exhibition Configuration to the frontend.
- * - [Fix] Limited exposed config strictly to exhibition settings to prevent over-fetching or exposing unrelated system defaults.
+ * - [V7.1.4] Fix localhost bypass logic in getAllLeads to prevent 401 fallthrough.
  * LINE LIFF 潛在客戶控制器
  * @description Line-Leads L1→L2：移除 Controller 內 Token 驗證實作與 Writer 直接依賴，改由 AuthService + ContactService 承擔。
  * @contract 遵守契約 v1.0：DOM/API/localStorage 不變。
@@ -16,13 +17,13 @@ class LineLeadsController {
     /**
      * @param {ContactService} contactService 
      * @param {AuthService} authService 
-     * @param {SystemService} systemService - [Phase 8.4] Added to fetch Exhibition Config deterministically
+     * @param {SystemService} systemService - Injected to fetch Exhibition Config deterministically
      */
     constructor(contactService, authService, systemService) {
         this.contactService = contactService;
         this.authService = authService;
         
-        // Ensure deterministic access
+        // Ensure deterministic access for config exposure
         if (!systemService) {
             console.warn('[LineLeadsController] systemService not provided. Exhibition config will be skipped.');
         }
@@ -64,19 +65,27 @@ class LineLeadsController {
 
             const leads = await this.contactService.getPotentialContacts(3000);
 
-            // [Phase 8.4] Safely extract and expose strictly necessary Exhibition Config for the frontend
+            // 4. Extract and expose Exhibition Config for the frontend
             let exhibitionConfig = null;
             if (this.systemService) {
                 try {
                     const sysConfig = await this.systemService.getSystemConfig();
                     const exConfigRaw = sysConfig['展會設定'] || [];
                     
-                    // Reconstruct into a flat object for easy frontend consumption, discarding irrelevant fields
+                    // Reconstruct into a flat object for easy frontend consumption.
+                    // If keys are missing in the sheet, they safely default to undefined/empty.
                     exhibitionConfig = {
+                        // Core behavior and data rules
                         exhibition_enabled: (exConfigRaw.find(c => c.value === 'exhibition_enabled') || {}).note || 'false',
                         exhibition_name: (exConfigRaw.find(c => c.value === 'exhibition_name') || {}).note || '',
                         exhibition_start_date: (exConfigRaw.find(c => c.value === 'exhibition_start_date') || {}).note || '',
-                        exhibition_end_date: (exConfigRaw.find(c => c.value === 'exhibition_end_date') || {}).note || ''
+                        exhibition_end_date: (exConfigRaw.find(c => c.value === 'exhibition_end_date') || {}).note || '',
+                        
+                        // Dynamic UI Theming keys
+                        exhibition_triangle_color: (exConfigRaw.find(c => c.value === 'exhibition_triangle_color') || {}).note,
+                        exhibition_triangle_opacity: (exConfigRaw.find(c => c.value === 'exhibition_triangle_opacity') || {}).note,
+                        exhibition_bar_color: (exConfigRaw.find(c => c.value === 'exhibition_bar_color') || {}).note,
+                        exhibition_bar_opacity: (exConfigRaw.find(c => c.value === 'exhibition_bar_opacity') || {}).note
                     };
                 } catch (configErr) {
                     console.warn('[LineLeadsController] Failed to fetch exhibition config:', configErr.message);
@@ -87,7 +96,7 @@ class LineLeadsController {
             res.json({
                 success: true,
                 data: leads,
-                exhibitionConfig // Explicitly added to payload
+                exhibitionConfig // Safely pass config to UI layer
             });
 
         } catch (error) {
