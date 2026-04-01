@@ -1,8 +1,10 @@
 /**
  * File: controllers/line-leads.controller.js
- * Version: 7.3.0 (Phase 8.6 Exhibition Theme Config Exposure)
+ * Version: 7.4.0
  * Date: 2026-03-22
  * Changelog: 
+ * - [V7.4.0] Implemented backend ownership enforcement for updateLead and added deleteLead endpoint.
+ * - [V7.3.1] Restored CRM Whitelist authorization gate in getAllLeads and updateLead, and ensured authorization executes before data access.
  * - [V7.3.0] Exposed 4 new exhibition theme config keys (triangle color/opacity, bar color/opacity) to the frontend via the getAllLeads response payload.
  * - [V7.2.0] Added minimal injection of SystemService into the Controller to expose Exhibition Configuration to the frontend.
  * - [V7.1.4] Fix localhost bypass logic in getAllLeads to prevent 401 fallthrough.
@@ -58,18 +60,21 @@ class LineLeadsController {
                 }
             }
 
-            // 3. 執行業務邏輯
-            if (!this.contactService) {
-                throw new Error('ContactService not initialized in Controller');
-            }
-
-            const leads = await this.contactService.getPotentialContacts(3000);
-
-            // 4. Extract and expose Exhibition Config for the frontend
+            // 3. Extract and expose Exhibition Config & Whitelist Authorization Gate
             let exhibitionConfig = null;
             if (this.systemService) {
                 try {
                     const sysConfig = await this.systemService.getSystemConfig();
+
+                    // --- Whitelist Authorization Gate ---
+                    if (token !== 'TEST_LOCAL_TOKEN') {
+                        const whitelist = sysConfig['LINE白名單'] || [];
+                        const isAllowed = whitelist.some(w => w.value && w.value.trim() === user.sub);
+                        if (!isAllowed) {
+                            return res.status(403).json({ success: false, message: '未授權的帳號', yourUserId: user.sub });
+                        }
+                    }
+
                     const exConfigRaw = sysConfig['展會設定'] || [];
                     
                     // Reconstruct into a flat object for easy frontend consumption.
@@ -88,9 +93,16 @@ class LineLeadsController {
                         exhibition_bar_opacity: (exConfigRaw.find(c => c.value === 'exhibition_bar_opacity') || {}).note
                     };
                 } catch (configErr) {
-                    console.warn('[LineLeadsController] Failed to fetch exhibition config:', configErr.message);
+                    console.warn('[LineLeadsController] Failed to fetch system config:', configErr.message);
                 }
             }
+
+            // 4. 執行業務邏輯
+            if (!this.contactService) {
+                throw new Error('ContactService not initialized in Controller');
+            }
+
+            const leads = await this.contactService.getPotentialContacts(3000);
 
             // 包裹回傳格式以符合前端 result.success 檢查
             res.json({
@@ -113,13 +125,33 @@ class LineLeadsController {
             const token = authHeader && authHeader.split(' ')[1];
             if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
+            const rowIndex = parseInt(req.params.rowIndex);
+
             if (token !== 'TEST_LOCAL_TOKEN') {
                 const user = await this.authService.verifyLineIdToken(token);
                 if (!user) return res.status(401).json({ success: false, message: 'Invalid Token' });
+
+                // --- Whitelist Authorization Gate ---
+                if (this.systemService) {
+                    const sysConfig = await this.systemService.getSystemConfig();
+                    const whitelist = sysConfig['LINE白名單'] || [];
+                    const isAllowed = whitelist.some(w => w.value && w.value.trim() === user.sub);
+                    if (!isAllowed) {
+                        return res.status(403).json({ success: false, message: '未授權的帳號', yourUserId: user.sub });
+                    }
+                }
+
+                // --- Ownership Authorization Gate ---
+                const targetLead = await this.contactService.getPotentialContactByRow(rowIndex);
+                if (!targetLead) {
+                    return res.status(404).json({ success: false, message: '找不到該名片資料' });
+                }
+                if (targetLead.lineUserId !== user.sub) {
+                    return res.status(403).json({ success: false, message: '無權限修改他人的名片' });
+                }
             }
 
             // 2. 執行更新
-            const rowIndex = parseInt(req.params.rowIndex);
             const updateData = req.body;
 
             // ★ 行為等價：保持原本 modifier 規則（只看 body，否則 LineUser）
@@ -132,6 +164,52 @@ class LineLeadsController {
 
         } catch (error) {
             handleApiError(res, error, 'Update Lead');
+        }
+    };
+
+    // DELETE /api/line/leads/:rowIndex
+    deleteLead = async (req, res) => {
+        try {
+            const authHeader = req.headers['authorization'];
+            const token = authHeader && authHeader.split(' ')[1];
+            if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+            const rowIndex = parseInt(req.params.rowIndex);
+            let modifier = 'LineUser';
+
+            if (token !== 'TEST_LOCAL_TOKEN') {
+                const user = await this.authService.verifyLineIdToken(token);
+                if (!user) return res.status(401).json({ success: false, message: 'Invalid Token' });
+
+                // --- Whitelist Authorization Gate ---
+                if (this.systemService) {
+                    const sysConfig = await this.systemService.getSystemConfig();
+                    const whitelist = sysConfig['LINE白名單'] || [];
+                    const isAllowed = whitelist.some(w => w.value && w.value.trim() === user.sub);
+                    if (!isAllowed) {
+                        return res.status(403).json({ success: false, message: '未授權的帳號', yourUserId: user.sub });
+                    }
+                }
+
+                // --- Ownership Authorization Gate ---
+                const targetLead = await this.contactService.getPotentialContactByRow(rowIndex);
+                if (!targetLead) {
+                    return res.status(404).json({ success: false, message: '找不到該名片資料' });
+                }
+                if (targetLead.lineUserId !== user.sub) {
+                    return res.status(403).json({ success: false, message: '無權限刪除他人的名片' });
+                }
+                
+                modifier = user.sub;
+            } else {
+                modifier = 'TEST_LOCAL_USER';
+            }
+
+            await this.contactService.deletePotentialContact(rowIndex, modifier);
+            res.json({ success: true, message: '刪除成功' });
+
+        } catch (error) {
+            handleApiError(res, error, 'Delete Lead');
         }
     };
 }

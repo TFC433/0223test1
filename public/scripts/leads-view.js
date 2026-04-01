@@ -1,7 +1,8 @@
 // File: public/scripts/leads-view.js
-// Version: 16.9.0
+// Version: 16.10.0
 // Date: 2026-03-22
 // Changelog: 
+//   - V16.10.0 Delete Feature: Added handleDeleteSubmit and delete button visibility toggling based on card ownership.
 //   - V16.9.0 Exhibition UI Cleanup: Surgically removed the legacy exhibition badge (pill) to eliminate visual clutter and ghosting. The visual system now strictly relies on the Corner Triangle (mode) and Bottom Info Bar (information) without redundancy.
 //   - V16.8.0 Exhibition UI Theming: Added dynamic color and opacity injection from System Config for the exhibition corner triangle and bottom info bar. Implemented robust hexToRgba helper and safe fallbacks to guarantee UI stability.
 //   - V16.7.0 Exhibition Display Normalization: Stopped frontend date reconstruction for exhibition labels. The bottom info bar now purely renders the pre-formatted label from RAW column R, ensuring future/historical data integrity and multi-exhibition support without drift.
@@ -268,6 +269,9 @@ function bindEvents() {
 
     const editForm = document.getElementById('edit-form');
     if (editForm) editForm.onsubmit = handleEditSubmit;
+
+    const deleteBtn = document.getElementById('delete-lead-btn');
+    if (deleteBtn) deleteBtn.onclick = handleDeleteSubmit;
 }
 
 async function getValidIdToken() {
@@ -362,11 +366,11 @@ function renderExhibitionBanner() {
     bannerEl.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
             <div style="font-weight: 600; color: #0f172a; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px;">
-                📢 ${exName} 展示會期間中（${startMD} - ${endMD}）
+                📢 ${exName} 期間（${startMD} - ${endMD}）
             </div>
             <div style="flex-shrink: 0;">
                 <span id="inline-exhibition-toggle" style="color: #0284c7; cursor: pointer; font-weight: 600; font-size: 0.8rem; padding: 4px 8px; border-radius: 4px; transition: background 0.2s;">
-                    只看本展會
+                    EXPO名片
                 </span>
             </div>
         </div>
@@ -406,7 +410,7 @@ function updateExhibitionInlineToggle(count) {
         toggleBtn.textContent = `顯示全部`;
         toggleBtn.style.backgroundColor = '#e0f2fe'; // subtle active state
     } else {
-        toggleBtn.textContent = `只看本展會`;
+        toggleBtn.textContent = `EXPO名片`;
         toggleBtn.style.backgroundColor = 'transparent';
     }
 }
@@ -736,6 +740,16 @@ function openEdit(lead) {
         }
     }
 
+    const isLocalDev = (currentUser.userId === 'TEST_LOCAL_USER');
+    const isMine = (lead.lineUserId === currentUser.userId);
+    const showDeleteBtn = isLocalDev || isMine;
+    
+    const deleteBtn = document.getElementById('delete-lead-btn');
+    if (deleteBtn) {
+        deleteBtn.style.display = showDeleteBtn ? 'block' : 'none';
+        deleteBtn.dataset.rowIndex = lead.rowIndex;
+    }
+
     modal.style.display = 'block';
 }
 
@@ -816,5 +830,73 @@ async function handleEditSubmit(e) {
     } finally {
         btn.disabled = false;
         btn.textContent = originalText;
+    }
+}
+
+async function handleDeleteSubmit(e) {
+    const rowIndex = e.target.dataset.rowIndex;
+    if (!rowIndex) return;
+
+    if (!window.confirm('確定要刪除這張名片嗎？此動作無法復原。')) {
+        return;
+    }
+
+    const deleteBtn = e.target;
+    const saveBtn = document.querySelector('#edit-form button[type="submit"]');
+    const originalDeleteText = deleteBtn.textContent;
+    
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = '刪除中...';
+    if (saveBtn) saveBtn.disabled = true;
+
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+
+        if (currentUser.userId === 'TEST_LOCAL_USER') {
+            headers['Authorization'] = 'Bearer TEST_LOCAL_TOKEN';
+        } else {
+            const idToken = await getValidIdToken();
+            if (!idToken) {
+                console.warn('[Auth] Missing token, skip request.');
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = originalDeleteText;
+                if (saveBtn) saveBtn.disabled = false;
+                return;
+            }
+            headers['Authorization'] = `Bearer ${idToken}`;
+        }
+
+        const res = await fetch(`/api/line/leads/${rowIndex}`, {
+            method: 'DELETE',
+            headers: headers
+        });
+
+        if (res.status === 401) {
+            document.getElementById('edit-modal').style.display = 'none';
+            showAuthFailedFallback();
+            return;
+        }
+
+        if (res.status === 403 || res.status === 404) {
+            const errData = await res.json();
+            alert(errData.message || '您沒有權限執行此操作');
+            return;
+        }
+
+        const result = await res.json();
+        
+        if (result.success) {
+            alert('刪除成功！');
+            document.getElementById('edit-modal').style.display = 'none';
+            loadLeadsData();
+        } else {
+            alert('刪除失敗: ' + (result.message || result.error));
+        }
+    } catch (e) {
+        alert('網路錯誤');
+    } finally {
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = originalDeleteText;
+        if (saveBtn) saveBtn.disabled = false;
     }
 }

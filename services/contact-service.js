@@ -1,9 +1,11 @@
 /**
  * services/contact-service.js
  * 聯絡人業務邏輯服務層
- * @version 8.11.0 (Phase 8.5 Exhibition Data Normalization)
- * @date 2026-03-22
+ * @version 8.13.0
+ * @date 2026-03-23
  * @changelog
+ * - [PHASE 8.13] Extracted _applyExhibitionAutoTag helper for shared exhibition logic. Added lazy auto-tag and write-back to getPotentialContacts to ensure unclassified RAW leads get tagged seamlessly during list hydration without breaking tri-state protection.
+ * - [PHASE 8.9] Added getPotentialContactByRow helper for secure backend ownership validation.
  * - [PHASE 8.5] Normalized exhibition data display: Auto-tag fallback now explicitly formats the exhibition_name with its date range suffix before saving to the RAW sheet (Column R). This guarantees historical data integrity for past exhibitions.
  * - [PHASE 8.3] Added safe defensive fallback evaluation for is_exhibition logic inside updatePotentialContact. System Service injection is explicitly required in constructor to ensure deterministic config retrieval.
  * - [PHASE 8.2] Added explicit cache invalidation to deletePotentialContact to fix frontend stale data.
@@ -49,6 +51,45 @@ class ContactService {
     // ============================================================
     // INTERNAL HELPERS (READ MAPPING)
     // ============================================================
+
+    // [Minimal Diff Helper] 共用的 Auto-Tag 判定器，確保 Tri-state 安全
+    _applyExhibitionAutoTag(target, sysConfig) {
+        if (target.is_exhibition != null && target.is_exhibition !== undefined && target.is_exhibition !== '') {
+            return false; // 保留明確的 true 或 false
+        }
+        const exConfig = sysConfig['展會設定'] || [];
+        const isEnabled = String((exConfig.find(c => c.value === 'exhibition_enabled') || {}).note).toUpperCase() === 'TRUE';
+        if (!isEnabled) return false;
+
+        const startStr = (exConfig.find(c => c.value === 'exhibition_start_date') || {}).note;
+        const endStr = (exConfig.find(c => c.value === 'exhibition_end_date') || {}).note;
+        const exName = (exConfig.find(c => c.value === 'exhibition_name') || {}).note || '';
+
+        if (startStr && endStr && target.createdTime) {
+            const createdDate = new Date(target.createdTime);
+            const startDate = new Date(startStr);
+            const endDate = new Date(endStr);
+            endDate.setHours(23, 59, 59, 999); // Safe bounding inclusion
+
+            if (!isNaN(createdDate.getTime()) && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+                if (createdDate >= startDate && createdDate <= endDate) {
+                    const startParts = startStr.split('-');
+                    const endParts = endStr.split('-');
+                    let formattedExName = exName;
+
+                    if (startParts.length === 3 && endParts.length === 3) {
+                        const suffix = `（${parseInt(startParts[1], 10)}/${parseInt(startParts[2], 10)}–${parseInt(endParts[1], 10)}/${parseInt(endParts[2], 10)}）`;
+                        formattedExName = `${exName}${suffix}`;
+                    }
+
+                    target.is_exhibition = true;
+                    target.exhibition_name = formattedExName;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     _normalizeKey(str = '') {
         return String(str).toLowerCase().trim();
@@ -159,6 +200,27 @@ class ContactService {
         });
 
         if (limit > 0) contacts = contacts.slice(0, limit);
+
+        // =========================================================
+        // [LAZY AUTO-TAG & WRITE-BACK]
+        // =========================================================
+        try {
+            const sysConfig = await this.systemService.getSystemConfig();
+            let hasUpdates = false;
+            for (let c of contacts) {
+                if (this._applyExhibitionAutoTag(c, sysConfig)) {
+                    await this.contactWriter.writePotentialContactRow(c.rowIndex, c);
+                    hasUpdates = true;
+                }
+            }
+            if (hasUpdates && this.contactRawReader.invalidateCache) {
+                this.contactRawReader.invalidateCache('contacts');
+            }
+        } catch (error) {
+            console.warn('[ContactService] Lazy auto-tag failed safely:', error.message);
+        }
+        // =========================================================
+
         return contacts;
     }
 
@@ -343,6 +405,12 @@ class ContactService {
     // RAW CONTACT ZONE (POTENTIAL CONTACTS - SHEET ONLY)
     // ============================================================
 
+    async getPotentialContactByRow(rowIndex) {
+        if (!this.contactRawReader) throw new Error('[ContactService] contactRawReader not configured');
+        const allContacts = await this.contactRawReader.getContacts();
+        return allContacts.find(c => c.rowIndex === parseInt(rowIndex, 10)) || null;
+    }
+
     async updatePotentialContact(rowIndex, updateData, modifier) {
         try {
             if (!this.contactRawReader) throw new Error('[ContactService] contactRawReader not configured');
@@ -358,50 +426,17 @@ class ContactService {
             // STRICT EVALUATION: Only execute when target.is_exhibition lacks a true/false state.
             // Builds the final normalized display string (Name + Date suffix) and commits it to RAW R.
             // =========================================================
-            if (target.is_exhibition == null || target.is_exhibition === undefined || target.is_exhibition === '') {
-                try {
-                    const sysConfig = await this.systemService.getSystemConfig();
-                    const exConfig = sysConfig['展會設定'] || [];
-                    
-                    const enabledStr = (exConfig.find(c => c.value === 'exhibition_enabled') || {}).note || 'false';
-                    const isEnabled = String(enabledStr).toUpperCase() === 'TRUE';
-
-                    if (isEnabled) {
-                        const exName = (exConfig.find(c => c.value === 'exhibition_name') || {}).note || '';
-                        const startStr = (exConfig.find(c => c.value === 'exhibition_start_date') || {}).note;
-                        const endStr = (exConfig.find(c => c.value === 'exhibition_end_date') || {}).note;
-
-                        if (startStr && endStr && target.createdTime) {
-                            const createdDate = new Date(target.createdTime);
-                            const startDate = new Date(startStr);
-                            const endDate = new Date(endStr);
-                            endDate.setHours(23, 59, 59, 999); // Safe bounding inclusion
-
-                            // Proceed strictly if date parsing results in valid objects
-                            if (!isNaN(createdDate.getTime()) && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-                                if (createdDate >= startDate && createdDate <= endDate) {
-                                    
-                                    // Parse config strings safely by splitting to avoid timezone drift on output
-                                    const startParts = startStr.split('-');
-                                    const endParts = endStr.split('-');
-                                    let formattedExName = exName;
-
-                                    if (startParts.length === 3 && endParts.length === 3) {
-                                        const suffix = `（${parseInt(startParts[1], 10)}/${parseInt(startParts[2], 10)}–${parseInt(endParts[1], 10)}/${parseInt(endParts[2], 10)}）`;
-                                        formattedExName = `${exName}${suffix}`;
-                                    }
-
-                                    mergedData.is_exhibition = true;
-                                    mergedData.exhibition_name = formattedExName; // Raw R now stores the final display label
-                                }
-                            }
-                        }
-                    }
-                } catch (configError) {
-                    console.warn('[ContactService] Fallback auto-tag skipped safely due to error:', configError.message);
-                }
+            try {
+                const sysConfig = await this.systemService.getSystemConfig();
+                this._applyExhibitionAutoTag(mergedData, sysConfig);
+            } catch (configError) {
+                console.warn('[ContactService] Fallback auto-tag skipped safely due to error:', configError.message);
             }
             // =========================================================
+
+            if (mergedData.is_exhibition === false) {
+                mergedData.exhibition_name = '';
+            }
 
             if (updateData.notes) {
                 const oldNotes = target.notes || '';
