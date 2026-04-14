@@ -1,15 +1,16 @@
+// public/scripts/events/event-editor-standalone.js
 /**
  * @version Phase 8.10 Final Stable
- * @date 2026-03-12
+ * @date 2026-04-14
  * @purpose Phase 8 Production：修正儲存 UX（成功提示＋關閉編輯器＋避免強制回到 Dashboard／router 迴圈）+ Mutation Stale Integration
+ * @description [Bugfix Patch] Unified close paths and removed divergent HTML scroll lock to prevent UI freeze on Cancel/ESC.
  */
 
-// public/scripts/events/event-editor-standalone.js
 // 職責：獨立的事件編輯器控制器 (含 DT Placeholders)
 // (Refactored: Fix Zero-Dimension Trap via ResizeObserver - Loop Safe)
 
 // [Forensics Probe] Debug Counter
-console.log('%c[EventEditorStandalone] LOADED Phase 8.10 Final Stable Production 2026-03-12', 'color:#22c55e;font-weight:bold;');
+console.log('%c[EventEditorStandalone] LOADED Phase 8.10 Final Stable Production 2026-03-12 (Patched)', 'color:#22c55e;font-weight:bold;');
 
 window._DEBUG_EDITOR_OPEN_COUNT ||= 0;
 
@@ -26,7 +27,7 @@ const EventEditorStandalone = (() => {
     
     // [Fix] State flags for scroll lock and re-entry guard
     let _isOpening = false;
-    let _originalOverflow = { body: '', html: '' };
+    let _originalOverflow = { body: '' }; // Removed html overflow state to prevent divergent lock freeze
 
     // [Fix] Prevent double-submit
     let _isSaving = false;
@@ -136,17 +137,14 @@ const EventEditorStandalone = (() => {
         element.style.height = element.scrollHeight + 'px';
     }
 
-    // [Fix] Scroll locking helpers
+    // [Fix] Scroll locking helpers (Aligned with global ui.js to prevent freeze)
     function _lockScroll() {
         _originalOverflow.body = document.body.style.overflow;
-        _originalOverflow.html = document.documentElement.style.overflow;
         document.body.style.overflow = 'hidden';
-        document.documentElement.style.overflow = 'hidden';
     }
 
     function _unlockScroll() {
         document.body.style.overflow = _originalOverflow.body;
-        document.documentElement.style.overflow = _originalOverflow.html;
     }
 
     async function open(eventId) {
@@ -602,6 +600,7 @@ const EventEditorStandalone = (() => {
 
     return {
         open: open,
+        close: _close,
         selectType: selectType,
         toggleItem: toggleItem
     };

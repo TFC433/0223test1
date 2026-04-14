@@ -129,7 +129,7 @@
         <div class="modal-footer" style="flex-shrink: 0; background: #ffffff; padding: 16px 32px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
             <button type="button" class="action-btn danger ghost" id="standalone-delete-btn" style="display: none;">🗑️ 刪除事件</button>
             <div style="margin-left: auto; display: flex; gap: 12px;">
-                <button type="button" class="action-btn secondary" onclick="closeModal('standalone-event-modal')" style="min-width: 100px;">取消</button>
+                <button type="button" class="action-btn secondary" onclick="EventEditorStandalone.close()" style="min-width: 100px;">取消</button>
                 <button type="button" class="action-btn primary" id="standalone-submit-btn" onclick="document.getElementById('standalone-event-form').dispatchEvent(new Event('submit', {cancelable: true}))" style="min-width: 120px; box-shadow: 0 4px 6px rgba(79, 141, 247, 0.2);">儲存</button>
             </div>
         </div>

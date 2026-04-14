@@ -2,9 +2,9 @@
 // 職責：渲染並管理「事件紀錄」頁面的主列表 (含搜尋、篩選、統計、圖示化操作)
 // (Systematic Refactor: Event Delegation - 統一事件處理機制)
 /**
- * @version 1.0.13
- * @date 2026-03-17
- * @description [UI Alignment Patch] Removed hardcoded margin-top: 24px from event-list-root to fix double-gap layout issue and align with Opportunity page layout contract.
+ * @version 1.0.15
+ * @date 2026-04-14
+ * @description [Interaction Alignment Patch] Switched Event Name click action from edit-event to view-report to enforce observation-first flow.
  */
 
 // 模組內部狀態
@@ -168,8 +168,30 @@ function handleEventListClick(e) {
             break;
             
         case 'delete-event':
-             if (window.EventEditorStandalone && window.EventEditorStandalone.open) {
-                window.EventEditorStandalone.open(payload.id);
+            if (typeof showConfirmDialog === 'function') {
+                const safeName = payload.name || '此事件';
+                const message = `您確定要永久刪除事件 "${safeName}" 嗎？\n\n此操作無法復原，但系統會留下一筆刪除互動紀錄。`;
+                showConfirmDialog(message, async () => {
+                    if (typeof showLoading === 'function') showLoading('正在刪除...');
+                    try {
+                        const result = await authedFetch(`/api/events/${payload.id}`, { method: 'DELETE' });
+                        if (result && result.success !== false) {
+                            // 刪除成功後重新載入列表
+                            if (window.CRM_APP && window.CRM_APP.pageModules.events) {
+                                window.CRM_APP.pageModules.events();
+                            }
+                        } else {
+                            throw new Error(result.details || '刪除操作失敗');
+                        }
+                    } catch (error) {
+                        if (error.message !== 'Unauthorized') console.error('刪除失敗:', error);
+                        if (typeof showNotification === 'function') showNotification('刪除失敗', 'error');
+                    } finally {
+                        if (typeof hideLoading === 'function') hideLoading();
+                    }
+                });
+            } else {
+                console.warn('showConfirmDialog is not defined');
             }
             break;
 
@@ -260,24 +282,18 @@ function _filterAndRenderEvents() {
 
         if (event.opportunityId) {
             objTagHtml = `<span class="common-chip" style="background-color: #3b82f6;">機會</span>`;
-            const params = JSON.stringify({ opportunityId: event.opportunityId }).replace(/"/g, '&quot;');
-            objNameHtml = `<a href="#" class="text-link text-truncate" title="${event.opportunityName || event.opportunityId}" 
-                            data-action="navigate" 
-                            data-page="opportunity-details" 
-                            data-params="${params}">
+            objNameHtml = `<span class="text-truncate" title="${event.opportunityName || event.opportunityId}" style="color:var(--text-secondary);">
                             ${event.opportunityName || '(未命名)'}
-                           </a>`;
+                           </span>`;
         } else if (event.companyName || event.companyId) {
             const cName = event.companyName || event.companyId;
             objTagHtml = `<span class="common-chip" style="background-color: #6b7280;">公司</span>`;
-            const params = JSON.stringify({ companyName: encodeURIComponent(cName) }).replace(/"/g, '&quot;');
-            objNameHtml = `<a href="#" class="text-link text-truncate" title="${cName}" 
-                            data-action="navigate" 
-                            data-page="company-details" 
-                            data-params="${params}">
+            objNameHtml = `<span class="text-truncate" title="${cName}" style="color:var(--text-secondary);">
                             ${cName}
-                           </a>`;
+                           </span>`;
         }
+        
+        const safeEvtName = (event.eventName || '').replace(/"/g, '&quot;');
 
         html += `
             <tr>
@@ -285,28 +301,22 @@ function _filterAndRenderEvents() {
                 <td class="col-date">${dateStr}</td>
                 <td class="col-type">${typeHtml}</td>
                 <td class="col-name">
-                    <span class="text-truncate" title="${event.eventName || '(未命名)'}">${event.eventName || '(未命名)'}</span>
+                    <a href="#" class="text-link text-truncate" title="${safeEvtName}" 
+                       data-action="view-report" 
+                       data-id="${event.eventId}">
+                        <strong>${event.eventName || '(未命名)'}</strong>
+                    </a>
                 </td>
                 <td class="col-obj-tag">${objTagHtml}</td>
                 <td class="col-obj-name">${objNameHtml}</td>
                 <td class="col-user" title="${event.creator}">${event.creator}</td>
                 <td class="col-actions">
                     <div style="display: flex; justify-content: center; align-items: center; gap: 4px;">
-                        <button class="btn-mini-view" title="查看完整報告" 
-                                data-action="view-report" 
-                                data-id="${event.eventId}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                <circle cx="12" cy="12" r="3"></circle>
-                            </svg>
-                        </button>
-                        <button class="btn-mini-view" title="編輯" 
-                                data-action="edit-event" 
-                                data-id="${event.eventId}">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                            </svg>
+                        <button class="btn-mini-delete" title="刪除事件" 
+                                data-action="delete-event" 
+                                data-id="${event.eventId}"
+                                data-name="${safeEvtName}">
+                            <svg style="width:18px;height:18px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2-2v2"></path></svg>
                         </button>
                     </div>
                 </td>
@@ -442,6 +452,24 @@ function _injectEventListStyles() {
         .btn-mini-view:hover {
             color: var(--accent-blue);
             background: #e0f2fe; 
+        }
+
+        /* 刪除按鈕樣式 */
+        .btn-mini-delete { 
+            background: none; 
+            border: none; 
+            color: #9ca3af; 
+            cursor: pointer; 
+            padding: 6px; 
+            border-radius: 4px; 
+            transition: all 0.2s; 
+            display: inline-flex; 
+            align-items: center; 
+            justify-content: center; 
+        }
+        .btn-mini-delete:hover { 
+            color: #ef4444; 
+            background: #fee2e2; 
         }
     `;
     document.head.appendChild(style);
