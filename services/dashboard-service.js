@@ -4,9 +4,10 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version v1.1.0 Dashboard Parallel Fetch Optimization
- * @date 2026-03-12
+ * @version v1.1.1 Dashboard RAW Contact KPI Patch
+ * @date 2026-04-14
  * @changelog
+ * - [PATCH] Fixed "潛在客戶數量" KPI to use RAW contacts (Google Sheets) via contactRawReader instead of CORE (SQL), maintaining minimal diff and performance.
  * - [PERF] Parallelized dashboard data fetch groups (Batch1, Batch2, Batch3, Weekly) to reduce first-load latency.
  * - [PERF] Eliminated full contacts table hydration from dashboard flow.
  * - [PERF] Introduced O(1) latestInteractionMap lookup to replace nested interaction scans.
@@ -127,10 +128,14 @@ class DashboardService {
             ]);
         })();
 
-        // --- Batch 3: SQL Aggregation Stats ---
-        // Responsibilities: Offload heavy COUNT/GROUP BY operations to the SQL layer (Contacts, Opportunities, EventLogs).
+        // --- Batch 3: SQL Aggregation Stats & RAW Contacts ---
+        // Responsibilities: Offload heavy COUNT/GROUP BY operations to the SQL layer (Opportunities, EventLogs). Fetch RAW Contacts directly.
         const batch3Promise = (async () => {
-            const contactStatsPromise = this.contactSqlReader.getContactStats(startOfMonth);
+            // [PATCH] Fetch RAW Contacts for the "潛在客戶數量" KPI safely
+            const rawContactsPromise = (this.contactService && this.contactService.contactRawReader)
+                ? this.contactService.contactRawReader.getContacts()
+                : Promise.resolve([]);
+                
             const opportunityStatsPromise = this.opportunitySqlReader.getOpportunityStats(startOfMonth);
             const eventStatsPromise = this.eventLogSqlReader.getEventLogStats(startOfMonth);
 
@@ -151,12 +156,33 @@ class DashboardService {
                 ? this.companySqlReader.getTargetCompanyEventActivities(targetCompanyIds)
                 : Promise.resolve([]);
 
-            return await Promise.all([
-                contactStatsPromise,
+            const [rawContacts, opportunityStats, eventStats, eventActivities] = await Promise.all([
+                rawContactsPromise,
                 opportunityStatsPromise,
                 eventStatsPromise,
                 eventActivityPromise
             ]);
+
+            // [PATCH] Calculate contactStats using RAW Potential Contacts
+            let rawTotal = 0;
+            let rawMonth = 0;
+            rawContacts.forEach(c => {
+                if (c.name || c.company) {
+                    rawTotal++;
+                    const ts = new Date(c.createdTime).getTime();
+                    if (!isNaN(ts) && ts >= startOfMonth.getTime()) {
+                        rawMonth++;
+                    }
+                }
+            });
+            const contactStats = { total: rawTotal, month: rawMonth };
+
+            return [
+                contactStats,
+                opportunityStats,
+                eventStats,
+                eventActivities
+            ];
         })();
 
         // --- Weekly Details: Weekly Business Data Integration ---
