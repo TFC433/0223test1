@@ -1,12 +1,26 @@
 /*
  * Project: TFC CRM
  * File: public/scripts/opportunities/details/opportunity-interactions.js
- * Version: v8.0.7 (Phase 8.10.3 - UTC Naive Display Fix)
- * Date: 2026-03-12
+ * Version: v8.0.22 (Phase 8.10.18 - Timeline Stabilization & CSS Polish)
+ * Date: 2026-04-14
  * Changelog: 
  * - Phase 8 Interaction UI: operation-key rowIndex -> interactionId for edit/delete
  * - Phase 8.10.2 Fix: Relaxed strict result.success check to prevent unreachable markStale on 204/raw responses
  * - Phase 8.10.3 Fix: Appended 'Z' to naive UTC ISO strings during showForEditing to prevent 8-hour offset loss.
+ * - Phase 8.10.4 Patch: Restore legacy clickable event report links inside contentSummary.
+ * - Phase 8.10.5 Fix: Restored mandatory timeline-card structure (crm-timeline-item) and left/right layout.
+ * - Phase 8.10.6 Fix: Aligned left/right with eventType (not index), fixed Event Report placement.
+ * - Phase 8.10.7 Patch: Fixed timeline geometry (absolute marker on center line), dynamic config-driven left/right logic, and adjusted card information hierarchy.
+ * - Phase 8.10.8 Fix: Migrated left/right layout to strictly use '時間軸佈局' config source, solidified geometry and information hierarchy.
+ * - Phase 8.10.9 Polish: Converted timeline to fixed-height scrollable workspace, styled right form as a contained panel, refined typography, and removed expand/collapse.
+ * - Phase 8.10.10 Patch: Micro fix to ensure timeline vertical line always spans the full dynamic height of rendered items.
+ * - Phase 8.10.11 Patch: Micro fix to wrap all timeline items in .interaction-timeline to ensure vertical line anchoring.
+ * - Phase 8.10.12 Patch: Micro fix to restore correct render targets (#discussion-timeline, #activity-log-timeline).
+ * - Phase 8.10.13 Patch: Reverted wrapper injection and moved ::before line logic directly to #discussion-timeline and #activity-log-timeline to fix double line issue.
+ * - Phase 8.10.15 Patch: Critical structural visual fix. Forced height: auto !important on timeline containers to override external height locks.
+ * - Phase 8.10.16 Patch: Final structural ownership fix. Introduced .crm-timeline-content wrapper to guarantee vertical line accurately follows true rendered item height without viewport clamping.
+ * - Phase 8.10.17 Patch: Precision fix to remove stale SPA CSS injections and guarantee only one consistent timeline center line exists.
+ * - Phase 8.10.18 Polish: Stabilized box-sizing, content overflow wrapping, and added strict SPA bleed protection for timeline line ownership.
  */
 // public/scripts/opportunities/details/opportunity-interactions.js
 // 職責：專門管理「互動與新增」頁籤的所有 UI 與功能
@@ -50,8 +64,31 @@ const OpportunityInteractions = (() => {
     }
 
     /**
+     * 【鑑識修補】動態取得 Left/Right 排版屬性
+     * Source: window.CRM_APP.systemConfig['時間軸佈局']
+     * Rule: 設定項目 (value) === eventType -> Extract 備註 (note)
+     */
+    function getTimelineSide(eventType) {
+        if (window.CRM_APP && window.CRM_APP.systemConfig && window.CRM_APP.systemConfig['時間軸佈局']) {
+            const layoutConfigs = window.CRM_APP.systemConfig['時間軸佈局'];
+            
+            // Exact match: 設定項目 (config.value) === eventType
+            const config = layoutConfigs.find(c => c.value === eventType);
+            if (config && config.note) {
+                const side = config.note.trim().toLowerCase();
+                if (side === 'left' || side === 'right') {
+                    return side;
+                }
+            }
+        }
+        
+        // Strict fallback only if config missing or invalid
+        return 'right';
+    }
+
+    /**
      * 【鑑識修補】渲染單一互動項目
-     * 使用已被 dashboard_widgets.js 證實使用的 class: .activity-feed-item/.feed-content/.feed-text/.feed-time
+     * 遵守 timeline-card UI doctrine (crm-timeline-item, crm-timeline-card, left/right layout)
      * 並維持 Strategy A：rowIndex 非有效數字則不渲染刪除按鈕
      */
     function renderSingleInteractionItem(interaction) {
@@ -66,7 +103,14 @@ const OpportunityInteractions = (() => {
         const recorder = escapeHtml(interaction.recorder || '系統');
 
         const rawSummary = interaction.contentSummary || '(無內容)';
-        const summaryHtml = escapeHtml(rawSummary).replace(/\n/g, '<br>');
+        let summaryHtml = escapeHtml(rawSummary).replace(/\n/g, '<br>');
+
+        // [Phase 8 Patch] Restore legacy clickable event report links inside contentSummary
+        const linkRegex = /\[(.*?)\]\(event_log_id=([a-zA-Z0-9_-]+)\)/g;
+        summaryHtml = summaryHtml.replace(linkRegex, (fullMatch, text, eventId) => {
+            const safeEventId = eventId.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            return `<a href="#" class="text-link" onclick="event.preventDefault(); showEventLogReport('${safeEventId}')">${text}</a>`;
+        });
 
         const rowId = interaction.interactionId;
         const rowIndex = interaction.rowIndex;
@@ -94,18 +138,26 @@ const OpportunityInteractions = (() => {
             }
         }
 
+        // Configuration driven layout from '時間軸佈局'
+        const alignClass = getTimelineSide(interaction.eventType);
+
+        // Corrected Information Hierarchy
         return `
-            <div class="activity-feed-item">
-                <div class="feed-content">
-                    <div class="feed-text">
-                        <strong>${recorder}</strong> - <strong>${typeStr}</strong>
-                        <span class="feed-time"> (${escapeHtml(timeStr)})</span>
+            <div class="crm-timeline-item ${alignClass}">
+                <div class="crm-timeline-marker"></div>
+                <div class="crm-timeline-card">
+                    <div class="card-header">
+                        <strong>${typeStr}</strong>
+                        <span class="feed-time">${escapeHtml(timeStr)}</span>
                     </div>
-                    <div class="feed-text">
+                    <div class="card-body">
                         ${summaryHtml}
                     </div>
-                    <div class="feed-text">
-                        ${buttonsHtml}
+                    <div class="card-footer">
+                        <div class="footer-meta">紀錄: ${recorder}</div>
+                        <div class="footer-actions">
+                            ${buttonsHtml}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -116,9 +168,8 @@ const OpportunityInteractions = (() => {
      * 渲染一個時間軸列表
      * @param {string} containerSelector - e.g. '#discussion-timeline'
      * @param {Array<object>} interactions
-     * @param {number} limit
      */
-    function _renderTimelineList(containerSelector, interactions, limit = 3) {
+    function _renderTimelineList(containerSelector, interactions) {
         const historyList = _container.querySelector(containerSelector);
         if (!historyList) {
             console.error(`[Interactions] 找不到時間軸容器: ${containerSelector}`);
@@ -127,7 +178,6 @@ const OpportunityInteractions = (() => {
 
         const allInteractions = Array.isArray(interactions) ? interactions : [];
         if (allInteractions.length === 0) {
-            // ✅ [Fix] 移除 inline style（維持最小例外）
             historyList.innerHTML = `
                 <div class="alert alert-info">
                     ${containerSelector.includes('discussion') ? '尚無動態' : '尚無系統活動'}
@@ -136,37 +186,15 @@ const OpportunityInteractions = (() => {
             return;
         }
 
-        const isExpanded = historyList.classList.contains('is-expanded');
-        const interactionsToRender = isExpanded ? allInteractions : allInteractions.slice(0, limit);
+        // [Polish] Removed limit and expand/collapse. Render entire list in scrollable workspace.
+        let listHtml = allInteractions.map(renderSingleInteractionItem).join('');
 
-        let listHtml = interactionsToRender.map(renderSingleInteractionItem).join('');
-
-        if (allInteractions.length > limit) {
-            const buttonText = isExpanded
-                ? '收合紀錄'
-                : `顯示其餘 ${allInteractions.length - limit} 筆紀錄`;
-
-            listHtml += `
-                <div class="interaction-timeline-toggle">
-                    <button class="action-btn secondary" onclick="OpportunityInteractions.toggleListExpanded('${containerSelector}', ${!isExpanded})">
-                        ${buttonText}
-                    </button>
-                </div>
-            `;
-        }
-
-        historyList.innerHTML = listHtml;
-    }
-
-    /**
-     * 公開：切換特定列表展開/收合
-     */
-    function toggleListExpanded(containerSelector, expand) {
-        const historyList = _container.querySelector(containerSelector);
-        if (historyList) {
-            historyList.classList.toggle('is-expanded', !!expand);
-            _updateTimelineView();
-        }
+        // Structural visual fix: Bind the center line dynamically to the true rendered content
+        historyList.innerHTML = `
+            <div class="crm-timeline-content">
+                ${listHtml}
+            </div>
+        `;
     }
 
     /**
@@ -179,7 +207,9 @@ const OpportunityInteractions = (() => {
         const activityLogInteractions = [];
 
         _interactions.forEach(interaction => {
-            if (SYSTEM_GENERATED_TYPES.includes(interaction.eventType)) {
+            // [Fix] Placement Rule: Only pure '系統事件' remains in activity-log. 
+            // '事件報告' (Event Reports) are explicitly treated as discussions.
+            if (interaction.eventType === '系統事件') {
                 activityLogInteractions.push(interaction);
             } else {
                 discussionInteractions.push(interaction);
@@ -190,8 +220,8 @@ const OpportunityInteractions = (() => {
         // discussionInteractions.sort((a, b) => new Date(b.interactionTime || b.createdTime || 0) - new Date(a.interactionTime || a.createdTime || 0));
         // activityLogInteractions.sort((a, b) => new Date(b.interactionTime || b.createdTime || 0) - new Date(a.interactionTime || a.createdTime || 0));
 
-        _renderTimelineList('#discussion-timeline', discussionInteractions, 5);
-        _renderTimelineList('#activity-log-timeline', activityLogInteractions, 3);
+        _renderTimelineList('#discussion-timeline', discussionInteractions);
+        _renderTimelineList('#activity-log-timeline', activityLogInteractions);
     }
 
     /**
@@ -251,23 +281,272 @@ const OpportunityInteractions = (() => {
         }
     }
 
-    // 動態注入樣式（保留既有行為）
+    // 動態注入樣式（保留既有行為並補齊精確的時間軸幾何與 CSS）
     function _injectStyles() {
         const styleId = 'interactions-dynamic-styles';
-        if (document.getElementById(styleId)) return;
+        
+        // [Fix] Remove existing style block to prevent SPA duplicate/stale CSS issues
+        const existing = document.getElementById(styleId);
+        if (existing) existing.remove();
 
         const style = document.createElement('style');
         style.id = styleId;
         style.innerHTML = `
-            .interaction-timeline-toggle {
-                text-align: center;
-                margin-top: var(--spacing-4);
+            /* --- Fixed Height Workspace (Scrollable Panes) --- */
+            #discussion-pane, #activity-pane {
+                height: 500px;
+                overflow-y: auto;
+                padding-right: 12px;
+                scrollbar-width: thin;
+                scrollbar-color: var(--border-color, #cbd5e1) transparent;
             }
-            .interaction-timeline.is-expanded {
-                max-height: none;
-                overflow-y: visible;
-                mask-image: none;
-                -webkit-mask-image: none;
+            #discussion-pane::-webkit-scrollbar, #activity-pane::-webkit-scrollbar {
+                width: 6px;
+            }
+            #discussion-pane::-webkit-scrollbar-thumb, #activity-pane::-webkit-scrollbar-thumb {
+                background-color: var(--border-color, #cbd5e1);
+                border-radius: 4px;
+            }
+
+            /* --- Timeline Exact Geometry Implementation --- */
+            .crm-timeline-content {
+                position: relative;
+                padding: 20px 0;
+                width: 100%;
+                box-sizing: border-box;
+            }
+
+            /* --- STRICT SPA BLEED PROTECTION: Double Line Prevention --- */
+            #discussion-timeline::before,
+            #activity-log-timeline::before,
+            .interaction-timeline::before {
+                content: none !important;
+                display: none !important;
+                width: 0 !important;
+                background: transparent !important;
+            }
+            .crm-timeline-content,
+            .interaction-timeline,
+            #discussion-timeline,
+            #activity-log-timeline {
+                border-left: none !important;
+                border-right: none !important;
+                background-image: none !important;
+            }
+            
+            /* The Anchor: Vertical Center Line (SINGLE OWNER) */
+            .crm-timeline-content::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 50%;
+                width: 2px;
+                background: var(--border-color, #e2e8f0);
+                transform: translateX(-50%);
+                z-index: 1;
+            }
+
+            /* The Item Layout Shell */
+            .crm-timeline-item {
+                position: relative;
+                width: 100%;
+                margin-bottom: 24px;
+                display: flex;
+                box-sizing: border-box;
+            }
+            .crm-timeline-item.left {
+                justify-content: flex-start;
+            }
+            .crm-timeline-item.right {
+                justify-content: flex-end;
+            }
+
+            /* The Anchor Point: Exactly centered Marker */
+            .crm-timeline-marker {
+                box-sizing: border-box;
+                position: absolute;
+                left: 50%;
+                top: 20px;
+                transform: translateX(-50%);
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: var(--primary-color, #4f46e5);
+                border: 3px solid var(--bg-color, #ffffff);
+                box-shadow: 0 0 0 2px var(--border-color, #cbd5e1);
+                z-index: 2;
+            }
+
+            /* The Card: Geometrically spaced from center */
+            .crm-timeline-card {
+                box-sizing: border-box;
+                position: relative;
+                width: calc(50% - 32px); /* Leaves exactly 32px gap from center line */
+                background: var(--card-bg, #ffffff);
+                border: 1px solid var(--border-color, #e2e8f0);
+                border-radius: 10px;
+                padding: 16px 20px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+                z-index: 2;
+            }
+
+            /* The Connectors: Visual attachment arrows pointing to the marker */
+            .crm-timeline-card::before {
+                content: '';
+                position: absolute;
+                top: 21px;
+                width: 0;
+                height: 0;
+                border-style: solid;
+            }
+            .crm-timeline-card::after {
+                content: '';
+                position: absolute;
+                top: 22px;
+                width: 0;
+                height: 0;
+                border-style: solid;
+            }
+
+            /* Left Card Arrow */
+            .crm-timeline-item.left .crm-timeline-card::before {
+                right: -9px;
+                border-width: 7px 0 7px 9px;
+                border-color: transparent transparent transparent var(--border-color, #e2e8f0);
+            }
+            .crm-timeline-item.left .crm-timeline-card::after {
+                right: -7px;
+                border-width: 6px 0 6px 8px;
+                border-color: transparent transparent transparent var(--card-bg, #ffffff);
+            }
+
+            /* Right Card Arrow */
+            .crm-timeline-item.right .crm-timeline-card::before {
+                left: -9px;
+                border-width: 7px 9px 7px 0;
+                border-color: transparent var(--border-color, #e2e8f0) transparent transparent;
+            }
+            .crm-timeline-item.right .crm-timeline-card::after {
+                left: -7px;
+                border-width: 6px 8px 6px 0;
+                border-color: transparent var(--card-bg, #ffffff) transparent transparent;
+            }
+
+            /* --- Readability & Typography (Timeline) --- */
+            .crm-timeline-card .card-header {
+                font-size: 1rem;
+                font-weight: 600;
+                color: var(--text-color, #1e293b);
+                margin-bottom: 8px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .crm-timeline-card .feed-time {
+                font-size: 0.75rem;
+                color: var(--text-muted, #94a3b8);
+                font-weight: 400;
+            }
+            .crm-timeline-card .card-body {
+                font-size: 0.9rem;
+                line-height: 1.6;
+                color: var(--text-secondary, #475569);
+                margin-bottom: 12px;
+                word-break: break-word;
+                overflow-wrap: anywhere; /* Safety: strict overflow containment */
+            }
+            .crm-timeline-card .card-footer {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-top: 1px dashed var(--border-color, #e2e8f0);
+                padding-top: 10px;
+                font-size: 0.8rem;
+            }
+            .crm-timeline-card .footer-meta {
+                color: var(--text-muted, #64748b);
+            }
+            .crm-timeline-card .footer-actions {
+                display: flex;
+                gap: 8px;
+            }
+
+            /* --- Right Panel Structure & Typography --- */
+            .interaction-form-section {
+                background-color: var(--secondary-bg, #f8fafc);
+                border: 1px solid var(--border-color, #e2e8f0);
+                border-radius: 12px;
+                padding: 24px;
+                height: fit-content;
+            }
+            
+            .interaction-form-section h3 {
+                font-size: 1.1rem;
+                margin-bottom: 1.2rem !important;
+                color: var(--text-primary);
+                border-bottom: 1px solid var(--border-color, #e2e8f0);
+                padding-bottom: 12px;
+            }
+
+            .interaction-form-section .form-label {
+                font-size: 0.85rem;
+                color: var(--text-secondary);
+                margin-bottom: 6px;
+            }
+
+            .interaction-form-section .form-input,
+            .interaction-form-section .form-select,
+            .interaction-form-section .form-textarea {
+                font-size: 0.9rem;
+                padding: 8px 10px;
+                box-sizing: border-box;
+            }
+
+            .interaction-form-section .form-group {
+                margin-bottom: 16px;
+            }
+
+            .interaction-form-section .submit-btn {
+                margin-top: 8px;
+                width: 100%;
+            }
+
+            /* Mobile Responsive Fallback */
+            @media (max-width: 768px) {
+                .crm-timeline-content::before {
+                    left: 20px;
+                }
+                .crm-timeline-item.left, .crm-timeline-item.right {
+                    justify-content: flex-end;
+                }
+                .crm-timeline-card {
+                    width: calc(100% - 52px); /* Accommodate offset line */
+                }
+                .crm-timeline-marker {
+                    left: 20px !important;
+                }
+                .crm-timeline-item.left .crm-timeline-card::before,
+                .crm-timeline-item.right .crm-timeline-card::before {
+                    left: -9px;
+                    right: auto;
+                    border-width: 7px 9px 7px 0;
+                    border-color: transparent var(--border-color, #e2e8f0) transparent transparent;
+                }
+                .crm-timeline-item.left .crm-timeline-card::after,
+                .crm-timeline-item.right .crm-timeline-card::after {
+                    left: -7px;
+                    right: auto;
+                    border-width: 6px 8px 6px 0;
+                    border-color: transparent var(--card-bg, #ffffff) transparent transparent;
+                }
+                #discussion-pane, #activity-pane {
+                    height: auto;
+                    max-height: 500px;
+                }
+                .interaction-form-section {
+                    margin-top: 24px;
+                }
             }
         `;
         document.head.appendChild(style);
@@ -419,7 +698,6 @@ const OpportunityInteractions = (() => {
     return {
         init,
         showForEditing,
-        toggleListExpanded,
         confirmDelete
     };
 })();
