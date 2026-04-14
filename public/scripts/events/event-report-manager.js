@@ -1,10 +1,10 @@
 // public/scripts/events/event-report-manager.js
-// 職責：專門負責「查看報告」彈窗的顯示、渲染與匯出功能
+// 職責：專門負責「查看報告」彈窗的顯示、渲染
 // (V6 - 包含智慧職稱關聯、動態標頭色、膠囊顯示)
 /**
- * @version 1.0.3
- * @date 2026-01-22
- * @description [Forensics Probe] Added debug counters and global export.
+ * @version 1.0.4
+ * @date 2026-04-14
+ * @description [Forensics Probe] Removed exportReportToPdf and all PDF export logic to comply with NG feature requirement.
  */
 
 // [Forensics Probe] Debug Counter
@@ -82,7 +82,6 @@ async function showEventLogReport(eventId) {
                 console.error("EventEditorStandalone module not loaded");
             }
         };
-        document.getElementById('save-report-as-pdf-btn').onclick = () => exportReportToPdf(eventData);
         document.getElementById('report-delete-event-btn').onclick = () => {
             if (typeof confirmDeleteEvent === 'function') {
                 confirmDeleteEvent(eventData.eventId, eventData.eventName);
@@ -249,7 +248,7 @@ function renderEventLogReportHTML(event, contextContacts = []) {
         }
     }
 
-    return `<div class="report-view" id="pdf-content-${event.eventId || ''}">
+    return `<div class="report-view">
         <div class="report-header" style="--header-color: ${headerColor};">
              <h2 class="report-title">
                 ${event.eventName || '未命名事件'} 
@@ -266,56 +265,6 @@ function renderEventLogReportHTML(event, contextContacts = []) {
             ${sectionsHTML || '<div class="alert alert-info">此事件沒有額外的詳細記錄。</div>'}
         </div>
     </div>`;
-}
-
-async function exportReportToPdf(event) {
-    showLoading('正在產生寬版 PDF，請稍候...');
-    
-    const reportElement = document.getElementById(`pdf-content-${event.eventId || ''}`);
-    const modalContent = reportElement ? reportElement.closest('.modal-content') : null;
-    const modalBackdrop = reportElement ? reportElement.closest('.modal') : null;
-
-    if (!reportElement || !modalContent || !modalBackdrop) {
-        hideLoading();
-        showNotification('找不到報告內容或 Modal 容器，無法匯出', 'error');
-        return;
-    }
-    
-    const originalModalContentStyle = modalContent.style.cssText;
-    const originalModalBackdropStyle = modalBackdrop.style.cssText;
-
-    try {
-        if (typeof html2pdf === 'undefined' || typeof html2pdf().from !== 'function') {
-            throw new Error('PDF 產生器 (html2pdf) 載入失敗。');
-        }
-
-        modalBackdrop.style.overflow = 'visible';
-        modalContent.style.overflow = 'visible';
-        modalContent.style.maxHeight = 'none';
-        modalContent.style.width = '1920px';
-        modalContent.style.maxWidth = '1920px';
-
-        await new Promise(resolve => setTimeout(resolve, 50));
-
-        const options = {
-            margin: 15,
-            filename: `事件報告-${event.eventName || '未命名'}-${event.eventId}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } 
-        };
-        
-        await html2pdf().from(reportElement).set(options).save();
-
-    } catch (error) {
-        console.error("PDF生成失敗:", error);
-        showNotification("PDF 產生失敗，請再試一次。", "error");
-    } finally {
-        modalContent.style.cssText = originalModalContentStyle;
-        modalBackdrop.style.cssText = originalModalBackdropStyle;
-        if (modalBackdrop.style.display !== 'block') { modalBackdrop.style.display = 'block'; }
-        hideLoading();
-    }
 }
 
 // Ensure global accessibility
