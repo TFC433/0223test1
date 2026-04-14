@@ -1,10 +1,10 @@
 // public/scripts/events/event-report-manager.js
-// 職責：專門負責「查看報告」彈窗的顯示、渲染
+// 職責：專門負責「查看報告」彈窗的顯示、渲染與匯出功能
 // (V6 - 包含智慧職稱關聯、動態標頭色、膠囊顯示)
 /**
- * @version 1.0.4
+ * @version 1.0.11
  * @date 2026-04-14
- * @description [Forensics Probe] Removed exportReportToPdf and all PDF export logic to comply with NG feature requirement.
+ * @description [Forensics Probe] Changed company name enrichment assignment to conditional block to prevent empty string fallback issues.
  */
 
 // [Forensics Probe] Debug Counter
@@ -55,16 +55,29 @@ async function showEventLogReport(eventId) {
                 const oppResult = await authedFetch(`/api/opportunities/${eventData.opportunityId}/details`);
                 if (oppResult.success && oppResult.data) {
                     contextContacts = oppResult.data.linkedContacts || [];
+                    
+                    const oppInfo = oppResult.data.opportunityInfo || {};
+                    // [Forensics Probe] 從機會明細 (opportunityInfo) 中提取並補完 eventData 的名稱欄位，確保 UI 能正確顯示
+                    eventData.opportunityName = oppInfo.opportunityName || eventData.opportunityName || '';
+                    if (oppInfo.customerCompany) {
+                        eventData.companyName = oppInfo.customerCompany;
+                    }
                 }
-            } else if (eventData.companyName) { // 如果沒有機會ID但有公司名，嘗試抓公司聯絡人
-                const compResult = await authedFetch(`/api/companies/${encodeURIComponent(eventData.companyName)}/details`);
+            } else if (eventData.companyId) { // 如果沒有機會ID但有公司ID，嘗試抓公司聯絡人
+                const compResult = await authedFetch(`/api/companies/${eventData.companyId}/details`);
                 if (compResult.success && compResult.data) {
                     contextContacts = compResult.data.contacts || [];
+                    const companyInfo = compResult.data.companyInfo || {};
+                    if (companyInfo.companyName || companyInfo.customerCompany) {
+                        eventData.companyName = 
+                            companyInfo.companyName || 
+                            companyInfo.customerCompany;
+                    }
                 }
             }
         } catch (e) {
-            console.warn("[EventReport] 無法獲取關聯聯絡人進行職稱比對", e);
-            // 失敗不影響報告顯示，只是無法自動補職稱
+            console.warn("[EventReport] 無法獲取關聯聯絡人或關聯資訊進行比對", e);
+            // 失敗不影響報告顯示，只是無法自動補齊名稱或職稱
         }
         
         // 3. 渲染報告 (傳入 contextContacts)
@@ -155,8 +168,8 @@ function renderEventLogReportHTML(event, contextContacts = []) {
 
     const linkedEntityType = event.opportunityId ? '關聯機會' : '關聯公司';
     const linkedEntityName = event.opportunityId 
-        ? (event.opportunityName || event.opportunityId) 
-        : (event.companyName || event.companyId || '未指定');
+        ? (event.opportunityName || '-') 
+        : (event.companyName || (event.companyId ? '-' : '未指定'));
         
     // 取得系統設定顏色
     const eventTypeConfig = new Map((window.CRM_APP?.systemConfig['事件類型'] || []).map(t => [t.value, { note: t.note, color: t.color }]));
