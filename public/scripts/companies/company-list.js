@@ -1,18 +1,15 @@
 /**
  * public/scripts/companies/company-list.js
  * 職責：管理「公司總覽列表頁」
- * * @version 7.6.3
- * * @date 2026-03-16
+ * * @version 7.7.0 (Phase 10: Backend Opportunity Counting)
+ * * @date 2026-04-15
  * * @description 
- * * 1. [Fix] handleCompanyListClick: Navigation payload must use companyId.
- * * 2. [Fix] submitQuickCreateCompany: Navigation after create uses companyId.
- * * 3. [Contract] All operations (delete, navigate) use companyId exclusively.
- * * 4. [Patch] Added dashboardManager.markStale() on successful mutations (create, delete).
- * * 5. [Patch] Removed dashboard charts section, related HTML, API calls, and rendering logic.
- * * 6. [UX Polish] Aligned list layout (Search, Tabs, Count) with Potential Contacts UI.
- * * 7. [UX Polish] Reorganized top control area into 3 distinct rows for better hierarchy.
- * * 8. [UX Polish] Layout Correction: Strict placement of Tabs, Select Filters, Search+CTA, and Count.
- * * 9. [UX Polish] Removed Stage and Rating filters and cleaned up layout.
+ * * 1. [PATCH] Removed heavy frontend dependency on /api/opportunities?page=0 payload.
+ * * 2. [PATCH] Consumes backend-provided opportunityCount natively.
+ * * 3. [Fix] handleCompanyListClick: Navigation payload must use companyId.
+ * * 4. [Fix] submitQuickCreateCompany: Navigation after create uses companyId.
+ * * 5. [Contract] All operations (delete, navigate) use companyId exclusively.
+ * * 6. [Patch] Added dashboardManager.markStale() on successful mutations (create, delete).
  */
 
 // ==================== 全域變數 ====================
@@ -91,7 +88,6 @@ async function executeDeleteCompany(companyId, companyName) {
     
     const confirmFunc = window.showConfirmDialog || window.confirmAction || window.confirm;
     
-    // 定義實際執行刪除的閉包
     const doDelete = async () => {
         await performDeleteAPI(companyId);
     };
@@ -108,7 +104,6 @@ async function executeDeleteCompany(companyId, companyName) {
 async function performDeleteAPI(companyId) {
     if (typeof showLoading === 'function') showLoading('正在刪除...');
     
-    // [Contract Fix] 使用 ID 進行刪除
     try {
         const res = await authedFetch(`/api/companies/${companyId}`, { method: 'DELETE' });
         
@@ -148,7 +143,6 @@ async function loadCompaniesListPage() {
     container.onclick = handleCompanyListClick;
     container.onkeydown = handleCompanyListKeydown;
 
-    // 渲染 UI 骨架 [UX Polish] Strict layout hierarchy applied
     container.innerHTML = `
         <div id="company-list-root">
             <div class="dashboard-widget">
@@ -200,9 +194,9 @@ async function loadCompaniesListPage() {
     `;
 
     try {
-        const [listResult, oppsResult, systemConfigResult] = await Promise.all([
+        // [PATCH Phase 10] Removed explicit opportunity fetch. opportunityCount is now baked into the /api/companies payload.
+        const [listResult, systemConfigResult] = await Promise.all([
             authedFetch(`/api/companies`), 
-            authedFetch(`/api/opportunities?page=0`), 
             authedFetch(`/api/config`) 
         ]);
 
@@ -210,21 +204,13 @@ async function loadCompaniesListPage() {
             window.CRM_APP = window.CRM_APP || {};
             window.CRM_APP.systemConfig = systemConfigResult;
             
-            // Render Tab Filters instead of Select Box for Company Type
             renderCompanyTypeTabs(systemConfigResult['公司類型'] || []);
         }
 
         if (listResult.success) {
-            const companies = listResult.data || [];
-            const allOpps = oppsResult || [];
+            // Mapping loop removed. Straight assignment of fully formed backend DTO.
+            allCompaniesData = listResult.data || [];
             
-            const oppCountMap = new Map();
-            allOpps.forEach(opp => {
-                const companyName = opp.customerCompany;
-                if (companyName) oppCountMap.set(companyName, (oppCountMap.get(companyName) || 0) + 1);
-            });
-
-            allCompaniesData = companies.map(c => ({ ...c, opportunityCount: oppCountMap.get(c.companyName) || 0 }));
             filterAndRenderCompanyList();
 
             const searchInput = document.getElementById('company-list-search');
@@ -253,7 +239,6 @@ function handleCompanyListClick(e) {
     switch (action) {
         case 'switch-type-tab': 
             companyListFilters.type = payload.value;
-            // Update tab visuals immediately
             document.querySelectorAll('#company-type-tabs .tab-btn').forEach(tBtn => {
                 const isActive = tBtn.dataset.value === companyListFilters.type;
                 tBtn.style.background = isActive ? 'white' : 'transparent';
@@ -276,7 +261,6 @@ function handleCompanyListClick(e) {
                 try { params = JSON.parse(payload.params); } catch (err) { }
             }
             
-            // [Phase 8 Strict Fix] 確保只使用 companyId 進行導航
             const targetId = params.companyId || payload.id;
             
             if (window.CRM_APP && window.CRM_APP.navigateTo && targetId) {
@@ -322,7 +306,6 @@ function filterAndRenderCompanyList() {
             : valBStr.localeCompare(valAStr, 'zh-Hant');
     });
 
-    // [UX Polish] Match contacts format
     if (countDisplay) countDisplay.innerHTML = `共 ${filtered.length} 筆`;
     const listContent = document.getElementById('companies-list-content');
     if (listContent) listContent.innerHTML = renderCompaniesTable(filtered);
@@ -358,7 +341,6 @@ function renderCompaniesTable(companies) {
         const stageColor = stageColors.get(c.customerStage) || '#6b7280';
         const ratingColor = ratingColors.get(c.engagementRating) || '#6b7280';
         
-        // [Phase 8 Strict Fix] 建構參數：只傳 companyId
         const navParams = JSON.stringify({ 
             companyId: c.companyId
         }).replace(/'/g, "&apos;").replace(/"/g, '&quot;');
@@ -375,7 +357,7 @@ function renderCompaniesTable(companies) {
                         <strong>${c.companyName || '-'}</strong>
                     </a>
                 </td>
-                <td style="text-align:center;"><span class="comp-opp-count">${c.opportunityCount}</span></td>
+                <td style="text-align:center;"><span class="comp-opp-count">${c.opportunityCount || 0}</span></td>
                 <td><span class="comp-status-badge" style="background:${stageColor}">${c.customerStage || '-'}</span></td>
                 <td><span class="comp-status-badge" style="background:${ratingColor}">${c.engagementRating || '-'}</span></td>
                 <td style="text-align:center;">
@@ -430,7 +412,6 @@ async function submitQuickCreateCompany() {
             
             toggleQuickCreateCard(false);
             if (window.CRM_APP && window.CRM_APP.navigateTo) {
-                // [Phase 8 Fix] 使用 companyId 導航
                 CRM_APP.navigateTo('company-details', { 
                     companyId: res.data.companyId 
                 });

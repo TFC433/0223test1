@@ -1,8 +1,8 @@
 // routes/opportunity.routes.js
 /**
  * Opportunity Routes
- * * @version 6.0.0 (Phase 4 - SQL Transition - Write Authority)
- * @date 2026-02-06
+ * * @version 6.1.0 (Phase 9 - Metadata Decoupling)
+ * @date 2026-04-15
  */
 
 const express = require('express');
@@ -25,6 +25,11 @@ router.get('/dashboard', (req, res, next) => {
 // GET /api/opportunities/by-county
 router.get('/by-county', (req, res, next) => {
     getController(req).getOpportunitiesByCounty(req, res, next);
+});
+
+// GET /api/opportunities/metadata/years
+router.get('/metadata/years', (req, res, next) => {
+    getController(req).getOpportunityYears(req, res, next);
 });
 
 // GET /api/opportunities/

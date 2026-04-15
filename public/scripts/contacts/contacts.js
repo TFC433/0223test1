@@ -2,51 +2,31 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.2.15 (Phase 8.2 Tab Alignment & Operation Mode Polish)
- * Date: 2026-03-16
+ * Version: v8.4.0 (Phase 8.4 Core UI Pagination Controls)
+ * Date: 2026-04-15
  * Author: Gemini
  *
  * Change Log:
- * - [UX Polish] Aligned all internal comments to strictly match the UI tab order (Tab 1: 名片總覽, Tab 2: 聯絡人列表, Tab 3: 正式聯絡人).
- * - [UX Polish] Removed Operation Mode toggle and delete buttons entirely from Tab 1 (名片總覽 / renderContactsTable) for safety.
+ * - [Feature] Added explicit page state tracking (`currentCorePage`) and UI controls for CORE contacts.
+ * - [Feature] Supported search-triggered page resets and post-delete empty-page auto-correction for CORE list.
+ * - [Performance] Removed fetchAllCoreContacts bypass loop.
+ * - [Refactor] Migrated CORE tab to use strict page-by-page API fetching instead of in-memory dataset mapping.
+ * - [UX Polish] Aligned all internal comments to strictly match the UI tab order.
  * - [UX Polish] Maintained Operation Mode exclusively in Tab 2 (RAW table) and Tab 3 (CORE table).
- * - [Feature] Operation Mode extended to apply consistently across all RAW and CORE list views.
- * - [Feature] Implemented real handleDeleteRawContact flow wired to expected backend sheet deletion route, featuring strict UX guardrails and localized data refreshing.
- * - [Cleanup] Removed forensic trace logs and restored to clean production state.
- * - [Bugfix] Maintained `skipRefresh: true` on DELETE requests to securely handle relation-blocked scenarios locally.
- * - [Phase 8.1] Implemented inline edit mode for RAW contacts (Left: Preview, Right: Form).
+ * - [Feature] Implemented real handleDeleteRawContact flow wired to expected backend sheet deletion route.
  * ============================================================================
  */
 
 // ==================== 全域變數 ====================
 let allContactsData = []; 
 let coreContactsData = [];
+let coreContactsTotal = 0; 
+let currentCorePage = 1; // [Patch] CORE Page State
+let corePaginationState = { hasNext: false, hasPrev: false, totalPages: 1 }; // [Patch] CORE Pagination Metadata
 let currentContactsTab = 'list'; // 'list' | 'cards' | 'core'
 let currentEditRowIndex = null;
 let currentCoreEditContactId = null;
-let contactsOperationMode = false; // [Feature] Operation Mode State
-
-// ==================== API 輔助函式 ====================
-
-// Helper function to fetch all paginated CORE contacts (reusable)
-async function fetchAllCoreContacts() {
-    let accumulatedData = [];
-    let currentPage = 1;
-    let hasNext = true;
-    
-    while (hasNext) {
-        const res = await authedFetch(`/api/contacts/list?page=${currentPage}&limit=100`);
-        if (res && res.data) {
-            accumulatedData = accumulatedData.concat(res.data);
-        }
-        if (res && res.pagination && res.pagination.hasNext) {
-            currentPage++;
-        } else {
-            hasNext = false;
-        }
-    }
-    return accumulatedData;
-}
+let contactsOperationMode = false;
 
 // ==================== 主要功能函式 ====================
 
@@ -109,18 +89,13 @@ async function loadContacts(query = '') {
     }
 
     try {
-        if (allContactsData.length === 0 || coreContactsData.length === 0) {
-            console.log('[Contacts] 首次載入，正在獲取潛在與正式客戶資料...');
-            
-            // [World Model] Fetching RAW Data and CORE Data sequentially to prevent backend API deadlocks
+        if (allContactsData.length === 0) {
+            console.log('[Contacts] 首次載入，正在獲取潛在客戶資料...');
             const listResult = await authedFetch(`/api/contacts?q=`);
             allContactsData = (listResult && listResult.data) ? listResult.data : [];
-            
-            const fullCoreData = await fetchAllCoreContacts();
-            coreContactsData = fullCoreData || [];
         }
         
-        filterAndRenderContacts(searchQuery);
+        await filterAndRenderContacts(searchQuery);
 
     } catch (error) {
         if (error.message !== 'Unauthorized') {
@@ -134,7 +109,6 @@ async function loadContacts(query = '') {
 
 function toggleContactsOperationMode() {
     contactsOperationMode = !contactsOperationMode;
-    // UI toggle manipulation is handled implicitly by re-rendering the list.
     const currentQuery = document.getElementById('contacts-page-search')?.value || '';
     filterAndRenderContacts(currentQuery);
 }
@@ -143,7 +117,7 @@ function handleContactListClick(e) {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
 
-    e.preventDefault(); // Prevent accidental form submits or jumping
+    e.preventDefault();
 
     const action = btn.dataset.action;
     const payload = btn.dataset;
@@ -154,7 +128,6 @@ function handleContactListClick(e) {
             break;
 
         case 'view-card':
-            // 呼叫外部全域函式 (假設存在於 main.js 或 utils.js)
             if (window.showBusinessCardPreview) {
                 window.showBusinessCardPreview(payload.link);
             } else {
@@ -164,11 +137,10 @@ function handleContactListClick(e) {
             
         case 'switch-tab':
             const tabName = payload.tab;
-            if (currentContactsTab === tabName) return; // No change
+            if (currentContactsTab === tabName) return; 
             
             currentContactsTab = tabName;
             
-            // Update UI state with Red Tab Emphasis Logic
             document.querySelectorAll('.contacts-tabs .tab-btn').forEach(t => {
                 const isCoreBtn = t.dataset.tab === 'core';
                 const isActive = t.dataset.tab === currentContactsTab;
@@ -191,12 +163,25 @@ function handleContactListClick(e) {
                 else t.classList.remove('active');
             });
             
-            // Re-apply current search
             const currentQuery = document.getElementById('contacts-page-search')?.value || '';
             filterAndRenderContacts(currentQuery);
             break;
 
-        // RAW Contacts Edit Actions
+        // [Patch] CORE Pagination Controls
+        case 'core-prev':
+            if (currentCorePage > 1) {
+                currentCorePage--;
+                filterAndRenderContacts(document.getElementById('contacts-page-search')?.value || '');
+            }
+            break;
+            
+        case 'core-next':
+            if (corePaginationState.hasNext) {
+                currentCorePage++;
+                filterAndRenderContacts(document.getElementById('contacts-page-search')?.value || '');
+            }
+            break;
+
         case 'edit-card':
             try {
                 const contactData = JSON.parse(payload.contact);
@@ -211,7 +196,6 @@ function handleContactListClick(e) {
             break;
 
         case 'cancel-edit':
-            // Return to current tab view
             const rawQuery = document.getElementById('contacts-page-search')?.value || '';
             filterAndRenderContacts(rawQuery);
             break;
@@ -220,7 +204,6 @@ function handleContactListClick(e) {
             handleSaveCardEdit();
             break;
 
-        // CORE Contacts Edit Actions
         case 'edit-core':
             try {
                 const coreData = JSON.parse(payload.contact);
@@ -235,7 +218,6 @@ function handleContactListClick(e) {
             break;
 
         case 'cancel-core-edit':
-            // Return to current tab view
             const coreQuery = document.getElementById('contacts-page-search')?.value || '';
             filterAndRenderContacts(coreQuery);
             break;
@@ -248,44 +230,75 @@ function handleContactListClick(e) {
 
 function searchContactsEvent(event) {
     const query = event.target.value;
+    
+    // [Patch] Reset page to 1 strictly on CORE search modifications
+    if (currentContactsTab === 'core') {
+        currentCorePage = 1;
+    }
+    
     handleSearch(() => filterAndRenderContacts(query));
 }
 
-function filterAndRenderContacts(query = '') {
+async function filterAndRenderContacts(query = '') {
     const listContent = document.getElementById('contacts-page-content');
     const actionBar = document.getElementById('contacts-action-bar');
     const countDisplay = document.getElementById('contacts-count-display');
     if (!listContent) return;
 
-    // Ensure search bar is visible when not in edit mode
     if (actionBar) actionBar.style.display = 'block';
     
-    // Reset edit states safely
     currentEditRowIndex = null; 
     currentCoreEditContactId = null;
 
     let filteredData = [];
-    
-    // Type Guard: strictly handle query as a string
     const safeQuery = typeof query === 'string' ? query : '';
     const searchTerm = safeQuery.toLowerCase();
 
-    // Branch filtering based on active tab and data source
     if (currentContactsTab === 'core') {
-        filteredData = [...coreContactsData];
-        if (searchTerm) {
-            filteredData = filteredData.filter(c =>
-                (c.name && c.name.toLowerCase().includes(searchTerm)) ||
-                (c.companyName && c.companyName.toLowerCase().includes(searchTerm))
-            );
+        // [API-Driven] Show loading during live fetch
+        listContent.innerHTML = `<div class="loading show"><div class="spinner"></div><p>載入正式聯絡人資料中...</p></div>`;
+        
+        try {
+            // [Patch] Execute search strictly via API bound to current page state
+            const res = await authedFetch(`/api/contacts/list?page=${currentCorePage}&limit=100&q=${encodeURIComponent(safeQuery)}`);
+            coreContactsData = (res && res.data) ? res.data : [];
+            
+            // Extract pagination metadata
+            if (res && res.pagination) {
+                coreContactsTotal = res.pagination.totalItems !== undefined ? res.pagination.totalItems : coreContactsData.length;
+                corePaginationState.hasNext = !!res.pagination.hasNext;
+                corePaginationState.hasPrev = !!res.pagination.hasPrev;
+                corePaginationState.totalPages = res.pagination.total || Math.ceil(coreContactsTotal / 100) || 1;
+                
+                // [Patch] Delete boundary auto-correction: if current page vanishes, step back
+                if (coreContactsData.length === 0 && currentCorePage > 1) {
+                    currentCorePage--;
+                    return filterAndRenderContacts(query);
+                }
+            } else {
+                coreContactsTotal = coreContactsData.length;
+                corePaginationState.hasNext = false;
+                corePaginationState.hasPrev = false;
+                corePaginationState.totalPages = 1;
+            }
+        } catch (e) {
+            console.error('Failed to fetch CORE contacts:', e);
+            coreContactsData = [];
+            coreContactsTotal = 0;
+            corePaginationState = { hasNext: false, hasPrev: false, totalPages: 1 };
         }
+
+        filteredData = [...coreContactsData];
+        
         // [UX Polish] Sort CORE contacts by update time descending
         filteredData.sort((a, b) => {
             const timeA = new Date(a.lastUpdateTime || a.createdTime || 0).getTime();
             const timeB = new Date(b.lastUpdateTime || b.createdTime || 0).getTime();
             return timeB - timeA;
         });
+
     } else {
+        // [In-Memory] RAW Data slice
         filteredData = [...allContactsData];
         if (searchTerm) {
             filteredData = filteredData.filter(c =>
@@ -295,10 +308,11 @@ function filterAndRenderContacts(query = '') {
         }
     }
     
-    // Update count display with appropriate label and hint
     if (countDisplay) {
         const label = currentContactsTab === 'core' ? '正式聯絡人' : '潛在客戶';
-        let htmlContent = `共 ${filteredData.length} 筆${label}`;
+        const displayCount = currentContactsTab === 'core' ? coreContactsTotal : filteredData.length;
+        
+        let htmlContent = `共 ${displayCount} 筆${label}`;
         
         if (currentContactsTab === 'core') {
             htmlContent += ` <span style="margin-left: 10px; font-size: 0.85em; background: var(--bg-hover, #f1f5f9); padding: 3px 8px; border-radius: 4px; color: var(--text-secondary);">「依最後更新時間排序（新到舊）」</span>`;
@@ -307,17 +321,31 @@ function filterAndRenderContacts(query = '') {
         countDisplay.innerHTML = htmlContent;
     }
 
-    // Render corresponding view based on internal IDs vs UI mapping
     if (currentContactsTab === 'list') {
         listContent.innerHTML = renderContactsTable(filteredData);
     } else if (currentContactsTab === 'cards') {
         listContent.innerHTML = renderBusinessCardList(filteredData);
     } else if (currentContactsTab === 'core') {
         listContent.innerHTML = renderCoreContactsTable(filteredData);
+        // [Patch] Append minimal CORE pagination controls
+        if (coreContactsTotal > 0) {
+            listContent.innerHTML += renderCorePagination();
+        }
     }
 }
 
 // ==================== 專用渲染函式 ====================
+
+// --- [Patch] CORE Pagination Helper ---
+function renderCorePagination() {
+    return `
+        <div class="pagination-controls" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+            <button class="action-btn" data-action="core-prev" ${!corePaginationState.hasPrev ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background: white;"'}>上一頁</button>
+            <span style="color: var(--text-secondary); font-weight: 500;">第 ${currentCorePage} / ${corePaginationState.totalPages} 頁</span>
+            <button class="action-btn" data-action="core-next" ${!corePaginationState.hasNext ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background: white;"'}>下一頁</button>
+        </div>
+    `;
+}
 
 // --- Tab 1: 名片總覽 (RAW) ---
 function renderContactsTable(data) {
@@ -325,15 +353,14 @@ function renderContactsTable(data) {
         return '<div class="alert alert-info" style="text-align:center; margin-top: 20px;">沒有找到名片資料</div>';
     }
 
-    // Add specific style to ensure name wraps and does not truncate
     let listHTML = `
         <style>
             .contact-card-name-full {
                 font-weight: 600;
                 font-size: 1.1rem;
                 color: var(--text-main);
-                white-space: normal; /* Force wrap */
-                word-break: break-all; /* Prevent overflow on long strings without spaces */
+                white-space: normal;
+                word-break: break-all;
                 display: block;
                 line-height: 1.4;
             }
@@ -430,7 +457,6 @@ function renderBusinessCardList(data) {
             ? `<button class="action-btn small info" title="預覽名片" data-action="view-card" data-link="${safeDriveLink}" style="margin-right: 8px;">💳</button>`
             : '';
 
-        // [Feature] Conditional RAW Delete Button based on Operation Mode
         let deleteBtn = '';
         if (contactsOperationMode) {
             deleteBtn = `<button class="action-btn small danger" data-action="delete-raw" data-index="${contact.rowIndex}" data-name="${contact.name || ''}" style="margin-left: 4px; background: #fee2e2; color: #ef4444; border: 1px solid #fca5a5;">🗑️ 刪除</button>`;
@@ -501,6 +527,9 @@ function renderCoreContactsTable(data) {
                 <tbody>
     `;
 
+    // Calculate absolute index to maintain visual consistency across pages
+    const indexOffset = (currentCorePage - 1) * 100;
+
     data.forEach((contact, index) => {
         let updateTimeStr = '-';
         const rawTime = contact.lastUpdateTime || contact.createdTime;
@@ -521,7 +550,7 @@ function renderCoreContactsTable(data) {
 
         listHTML += `
             <tr>
-                <td style="text-align: center; color: var(--text-muted); font-weight: 500;">${index + 1}</td>
+                <td style="text-align: center; color: var(--text-muted); font-weight: 500;">${indexOffset + index + 1}</td>
                 <td class="core-name-cell">${contact.name || '-'}</td>
                 <td>${contact.companyName || '-'}</td>
                 <td>${contact.position || '-'}</td>
@@ -546,13 +575,12 @@ function renderCoreContactsTable(data) {
 
 // ==================== 編輯模式渲染函式 ====================
 
-// --- RAW Contacts Edit Mode (Left Image / Right Form) ---
+// --- RAW Contacts Edit Mode ---
 function renderEditCardMode(contact) {
     const listContent = document.getElementById('contacts-page-content');
     const actionBar = document.getElementById('contacts-action-bar');
     if (!listContent) return;
 
-    // Hide search bar during edit
     if (actionBar) actionBar.style.display = 'none';
     currentEditRowIndex = contact.rowIndex;
 
@@ -574,7 +602,6 @@ function renderEditCardMode(contact) {
         `;
     }
 
-    // Editable fields: name, company, position, mobile, email
     const safeName = (contact.name || '').replace(/"/g, '&quot;');
     const safeCompany = (contact.company || '').replace(/"/g, '&quot;');
     const safePosition = (contact.position || '').replace(/"/g, '&quot;');
@@ -629,17 +656,15 @@ function renderEditCardMode(contact) {
     `;
 }
 
-// --- CORE Contacts Edit Mode (Centered Form) ---
+// --- CORE Contacts Edit Mode ---
 function renderCoreEditMode(contact) {
     const listContent = document.getElementById('contacts-page-content');
     const actionBar = document.getElementById('contacts-action-bar');
     if (!listContent) return;
 
-    // Hide search bar during edit
     if (actionBar) actionBar.style.display = 'none';
     currentCoreEditContactId = contact.contactId;
 
-    // Safely escape values
     const safeName = (contact.name || '').replace(/"/g, '&quot;');
     const safePosition = (contact.position || '').replace(/"/g, '&quot;');
     const safeMobile = (contact.mobile || '').replace(/"/g, '&quot;');
@@ -727,18 +752,15 @@ async function handleSaveCardEdit() {
         if (response && response.success) {
             if (typeof showNotification === 'function') showNotification('資料已更新成功', 'success');
             
-            // Re-fetch data to reflect changes immediately
             const listResult = await authedFetch(`/api/contacts?q=`);
             if (listResult && listResult.data) {
                 allContactsData = listResult.data;
             }
             
-            // Exit edit mode and return to previous list view safely
             currentEditRowIndex = null;
             const safeQuery = document.getElementById('contacts-page-search')?.value || '';
-            filterAndRenderContacts(safeQuery);
+            await filterAndRenderContacts(safeQuery);
             
-            // Signal dashboard update. 
             if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
                 window.dashboardManager.markStale();
             }
@@ -762,7 +784,7 @@ async function handleSaveCardEdit() {
 
 // --- Delete Action: RAW ---
 async function handleDeleteRawContact(rowIndex, contactName) {
-    const msg = `您確定要永久刪除潛在客戶「${contactName}」嗎？\n\n⚠️ 警告：此操作將會從 Google 試算表中永久移除該筆實體資料，且無法復原。`;
+    const msg = `您確定要永久刪除潛客戶「${contactName}」嗎？\n\n⚠️ 警告：此操作將會從 Google 試算表中永久移除該筆實體資料，且無法復原。`;
     
     const executeDelete = async () => {
         try {
@@ -778,17 +800,14 @@ async function handleDeleteRawContact(rowIndex, contactName) {
                     alert('刪除成功：潛在客戶已從試算表中移除');
                 }
                 
-                // Re-fetch RAW data to reflect changes
                 const listResult = await authedFetch(`/api/contacts?q=`);
                 if (listResult && listResult.data) {
                     allContactsData = listResult.data;
                 }
                 
-                // Re-render current list preserving search keyword
                 const safeQuery = document.getElementById('contacts-page-search')?.value || '';
-                filterAndRenderContacts(safeQuery);
+                await filterAndRenderContacts(safeQuery);
                 
-                // Refresh dashboard stats if available
                 if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
                     window.dashboardManager.markStale();
                 }
@@ -834,7 +853,6 @@ async function handleSaveCoreEdit() {
         btn.textContent = '儲存中...';
     }
 
-    // STRICT PAYLOAD: Exclude companyId, companyName, department to protect relations.
     const payload = {
         name: document.getElementById('core-edit-name')?.value.trim() || '',
         position: document.getElementById('core-edit-position')?.value.trim() || '',
@@ -853,15 +871,11 @@ async function handleSaveCoreEdit() {
         if (response && response.success) {
             if (typeof showNotification === 'function') showNotification('正式聯絡人已更新成功', 'success');
             
-            // Re-fetch CORE data to reflect changes immediately
-            coreContactsData = await fetchAllCoreContacts();
-            
-            // Exit edit mode and return to CORE list view
             currentCoreEditContactId = null;
             const safeQuery = document.getElementById('contacts-page-search')?.value || '';
-            filterAndRenderContacts(safeQuery);
+            // [Patch] Will naturally respect currentCorePage
+            await filterAndRenderContacts(safeQuery);
             
-            // Signal dashboard update. 
             if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
                 window.dashboardManager.markStale();
             }
@@ -901,14 +915,10 @@ async function handleDeleteCoreContact(contactId, contactName) {
                     alert('刪除成功：正式聯絡人已移除');
                 }
                 
-                // Re-fetch CORE data fully to maintain pagination integrity
-                coreContactsData = await fetchAllCoreContacts();
-                
-                // Re-render current list preserving search keyword
                 const safeQuery = document.getElementById('contacts-page-search')?.value || '';
-                filterAndRenderContacts(safeQuery);
+                // [Patch] Bound safely to auto-correcting pagination logic
+                await filterAndRenderContacts(safeQuery);
                 
-                // Refresh dashboard stats if available
                 if (window.dashboardManager && typeof window.dashboardManager.markStale === 'function') {
                     window.dashboardManager.markStale();
                 }

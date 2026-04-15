@@ -1,9 +1,9 @@
 // controllers/opportunity.controller.js
 /**
  * OpportunityController
- * * @version 6.1.0 (Phase 8.11 - Table Data Flow Decoupling)
- * @date 2026-03-12
- * @description 機會案件控制器，擴展 searchOpportunities 以支援獨立的 Table API Fetch 與 SQL 委派。
+ * * @version 6.2.0 (Phase 9 - Metadata Decoupling)
+ * @date 2026-04-15
+ * @description 機會案件控制器，擴展支援獨立的 Metadata API Fetch。
  */
 
 const { handleApiError } = require('../middleware/error.middleware');
@@ -41,6 +41,16 @@ class OpportunityController {
             res.json(result);
         } catch (error) {
             handleApiError(res, error, 'Opp By County');
+        }
+    };
+
+    // GET /api/opportunities/metadata/years
+    getOpportunityYears = async (req, res) => {
+        try {
+            const data = await this.opportunityService.getOpportunityYears();
+            res.json({ success: true, data });
+        } catch (error) {
+            handleApiError(res, error, 'Get Opp Years');
         }
     };
 

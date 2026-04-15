@@ -4,9 +4,10 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.10.3
- * @date 2026-03-18
+ * @version 8.11.0 (Phase 9 - Metadata Decoupling)
+ * @date 2026-04-15
  * @description 
+ * - [PATCH] Added getOpportunityYears to fetch distinct creation years safely.
  * - [PATCH] Unified interaction logging entry point: replaced direct interactionWriter calls with interactionService. No behavior change.
  * - [PHASE 8.14] Refactored addContactToOpportunity to pure SQL. Removed legacy RAW sheet writers (getOrCreateCompany, getOrCreateContact, updateContactStatus). Reused existing SQL contacts by name and companyId.
  * - [PHASE 8.13] Implemented SQL-only scaffolding for company and contact within createOpportunity. Injected contactSqlWriter.
@@ -441,6 +442,16 @@ class OpportunityService {
             return deleteResult;
         } catch (error) {
             console.error('[OpportunityService] deleteOpportunity Error:', error);
+            throw error;
+        }
+    }
+
+    async getOpportunityYears() {
+        if (!this.opportunitySqlReader) return [];
+        try {
+            return await this.opportunitySqlReader.getOpportunityYears();
+        } catch (error) {
+            console.error('[OpportunityService] getOpportunityYears Error:', error);
             throw error;
         }
     }

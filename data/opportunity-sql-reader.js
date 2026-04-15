@@ -4,25 +4,14 @@
  * - Type: SQL Reader (Read-Only)
  * - Target: PostgreSQL (Supabase)
  * - Table: opportunities
- * - Version: 2.0.1 (Phase 9-B.1)
+ * - Version: 2.3.0 (Phase 10 - Company List Lightweight Aggregation)
  * - Date: 2026-04-15
  * - Changelog: 
- * - [PHASE 9-B.1] Added nullsFirst: false to .order() calls to ensure NULL values sort to the bottom, restoring legacy JS UX.
- * - [PHASE 9-B] DB-First effectiveLastActivity integration. Attempts to use 'v_opportunities_summary' view for true SQL pagination and sorting, with a seamless JS fallback.
- * * ============================================================================
- * REQUIRED SQL MIGRATION FOR DB-FIRST FAST-PATH:
- * * CREATE OR REPLACE VIEW v_opportunities_summary AS
- * SELECT 
- * o.*,
- * GREATEST(
- * o.updated_time,
- * o.created_time,
- * (SELECT MAX(COALESCE(i.interaction_time, i.created_time)) 
- * FROM interactions i 
- * WHERE i.opportunity_id = o.opportunity_id)
- * ) as effective_last_activity
- * FROM opportunities o;
- * ============================================================================
+ * - [PHASE 10] Added getAllOpportunityCompanyNames() for lightweight cross-module counting without FKs.
+ * - [PHASE 9-D] Fixed post-pagination JS filtering. Migrated probability to native SQL.
+ * - [PHASE 9] Added getOpportunityYears() to fetch distinct creation years safely.
+ * - [PHASE 9-B.1] Added nullsFirst: false to .order() calls to ensure NULL values sort to the bottom.
+ * - [PHASE 9-B] DB-First effectiveLastActivity integration via 'v_opportunities_summary' view.
  */
 
 const { supabase } = require('../config/supabase');
@@ -32,6 +21,47 @@ class OpportunitySqlReader {
     constructor() {
         this.tableName = 'opportunities';
         this.viewName = 'v_opportunities_summary'; // Phase 9-B DB-First Target
+    }
+
+    async getOpportunityYears() {
+        try {
+            // Lightweight column fetch to deduplicate in Node (safest fallback for distinct operations via Supabase JS)
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('created_time');
+
+            if (error) throw new Error(`[OpportunitySqlReader] DB Error: ${error.message}`);
+
+            const yearSet = new Set();
+            (data || []).forEach(row => {
+                if (row.created_time) {
+                    const year = new Date(row.created_time).getFullYear();
+                    if (!isNaN(year)) yearSet.add(year);
+                }
+            });
+
+            return Array.from(yearSet).sort((a, b) => b - a);
+        } catch (error) {
+            console.error('[OpportunitySqlReader] getOpportunityYears Error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * [Phase 10] Lightweight fetch for backend relational counting via soft-link
+     */
+    async getAllOpportunityCompanyNames() {
+        try {
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('customer_company');
+
+            if (error) throw new Error(`[OpportunitySqlReader] DB Error: ${error.message}`);
+            return data || [];
+        } catch (error) {
+            console.error('[OpportunitySqlReader] getAllOpportunityCompanyNames Error:', error);
+            throw error;
+        }
     }
 
     async getOpportunityStats(startOfMonth) {
@@ -178,7 +208,6 @@ class OpportunitySqlReader {
         try {
             // =================================================================
             // STAGE 1: TRUE DB-FIRST PATH (Using SQL View)
-            // Unlocks DB-level pagination, sorting, and time filtering for effectiveLastActivity
             // =================================================================
             try {
                 let dbQuery = supabase.from(this.viewName).select('*', { count: 'exact' });
@@ -201,11 +230,16 @@ class OpportunitySqlReader {
                     dbQuery = dbQuery.gte('created_time', `${y}-01-01T00:00:00Z`).lt('created_time', `${y + 1}-01-01T00:00:00Z`);
                 }
 
+                // [Patch Phase 9-D] Safely migrated probability to native SQL
+                if (filters.probability && filters.probability !== 'all') {
+                    dbQuery = dbQuery.gte('win_probability', Number(filters.probability));
+                }
+
                 if (q) {
                     dbQuery = dbQuery.or(`opportunity_name.ilike.%${q}%,customer_company.ilike.%${q}%`);
                 }
 
-                // DB-First Time Filter (Previously impossible natively)
+                // DB-First Time Filter
                 if (filters.time && filters.time !== 'all') {
                     const timeMap = { '7': 7, '30': 30, '90': 90 };
                     const days = timeMap[filters.time];
@@ -217,7 +251,7 @@ class OpportunitySqlReader {
 
                 // DB-First Sorting
                 const sortMap = {
-                    effectiveLastActivity: 'effective_last_activity', // NATIVE!
+                    effectiveLastActivity: 'effective_last_activity',
                     opportunityName: 'opportunity_name',
                     customerCompany: 'customer_company',
                     opportunityValue: 'opportunity_value',
@@ -237,24 +271,21 @@ class OpportunitySqlReader {
 
                 const dbColumn = sortMap[sortField] || 'effective_last_activity';
                 
-                // [Phase 9-B.1] Add nullsFirst: false to prevent NULLs from appearing at the top when sorting DESC
                 dbQuery = dbQuery.order(dbColumn, { ascending: sortDirection === 'asc', nullsFirst: false });
 
-                if (limit && limit > 0) {
+                // [Patch Phase 9-D] If we must post-filter potentialSpecification, skip native .range() to prevent page truncation
+                const requiresJsPostFilter = filters.potentialSpecification && filters.potentialSpecification !== 'all';
+
+                if (!requiresJsPostFilter && limit && limit > 0) {
                     dbQuery = dbQuery.range(offset, offset + limit - 1);
                 }
 
                 const { data: viewData, count: viewCount, error: viewError } = await dbQuery;
 
                 if (!viewError) {
-                    // DB-First JS Filters (For JSON columns not natively mapped yet)
                     let results = (viewData || []).map(row => this._mapRowToDto(row));
                     
-                    if (filters.probability && filters.probability !== 'all') {
-                        results = results.filter(o => Number(o.orderProbability || o.winProbability || 0) >= Number(filters.probability));
-                    }
-
-                    if (filters.potentialSpecification && filters.potentialSpecification !== 'all') {
+                    if (requiresJsPostFilter) {
                         const val = filters.potentialSpecification;
                         results = results.filter(opp => {
                             const specData = opp.potentialSpecification;
@@ -266,6 +297,12 @@ class OpportunitySqlReader {
                                 return typeof specData === 'string' && specData.includes(val);
                             }
                         });
+
+                        const total = results.length;
+                        if (limit && limit > 0) {
+                            results = results.slice(offset, offset + limit);
+                        }
+                        return { data: results, total };
                     }
 
                     return { data: results, total: viewCount || results.length };
@@ -283,14 +320,13 @@ class OpportunitySqlReader {
 
             // =================================================================
             // STAGE 2: LEGACY COMPATIBILITY FALLBACK
-            // Executes if the v_opportunities_summary view is not deployed yet
             // =================================================================
             console.warn('[OpportunitySqlReader] View v_opportunities_summary not found. Falling back to JS aggregation.');
 
             const isNativeSort = sortField && sortField !== 'effectiveLastActivity';
             
+            // [Patch Phase 9-D] Removed probability from JS filters trigger
             const hasJsFilters = 
-                (filters.probability && filters.probability !== 'all') ||
                 (filters.time && filters.time !== 'all') ||
                 (filters.potentialSpecification && filters.potentialSpecification !== 'all');
 
@@ -306,6 +342,11 @@ class OpportunitySqlReader {
             if (filters.channel && filters.channel !== 'all') query = query.eq('sales_channel', filters.channel);
             if (filters.scale && filters.scale !== 'all') query = query.eq('equipment_scale', filters.scale);
             
+            // [Patch Phase 9-D] Added probability natively to Fallback
+            if (filters.probability && filters.probability !== 'all') {
+                query = query.gte('win_probability', Number(filters.probability));
+            }
+
             if (filters.status && filters.status !== 'all') {
                 query = query.eq('current_status', filters.status);
             } else {
@@ -343,7 +384,6 @@ class OpportunitySqlReader {
 
                 const dbColumn = sortMap[sortField] || 'updated_time';
                 
-                // [Phase 9-B.1] Add nullsFirst: false to Fallback Fast-Path as well
                 query = query.order(dbColumn, { ascending: sortDirection === 'asc', nullsFirst: false });
 
                 if (limit && limit > 0) {
@@ -391,10 +431,7 @@ class OpportunitySqlReader {
                 return dto;
             });
 
-            if (filters.probability && filters.probability !== 'all') {
-                results = results.filter(o => Number(o.orderProbability || o.winProbability || 0) >= Number(filters.probability));
-            }
-
+            // JS Filter for potentialSpecification only
             if (filters.potentialSpecification && filters.potentialSpecification !== 'all') {
                 const val = filters.potentialSpecification;
                 results = results.filter(opp => {
@@ -483,7 +520,6 @@ class OpportunitySqlReader {
             updatedBy: row.updated_by
         };
 
-        // [Phase 9-B] Safely extract DB-First effective_last_activity if view is active
         if (row.effective_last_activity) {
             dto.effectiveLastActivity = new Date(row.effective_last_activity).getTime();
         } else {

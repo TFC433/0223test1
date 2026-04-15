@@ -1,13 +1,13 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * @version 8.3.1
- * @date 2026-03-18
+ * @version 8.4.0 (Phase 10 - Backend Opportunity Counting)
+ * @date 2026-04-15
  * @changelog 
+ * - [PATCH PHASE 10] Added lightweight opportunity counting. Removed frontend dependency on page=0.
  * - [PATCH] Unified interaction logging entry point: replaced interactionWriter with interactionService. No behavior change.
  * - [PHASE 9.3] Fixed semantic mismatch: routed RAW potential contacts fetch explicitly to contactService.getPotentialContacts instead of ambiguously overloading contactReader.getContacts.
  * - [PHASE 9.3] Replaced fallback contactReader.getContactList() with robust contactSqlReader fallback.
- * - Phase 8.2.0: Removed InteractionReader dependency.
  */
 
 class CompanyService {
@@ -204,9 +204,13 @@ class CompanyService {
                 companies = companies.filter(c => c.engagementRating === filters.rating);
             }
 
-            const [interactions, eventLogs] = await Promise.all([
+            // [PATCH Phase 10] Replaced frontend /api/opportunities?page=0 dependency with lightweight backend column fetch
+            const [interactions, eventLogs, oppCompanyData] = await Promise.all([
                 this.interactionSqlReader.getInteractions(),
-                this.eventLogSqlReader ? this.eventLogSqlReader.getEventLogs() : this.eventLogReader.getEventLogs()
+                this.eventLogSqlReader ? this.eventLogSqlReader.getEventLogs() : this.eventLogReader.getEventLogs(),
+                this.opportunitySqlReader && typeof this.opportunitySqlReader.getAllOpportunityCompanyNames === 'function' 
+                    ? this.opportunitySqlReader.getAllOpportunityCompanyNames() 
+                    : Promise.resolve([])
             ]);
 
             const lastActivityMap = new Map();
@@ -222,6 +226,15 @@ class CompanyService {
             interactions.forEach(item => updateActivity(item.companyId, item.interactionTime || item.date));
             eventLogs.forEach(item => updateActivity(item.companyId, item.createdTime));
 
+            // Aggregate Opportunity Counts safely in Node.js memory
+            const oppCountMap = new Map();
+            (oppCompanyData || []).forEach(row => {
+                if (row.customer_company) {
+                    const normalized = this._normalizeCompanyName(row.customer_company);
+                    oppCountMap.set(normalized, (oppCountMap.get(normalized) || 0) + 1);
+                }
+            });
+
             const result = companies.map(comp => {
                 let lastTs = lastActivityMap.get(comp.companyId);
                 
@@ -230,8 +243,11 @@ class CompanyService {
                     if (!isNaN(createdTs)) lastTs = createdTs;
                 }
 
+                const normalizedCompName = this._normalizeCompanyName(comp.companyName);
+
                 return {
                     ...comp,
+                    opportunityCount: oppCountMap.get(normalizedCompName) || 0,
                     lastActivity: lastTs ? new Date(lastTs).toISOString() : null,
                     _sortTs: lastTs || 0
                 };

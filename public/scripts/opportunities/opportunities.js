@@ -1,15 +1,16 @@
 // public/scripts/opportunities/opportunities.js
 /**
  * 職責：管理「機會案件列表頁」的篩選、列表渲染與操作
- * @version 8.4.0 (Phase 9-C)
+ * @version 8.5.0 (Phase 9 - Metadata Decoupling)
  * @date 2026-04-15
  * @description 
+ * - [PHASE 9] Replaced expensive `page=0` full-dataset fetch with dedicated lightweight `metadata/years` endpoint.
  * - [PHASE 9-C] Implemented Incremental Append Pagination (limit 50) to drastically reduce first-load payload and DOM render cost.
  * - [Hierarchy Fix Patch] Reordered top controls to strictly follow: Tabs -> Dropdowns -> Search -> Status/Count -> Table.
  */
 
 // ==================== 全域變數 (此頁面專用) ====================
-let opportunitiesData = [];
+let opportunitiesData = []; // Maintained strictly as an empty default wrapper to prevent undefined variable crashes
 
 // 篩選與排序狀態
 let opportunitiesListFilters = { 
@@ -100,9 +101,9 @@ async function loadOpportunities(query = '') {
     }
 
     try {
-        // [Phase 9-C Note] Preserved page=0 fetch here specifically to populate the yearSet filter globally.
-        const [opportunitiesResult, systemConfigResult] = await Promise.all([
-            authedFetch(`/api/opportunities?page=0`), 
+        // [Phase 9 Note] Replaced expensive page=0 payload with dedicated lightweight metadata call
+        const [yearsResult, systemConfigResult] = await Promise.all([
+            authedFetch(`/api/opportunities/metadata/years`), 
             authedFetch(`/api/config`)
         ]);
 
@@ -119,21 +120,9 @@ async function loadOpportunities(query = '') {
             });
         }
 
-        let opportunities = opportunitiesResult || [];
-
-        const yearSet = new Set();
-        opportunities.forEach(opp => {
-             if (typeof opp.effectiveLastActivity !== 'number' || Number.isNaN(opp.effectiveLastActivity)) {
-                 opp.effectiveLastActivity = new Date(opp.lastUpdateTime || opp.createdTime || 0).getTime();
-             }
-             const createdDate = new Date(opp.createdTime);
-             opp.creationYear = isNaN(createdDate.getTime()) ? null : createdDate.getFullYear();
-             if (opp.creationYear) yearSet.add(opp.creationYear);
-        });
-
         const yearFilter = document.getElementById('opp-year-filter');
-        if (yearFilter) {
-            const sortedYears = Array.from(yearSet).sort((a, b) => b - a);
+        if (yearFilter && yearsResult && yearsResult.success && Array.isArray(yearsResult.data)) {
+            const sortedYears = yearsResult.data;
             sortedYears.forEach(y => {
                 const opt = document.createElement('option');
                 opt.value = y;
@@ -143,7 +132,7 @@ async function loadOpportunities(query = '') {
             yearFilter.value = opportunitiesListFilters.year;
         }
 
-        opportunitiesData = opportunities;
+        opportunitiesData = []; // Clear old dataset entirely from DOM memory.
 
         // Reset page and execute initial render
         currentOppPage = 1;
