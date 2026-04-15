@@ -1,8 +1,8 @@
 /**
- * @version 1.0.2
- * @date 2026-03-12
+ * @version 1.0.3
+ * @date 2026-04-15
  * @purpose Hotfix：event-editor 最小改動 (參數傳遞 + 解除一次性載入鎖定) 
- * * [Performance Fix] Dashboard SPA Cache: 修復 dashboard 忽略 SPA 快取導致的每次切換重複請求問題
+ * * [Phase 1] Relax SPA Cache: 移除 Router 強加的列表頁鎖定，消除對手動重整 (Manual Refresh) 的依賴
  */
 
 // public/scripts/core/router.js
@@ -166,8 +166,9 @@ const Router = {
                         }
                     }
 
-                    // [Hotfix-3] event-editor：不寫入 loaded=true，避免「鎖死」造成新增/編輯切換失效
-                    if (!isDetailPage && pageName !== 'event-editor') config.loaded = true;
+                    // [Phase 1] 移除 router 強加的列表頁 config.loaded = true 快取鎖定
+                    // 讓列表頁下次點擊時能自動 fetch 最新 SQL 資料
+                    // if (!isDetailPage && pageName !== 'event-editor') config.loaded = true;
 
                 } catch (err) {
                     console.error(`[Router] 載入頁面失敗:`, err);

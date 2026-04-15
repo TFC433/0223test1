@@ -1,24 +1,3 @@
-<!--
-FILE: public/dashboard.html
-VERSION: 8.0.8
-DATE: 2026-03-10
-
-CHANGELOG
-Phase 8.0.8
-- Replaced Highcharts CDN scripts with local vendor assets.
-- All Highcharts libraries now load from:
-  /assets/vendor/highcharts/
-
-REASON
-Corporate firewall / CSP blocks code.highcharts.com CDN (403).
-Local vendoring ensures stable loading in internal networks
-and Render deployment.
-
-NO BUSINESS LOGIC CHANGES
-Only static script path replacement.
--->
-
-
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -123,16 +102,6 @@ Only static script path replacement.
                     </button>
                     <button class="action-btn secondary" onclick="dashboardManager.forceRefresh()" title="強制重新整理">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px; height:16px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-                    </button>
-                    
-                    <button id="data-refresh-notification" class="action-btn secondary" 
-                            style="display: none; background-color: var(--accent-orange); color: white; border: none; cursor: pointer; animation: pulse-orange 2s infinite;" 
-                            onclick="CRM_APP.forceRefreshAndRestartPolling()"
-                            title="有其他成員更新了資料，點此重新整理">
-                        <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16">
-                            <path fill-rule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.2 5.002l.147-.293a.75.75 0 011.302.651l-.147.293a7 7 0 1011.02-6.32 1 1 0 00-1.383.58 5.492 5.492 0 01-1.739.08zM8.41 4.54a.75.75 0 011.18-.04l.147.293a.75.75 0 01-1.302.651l-.147-.293A.75.75 0 018.41 4.54zM4.688 8.576a5.5 5.5 0 019.2-5.002l-.147.293a.75.75 0 01-1.302-.651l.147-.293a7 7 0 10-11.02 6.32 1 1 0 001.383-.58 5.492 5.492 0 011.739-.08z" clip-rule="evenodd" />
-                        </svg>
-                        <span class="btn-text">資料已更新，請點此重整</span>
                     </button>
 
                     <div class="user-info" id="user-display" onclick="UserProfile.open()" title="查看個人檔案">

@@ -1,120 +1,12 @@
-// public/scripts/core/main.js (重構版: Smart Polling + 序列化資源載入)
-// 職責：系統初始化入口與智慧輪詢管理
-// @version [Patch] Dashboard debug cleanup
-// @date 2026-03-12
+// public/scripts/core/main.js (重構版: 序列化資源載入)
+// 職責：系統初始化入口
+// @version [Phase 2] Manual Refresh UX Removal
+// @date 2026-04-15
 // @changelog
-// - Removed high-frequency SmartPolling lifecycle debug logs.
-// - Removed refreshCurrentView debug and debounce logs.
+// - Removed obsolete SmartPolling system.
+// - Kept refreshCurrentView exactly as it was for local save/delete flows.
 
 window.CRM_APP = window.CRM_APP || {};
-
-// --- Smart Polling Manager ---
-const SmartPolling = {
-    intervalId: null,
-    isActive: true,
-    lastActivity: Date.now(),
-    currentInterval: 30000, // Default 30s
-    dataTimestamp: 0,
-
-    init() {
-        // 1. 監聽使用者活動 (Activity Tracking)
-        const resetActivity = () => {
-            this.lastActivity = Date.now();
-            if (!this.isActive) this.resume();
-        };
-        ['mousemove', 'keydown', 'click', 'scroll'].forEach(evt => 
-            document.addEventListener(evt, () => {
-                // Simple throttle for activity update
-                if (Date.now() - this.lastActivity > 1000) resetActivity();
-            }, { passive: true })
-        );
-
-        // 2. 監聽分頁可見性 (Visibility Tracking)
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                this.slowDown(); // Background -> Slow poll
-            } else {
-                this.resume();   // Foreground -> Normal poll
-            }
-        });
-
-        // 3. 啟動
-        this.start();
-    },
-
-    start() {
-        this.runCycle();
-    },
-
-    runCycle() {
-        if (this.intervalId) clearTimeout(this.intervalId);
-
-        // Calculate next delay based on state
-        let delay = this.currentInterval;
-        const now = Date.now();
-        const isIdle = (now - this.lastActivity) > 60000; // 1 min idle
-        
-        // Logic:
-        // - User Active: Normal (30s)
-        // - User Idle (>1m): Slow (2m)
-        // - Tab Hidden: Slower (5m)
-        // - Modal Open: Pause (handled by check)
-
-        if (document.hidden) {
-            delay = 300000; // 5 mins
-        } else if (isIdle) {
-            delay = 120000; // 2 mins
-        } else {
-            delay = 30000; // 30 secs
-        }
-
-        // Check for open modals (Pause if editing)
-        const hasOpenModal = document.querySelector('.modal[style*="display: block"]');
-        if (hasOpenModal) {
-            this.intervalId = setTimeout(() => this.runCycle(), 10000); // Check again in 10s
-            return;
-        }
-
-        this.checkServer();
-        this.intervalId = setTimeout(() => this.runCycle(), delay);
-    },
-
-    resume() {
-        if (!this.isActive) {
-            this.isActive = true;
-            this.currentInterval = 30000;
-            this.runCycle(); // Restart immediately
-        }
-    },
-
-    slowDown() {
-        this.isActive = false;
-        // Logic handled in runCycle via document.hidden check
-    },
-
-    async checkServer() {
-        try {
-            // Check system status
-            const result = await authedFetch('/api/system/status', { skipRefresh: true });
-            if (result && result.success && result.lastWriteTimestamp) {
-                const serverTime = result.lastWriteTimestamp;
-                if (this.dataTimestamp === 0) {
-                    this.dataTimestamp = serverTime;
-                } else if (serverTime > this.dataTimestamp) {
-                    console.warn(`[Sync] 偵測到新資料！伺服器: ${serverTime}`);
-                    this.showRefreshNotice(true);
-                }
-            }
-        } catch (err) {
-            // Ignore auth errors or network blips
-        }
-    },
-
-    showRefreshNotice(show) {
-        const bar = document.getElementById('data-refresh-notification');
-        if (bar) bar.style.display = show ? 'flex' : 'none';
-    }
-};
 
 // --- Main App Logic ---
 
@@ -124,9 +16,6 @@ CRM_APP.init = async function() {
         await this.loadResources();
         await this.loadConfig();
         LayoutManager.init();
-        
-        // Use SmartPolling instead of legacy startDataPolling
-        SmartPolling.init();
 
         Router.init();
 
@@ -181,10 +70,7 @@ CRM_APP.loadResources = async function() {
     
     const container = document.getElementById('modal-container');
     if (container) {
-        // 【修改】將並發請求改為序列化請求 (Sequential Fetch) 以防止 429 錯誤
-        // 舊寫法: await Promise.all(...) -> 會同時發出 8+ 個請求
-        // 新寫法: for...of + await -> 一個接一個載入
-        
+        // 序列化請求 (Sequential Fetch) 以防止 429 錯誤
         let htmls = [];
         for (const c of components) {
             try {
@@ -204,7 +90,7 @@ CRM_APP.loadResources = async function() {
 
     const types = ['general', 'iot', 'dt', 'dx'];
     
-    // 【修改】同樣將表單樣板改為序列化載入
+    // 序列化載入表單
     for (const t of types) {
         try {
             const file = `/components/forms/event-form-${t === 'dx' ? 'general' : t}.html`;
@@ -290,12 +176,6 @@ function logout() {
     localStorage.removeItem('crmUserRole');
     window.location.href = '/';
 }
-
-// Override legacy polling methods to use SmartPolling (if needed elsewhere)
-window.CRM_APP.startDataPolling = () => SmartPolling.resume();
-window.CRM_APP.stopDataPolling = () => SmartPolling.slowDown(); // or actually pause?
-// Note: SyncService from sync-service.js might still exist if loaded. 
-// We rely on main.js loading last or this overriding.
 
 document.addEventListener('DOMContentLoaded', () => {
     if (!window.CRM_APP_INITIALIZED) {
