@@ -4,37 +4,22 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version v1.1.1 Dashboard RAW Contact KPI Patch
- * @date 2026-04-14
+ * @version 2.0.0 Phase 9-A SQL-First Dashboard Optimization
+ * @date 2026-04-15
  * @changelog
+ * - [PHASE 9-A] Replaced full-table interactions hydration with targeted SQL queries (getInteractionActivities, getRecentInteractionsFeed).
+ * - [PHASE 9-A] Eliminated redundant O(N*M) latestInteractionMap JS logic. Now relies purely on OpportunitySqlReader's native effectiveLastActivity.
  * - [PATCH] Fixed "潛在客戶數量" KPI to use RAW contacts (Google Sheets) via contactRawReader instead of CORE (SQL), maintaining minimal diff and performance.
  * - [PERF] Parallelized dashboard data fetch groups (Batch1, Batch2, Batch3, Weekly) to reduce first-load latency.
  * - [PERF] Eliminated full contacts table hydration from dashboard flow.
- * - [PERF] Introduced O(1) latestInteractionMap lookup to replace nested interaction scans.
  * - [PERF] Introduced targeted MTU/SI event activity projection to avoid full event_logs hydration.
- * - [CLEANUP] Removed temporary performance instrumentation used during forensics.
- * - Removed DashboardService DEBUG console logs
  */
 
 class DashboardService {
-    /**
-     * 建構子：接收所有必要的資料讀取器與服務
-     * @param {Object} config - 系統設定
-     * @param {ContactService} contactService - [Phase 7 Fix]
-     * @param {EventLogSqlReader} eventLogSqlReader - [Phase 8.3d] Strict SQL Reader
-     * @param {SystemReader} systemReader
-     * @param {WeeklyBusinessService} weeklyBusinessService
-     * @param {CalendarService} calendarService
-     * @param {ContactSqlReader} contactSqlReader - [Phase 8.7] SQL Reader
-     * @param {InteractionSqlReader} interactionSqlReader - [Phase 8.7] SQL Reader
-     * @param {CompanySqlReader} companySqlReader - [Phase 8.7] SQL Reader
-     * @param {OpportunitySqlReader} opportunitySqlReader - [Phase 8.7] SQL Reader
-     * @param {SystemService} systemService - [Phase 8.8] Service Layer
-     */
     constructor(
         config,
         contactService,
-        eventLogSqlReader, // Renamed to enforce SQL usage
+        eventLogSqlReader, 
         systemReader,
         weeklyBusinessService,
         calendarService,
@@ -44,34 +29,23 @@ class DashboardService {
         opportunitySqlReader,
         systemService
     ) {
-        // 嚴格檢查依賴 (移除舊有 Sheet Readers 的檢查)
         if (!contactService || !config || !eventLogSqlReader) {
             throw new Error('[DashboardService] 初始化失敗：缺少必要的 Reader/Service 或 Config');
         }
 
         this.config = config;
         this.contactService = contactService;
-        
-        // [Phase 8.3d] Explicitly store as SQL reader to avoid confusion
         this.eventLogSqlReader = eventLogSqlReader;
-        
         this.systemReader = systemReader;
         this.weeklyBusinessService = weeklyBusinessService;
         this.calendarService = calendarService;
-
-        // [Phase 8.7] SQL Readers
         this.contactSqlReader = contactSqlReader;
         this.interactionSqlReader = interactionSqlReader;
         this.companySqlReader = companySqlReader;
         this.opportunitySqlReader = opportunitySqlReader;
-        
-        // [Phase 8.8] Service Layer
         this.systemService = systemService;
     }
 
-    /**
-     * 【內部輔助】取得週次 ID 
-     */
     _getWeekId(date) {
         const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
         const dayNum = d.getUTCDay() || 7;
@@ -81,20 +55,13 @@ class DashboardService {
         return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
     }
 
-    /**
-     * 取得主儀表板所需的所有整合資料
-     * 採用分批請求 (Batching) 與 Promise.all 並行處理以優化效能
-     */
     async getDashboardData() {
-        console.log('📊 [DashboardService] 執行主儀表板資料整合 (SQL-Only Mode, Parallelized)...');
+        console.log('📊 [DashboardService] 執行主儀表板資料整合 (Phase 9-A SQL-First Mode)...');
 
         const today = new Date();
         const thisWeekId = this._getWeekId(today);
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-        // --- Parallel Fetch Architecture ---
-        // Shared Promise: Company data is needed by both Batch 2 (reference data) and Batch 3 (MTU/SI stats).
-        // Hoisted to avoid duplicate SQL reads across concurrent batches.
         const companyPromise = this.companySqlReader ? this.companySqlReader.getCompanies() : Promise.resolve([]);
 
         // =================================================================
@@ -102,20 +69,26 @@ class DashboardService {
         // =================================================================
 
         // --- Batch 1: Core Business Data ---
-        // Responsibilities: Fetch primary entities (Opportunities, Interactions) required for active kanban and activity feeds.
         const batch1Promise = (async () => {
             const oppPromise = this.opportunitySqlReader.getOpportunities();
-            const intPromise = this.interactionSqlReader.getInteractions();
-            return await Promise.all([oppPromise, intPromise]);
+            
+            // [PHASE 9-A] Targeted SQL reads instead of full table hydration
+            const intActivityPromise = typeof this.interactionSqlReader.getInteractionActivities === 'function'
+                ? this.interactionSqlReader.getInteractionActivities()
+                : this.interactionSqlReader.getInteractions(); // Fallback
+                
+            const recentIntPromise = typeof this.interactionSqlReader.getRecentInteractionsFeed === 'function'
+                ? this.interactionSqlReader.getRecentInteractionsFeed(5)
+                : Promise.resolve([]);
+
+            return await Promise.all([oppPromise, intActivityPromise, recentIntPromise]);
         })();
 
         // --- Batch 2: Secondary / Reference Data ---
-        // Responsibilities: Fetch calendar events, system configuration, companies, and a lightweight contact feed.
         const batch2Promise = (async () => {
             const calendarPromise = this.calendarService ? this.calendarService.getThisWeekEvents() : Promise.resolve({ todayEvents: [], todayCount: 0, weekCount: 0 });
             const systemPromise = this.systemService ? this.systemService.getSystemConfig() : Promise.resolve({});
             
-            // Performance Fix: Fetch strictly limited top 5 contacts for feed to bypass full table load, saving memory and DB time.
             const recentContactsPromise = typeof this.contactSqlReader.getRecentContactsFeed === 'function' 
                 ? this.contactSqlReader.getRecentContactsFeed(5)
                 : Promise.resolve([]);
@@ -129,9 +102,7 @@ class DashboardService {
         })();
 
         // --- Batch 3: SQL Aggregation Stats & RAW Contacts ---
-        // Responsibilities: Offload heavy COUNT/GROUP BY operations to the SQL layer (Opportunities, EventLogs). Fetch RAW Contacts directly.
         const batch3Promise = (async () => {
-            // [PATCH] Fetch RAW Contacts for the "潛在客戶數量" KPI safely
             const rawContactsPromise = (this.contactService && this.contactService.contactRawReader)
                 ? this.contactService.contactRawReader.getContacts()
                 : Promise.resolve([]);
@@ -139,7 +110,6 @@ class DashboardService {
             const opportunityStatsPromise = this.opportunitySqlReader.getOpportunityStats(startOfMonth);
             const eventStatsPromise = this.eventLogSqlReader.getEventLogStats(startOfMonth);
 
-            // Await companies specifically to build MTU/SI target IDs
             const companies = await companyPromise;
             
             const normalize = (name) => (name || '').trim().toLowerCase();
@@ -151,7 +121,6 @@ class DashboardService {
                 .map(c => c.companyId)
                 .filter(Boolean);
 
-            // Performance Fix: Targeted MTU/SI event activity projection to avoid full event_logs hydration.
             const eventActivityPromise = typeof this.companySqlReader.getTargetCompanyEventActivities === 'function' && targetCompanyIds.length > 0
                 ? this.companySqlReader.getTargetCompanyEventActivities(targetCompanyIds)
                 : Promise.resolve([]);
@@ -163,7 +132,6 @@ class DashboardService {
                 eventActivityPromise
             ]);
 
-            // [PATCH] Calculate contactStats using RAW Potential Contacts
             let rawTotal = 0;
             let rawMonth = 0;
             rawContacts.forEach(c => {
@@ -224,7 +192,10 @@ class DashboardService {
         // =================================================================
         // 資料處理與統計邏輯 (Post-Fetch Aggregation)
         // =================================================================
-        const [opportunitiesRaw, interactions] = batch1Result;
+        
+        // [PHASE 9-A] Extract targeted payloads instead of full tables
+        const [opportunitiesRaw, interactionActivities, recentInteractions] = batch1Result;
+        
         const [calendarData, systemConfig, companies, recentContactsRaw] = batch2Result;
         const [contactStats, opportunityStats, eventStats, eventActivities] = batch3Result;
         const { thisWeeksEntries, thisWeekDetails } = weeklyResult;
@@ -233,23 +204,8 @@ class DashboardService {
         const isStrictMTU = (type) => normalize(type) === 'mtu';
         const isSI = (type) => /SI|系統整合|System Integrator/i.test(type || '');
 
-        // 1. 計算機會最後活動時間
-        // Performance Fix: O(1) Map lookup replaces nested interaction scans (O(N*M))
-        const latestInteractionMap = new Map();
-        interactions.forEach(interaction => {
-            const existingTimestamp = latestInteractionMap.get(interaction.opportunityId) || 0;
-            const currentTimestamp = new Date(interaction.interactionTime || interaction.createdTime).getTime();
-            if (currentTimestamp > existingTimestamp) {
-                latestInteractionMap.set(interaction.opportunityId, currentTimestamp);
-            }
-        });
-
-        opportunitiesRaw.forEach(opp => {
-            const selfUpdateTime = new Date(opp.lastUpdateTime || opp.createdTime).getTime();
-            const lastInteractionTime = latestInteractionMap.get(opp.opportunityId) || 0;
-            opp.effectiveLastActivity = Math.max(selfUpdateTime, lastInteractionTime);
-        });
-
+        // [PHASE 9-A] ELIMINATED redundant O(N*M) JS loop.
+        // OpportunitySqlReader already natively embeds the exact effectiveLastActivity into the payload.
         const opportunities = opportunitiesRaw.sort((a, b) => b.effectiveLastActivity - a.effectiveLastActivity);
 
         // MTU/SI 統計邏輯
@@ -278,14 +234,12 @@ class DashboardService {
             }
         };
 
-        // We already have interactions and opportunities in full, process them normally
-        interactions.forEach(i => i.companyId && recordActivity(i.companyId, i.interactionTime || i.createdTime));
+        // Pass lightweight activity arrays to standard tracking logic
+        interactionActivities.forEach(i => i.companyId && recordActivity(i.companyId, i.interactionTime || i.createdTime));
         opportunities.forEach(opp => {
             const cId = companyNameMap.get(normalize(opp.customerCompany));
             if (cId) recordActivity(cId, opp.createdTime);
         });
-        
-        // Iterate over heavily targeted, minimal DB projection (using raw snake_case keys)
         eventActivities.forEach(e => e.company_id && recordActivity(e.company_id, e.created_time));
 
         let mtuCount = 0;
@@ -331,22 +285,19 @@ class DashboardService {
             return new Date(dateStr) >= startOfMonth;
         }).length;
 
-        // 傳遞已預先計算的 latestInteractionMap，消滅 O(N*M) 巢狀迴圈
-        const followUps = this._getFollowUpOpportunities(opportunities, latestInteractionMap);
+        // Passed directly to rely on SQL-computed metric
+        const followUps = this._getFollowUpOpportunities(opportunities);
 
         const stats = {
             contactsCount: contactStats.total,
             opportunitiesCount: opportunityStats.total,
             eventLogsCount: eventStats.total,
-            
             wonCount: wonCount,
             wonCountMonth: wonCountMonth,
-            
             mtuCount: mtuCount,
             mtuCountMonth: mtuNewMonth,
             siCount: siCount,
             siCountMonth: siNewMonth,
-
             mtuDetails: {
                 totalMtu: staticMtuList.length,
                 activeCount: mtuCount,
@@ -354,11 +305,9 @@ class DashboardService {
                 activeNames: activeMtuNames,     
                 inactiveNames: inactiveMtuNames
             },
-
             todayEventsCount: calendarData.todayCount || 0,
             weekEventsCount: calendarData.weekCount || 0,
             followUpCount: followUps.length,
-            
             contactsCountMonth: contactStats.month,
             opportunitiesCountMonth: opportunityStats.month,
             eventLogsCountMonth: eventStats.month,
@@ -366,8 +315,8 @@ class DashboardService {
 
         const kanbanData = this._prepareKanbanData(opportunities, systemConfig);
         
-        // 嚴格重現 Recent Activity 合併邏輯，但不拉取 Contacts 全表
-        const recentActivity = this._prepareRecentActivity(interactions, recentContactsRaw, opportunities, companies, 5);
+        // Relies on surgical recent SQL fetch
+        const recentActivity = this._prepareRecentActivity(recentInteractions, recentContactsRaw, opportunities, companies, 5);
         
         const thisWeekInfoForDashboard = {
             weekId: thisWeekId,
@@ -386,11 +335,8 @@ class DashboardService {
         };
     }
 
-    // --- 各個子頁面的 Dashboard Data Getters ---
-
     async getCompaniesDashboardData() {
         const companies = await this.companySqlReader.getCompanies();
-
         return {
             chartData: {
                 trend: this._prepareTrendData(companies),
@@ -402,10 +348,7 @@ class DashboardService {
     }
 
     async getEventsDashboardData() {
-        // [Phase 8.3d] STRICT SQL READ (This isolated page still needs full payload)
         const eventLogs = await this.eventLogSqlReader.getEventLogs();
-        
-        // Use Promise.all for others
         const [opportunities, companies] = await Promise.all([
             this.opportunitySqlReader.getOpportunities(),
             this.companySqlReader.getCompanies(),
@@ -473,10 +416,10 @@ class DashboardService {
         };
     }
 
-    // --- 內部資料處理函式 (Data Processing Helpers) ---
+    // --- 內部資料處理函式 ---
 
-    // [Performance Fix] Receives O(1) Map instead of raw interactions array.
-    _getFollowUpOpportunities(opportunities, latestInteractionMap) {
+    // [Phase 9-A] Signature simplified: completely relies on the reader's native SQL computed value.
+    _getFollowUpOpportunities(opportunities) {
         const daysThreshold = (this.config.FOLLOW_UP && this.config.FOLLOW_UP.DAYS_THRESHOLD) || 7;
         const activeStages = (this.config.FOLLOW_UP && this.config.FOLLOW_UP.ACTIVE_STAGES) || ['01_初步接觸', '02_需求確認', '03_提案報價', '04_談判修正'];
         
@@ -489,14 +432,12 @@ class DashboardService {
                 return false;
             }
             
-            const lastInteractionTime = latestInteractionMap.get(opp.opportunityId);
-            
-            if (!lastInteractionTime) {
+            if (!opp.effectiveLastActivity) {
                 const createdDate = new Date(opp.createdTime);
                 return createdDate.getTime() < thresholdTime;
             }
             
-            return lastInteractionTime < thresholdTime;
+            return opp.effectiveLastActivity < thresholdTime;
         });
     }
 
@@ -520,20 +461,17 @@ class DashboardService {
         return stageGroups;
     }
 
-    // [Performance Fix] Accepts limited contact array, maintains exact original sorting semantics
-    _prepareRecentActivity(interactions, contactsLimitArray, opportunities, companies, limit) {
+    _prepareRecentActivity(recentInteractions, contactsLimitArray, opportunities, companies, limit) {
         const contactFeed = contactsLimitArray.map(item => {
             const ts = new Date(item.createdTime);
             return { type: 'new_contact', timestamp: isNaN(ts.getTime()) ? 0 : ts.getTime(), data: item };
         });
         
-        // Preserve exact semantic fidelity: Interaction Time OR Created Time
-        const interactionFeed = interactions.map(item => {
+        const interactionFeed = recentInteractions.map(item => {
             const ts = new Date(item.interactionTime || item.createdTime);
             return { type: 'interaction', timestamp: isNaN(ts.getTime()) ? 0 : ts.getTime(), data: item };
         });
 
-        // Safe absolute Top N sort because interactionFeed is exhaustive and contactFeed represents the absolute Top 5 contacts
         const combinedFeed = [...interactionFeed, ...contactFeed]
             .sort((a, b) => b.timestamp - a.timestamp)
             .slice(0, limit);

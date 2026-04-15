@@ -1,9 +1,11 @@
 // public/scripts/opportunities/opportunities.js
 /**
  * 職責：管理「機會案件列表頁」的篩選、列表渲染與操作
- * @version 8.3.0 (Hierarchy Fix Patch)
- * @date 2026-03-16
- * @description [Hierarchy Fix Patch] Reordered top controls to strictly follow: Tabs -> Dropdowns -> Search -> Status/Count -> Table. Decoupled filter status from dropdown row.
+ * @version 8.4.0 (Phase 9-C)
+ * @date 2026-04-15
+ * @description 
+ * - [PHASE 9-C] Implemented Incremental Append Pagination (limit 50) to drastically reduce first-load payload and DOM render cost.
+ * - [Hierarchy Fix Patch] Reordered top controls to strictly follow: Tabs -> Dropdowns -> Search -> Status/Count -> Table.
  */
 
 // ==================== 全域變數 (此頁面專用) ====================
@@ -19,6 +21,10 @@ let opportunitiesListFilters = {
 };
 let currentOppSort = { field: 'effectiveLastActivity', direction: 'desc' };
 
+// [Phase 9-C] Pagination State
+let currentOppPage = 1;
+const OPP_PAGE_LIMIT = 50;
+
 // ==================== 主要功能函式 ====================
 
 /**
@@ -29,7 +35,7 @@ async function loadOpportunities(query = '') {
     const container = document.getElementById('page-opportunities');
     if (!container) return;
 
-    // 1. 渲染頁面骨架 (Corrected Hierarchy Pattern)
+    // 1. 渲染頁面骨架 
     container.innerHTML = `
         <div id="opportunities-list-root">
             <div class="dashboard-widget">
@@ -94,7 +100,7 @@ async function loadOpportunities(query = '') {
     }
 
     try {
-        // 取得動態配置與原始年份計算資料 (保留 page=0 以計算 yearSet，符合後端現存契約)
+        // [Phase 9-C Note] Preserved page=0 fetch here specifically to populate the yearSet filter globally.
         const [opportunitiesResult, systemConfigResult] = await Promise.all([
             authedFetch(`/api/opportunities?page=0`), 
             authedFetch(`/api/config`)
@@ -104,14 +110,10 @@ async function loadOpportunities(query = '') {
             window.CRM_APP = window.CRM_APP || {};
             window.CRM_APP.systemConfig = systemConfigResult;
             
-            // --- 建立 Opportunity Type Tabs ---
             renderOpportunityTypeTabs(systemConfigResult['機會種類'] || []);
-
-            // 填充下拉選單選項
             populateOppFilterOptions('opp-source-filter', systemConfigResult['機會來源'], '所有來源');
             populateOppFilterOptions('opp-stage-filter', systemConfigResult['機會階段'], '所有階段');
             
-            // 監聽選單變更
             document.querySelectorAll('#opportunity-list-filters select').forEach(select => {
                 select.addEventListener('change', handleOppFilterDropdownChange);
             });
@@ -124,13 +126,11 @@ async function loadOpportunities(query = '') {
              if (typeof opp.effectiveLastActivity !== 'number' || Number.isNaN(opp.effectiveLastActivity)) {
                  opp.effectiveLastActivity = new Date(opp.lastUpdateTime || opp.createdTime || 0).getTime();
              }
-             
              const createdDate = new Date(opp.createdTime);
              opp.creationYear = isNaN(createdDate.getTime()) ? null : createdDate.getFullYear();
              if (opp.creationYear) yearSet.add(opp.creationYear);
         });
 
-        // 動態生成年份選項
         const yearFilter = document.getElementById('opp-year-filter');
         if (yearFilter) {
             const sortedYears = Array.from(yearSet).sort((a, b) => b - a);
@@ -145,8 +145,9 @@ async function loadOpportunities(query = '') {
 
         opportunitiesData = opportunities;
 
-        // 執行初始表格 API 渲染
-        fetchAndRenderOpportunitiesTable();
+        // Reset page and execute initial render
+        currentOppPage = 1;
+        fetchAndRenderOpportunitiesTable(false);
 
     } catch (error) {
         if (error.message !== 'Unauthorized') {
@@ -171,7 +172,8 @@ function handleOpportunitiesClick(e) {
         case 'switch-type-tab':
             opportunitiesListFilters.type = payload.value;
             renderOpportunityTypeTabs(window.CRM_APP?.systemConfig?.['機會種類'] || []);
-            fetchAndRenderOpportunitiesTable();
+            currentOppPage = 1;
+            fetchAndRenderOpportunitiesTable(false);
             break;
         case 'sort':
             handleOppSort(payload.field);
@@ -181,6 +183,10 @@ function handleOpportunitiesClick(e) {
             break;
         case 'clear-filters':
             clearAllOppFilters();
+            break;
+        case 'load-more-opps':
+            currentOppPage++;
+            fetchAndRenderOpportunitiesTable(true);
             break;
         case 'navigate':
             e.preventDefault();
@@ -227,7 +233,8 @@ function populateOppFilterOptions(selectId, options, defaultText) {
 function handleOppFilterDropdownChange(e) {
     const filterKey = e.target.dataset.filter;
     opportunitiesListFilters[filterKey] = e.target.value;
-    fetchAndRenderOpportunitiesTable(); 
+    currentOppPage = 1;
+    fetchAndRenderOpportunitiesTable(false); 
 }
 
 function clearAllOppFilters() {
@@ -235,22 +242,20 @@ function clearAllOppFilters() {
         year: 'all', type: 'all', source: 'all', time: 'all', stage: 'all' 
     };
     
-    // 重設下拉選單
     document.querySelectorAll('#opportunity-list-filters select').forEach(select => {
         select.value = 'all';
     });
 
-    // 重設 Tabs
     renderOpportunityTypeTabs(window.CRM_APP?.systemConfig?.['機會種類'] || []);
 
-    fetchAndRenderOpportunitiesTable();
+    currentOppPage = 1;
+    fetchAndRenderOpportunitiesTable(false);
 }
 
 /**
- * [Phase 8.11 Decoupling]
- * Fetches decoupled table data directly from the backend API.
+ * [Phase 9-C] Incremental Append Table Fetching
  */
-async function fetchAndRenderOpportunitiesTable() {
+async function fetchAndRenderOpportunitiesTable(isAppend = false) {
     const listContent = document.getElementById('opportunities-page-content');
     const filterStatus = document.getElementById('opportunities-filter-status');
     const filterText = document.getElementById('opportunities-filter-text');
@@ -259,7 +264,6 @@ async function fetchAndRenderOpportunitiesTable() {
 
     if (!listContent) return;
 
-    // Update UI for active filters (exclude 'type' from chip count as it's handled by tabs)
     const activeFiltersCount = Object.entries(opportunitiesListFilters).filter(([k, v]) => k !== 'type' && v !== 'all' && v !== undefined).length;
     if (activeFiltersCount > 0) {
         if (filterStatus) filterStatus.style.display = 'flex';
@@ -268,12 +272,21 @@ async function fetchAndRenderOpportunitiesTable() {
         if (filterStatus) filterStatus.style.display = 'none';
     }
 
-    listContent.innerHTML = '<div class="loading show"><div class="spinner"></div><p>載入機會資料中...</p></div>';
+    if (!isAppend) {
+        currentOppPage = 1;
+        listContent.innerHTML = '<div class="loading show"><div class="spinner"></div><p>載入機會資料中...</p></div>';
+    } else {
+        const btn = document.getElementById('btn-load-more-opps');
+        if (btn) {
+            btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;border-top-color:var(--accent-blue);margin-right:8px;display:inline-block;vertical-align:middle;"></div>載入中...';
+            btn.disabled = true;
+        }
+    }
 
     try {
         const params = new URLSearchParams();
-        params.append('page', '1');
-        params.append('limit', '500'); // Baseline reasonable limit for unpaginated UI
+        params.append('page', currentOppPage);
+        params.append('limit', OPP_PAGE_LIMIT); 
         if (query) params.append('q', query);
         
         if (currentOppSort.field) {
@@ -281,7 +294,6 @@ async function fetchAndRenderOpportunitiesTable() {
             params.append('sortDirection', currentOppSort.direction);
         }
 
-        // Map UI filters to backend params
         const keyMapping = { 'type': 'type', 'source': 'source', 'stage': 'stage' };
 
         for (const [key, value] of Object.entries(opportunitiesListFilters)) {
@@ -297,16 +309,48 @@ async function fetchAndRenderOpportunitiesTable() {
         const totalCount = result.total !== undefined ? result.total : tableData.length;
 
         if (countDisplay) countDisplay.innerHTML = `共 ${totalCount} 筆`;
-        listContent.innerHTML = renderOpportunitiesTable(tableData);
+
+        if (!isAppend) {
+            listContent.innerHTML = renderOpportunitiesTable(tableData);
+        } else {
+            const tbody = listContent.querySelector('.opp-list-table tbody');
+            if (tbody) {
+                tbody.insertAdjacentHTML('beforeend', renderOpportunityRows(tableData));
+            }
+            const oldBtnContainer = document.getElementById('opp-load-more-container');
+            if (oldBtnContainer) oldBtnContainer.remove();
+        }
+
+        // Render Load More button if there's more data
+        if (currentOppPage * OPP_PAGE_LIMIT < totalCount) {
+            listContent.insertAdjacentHTML('beforeend', `
+                <div id="opp-load-more-container" style="text-align: center; padding: 20px;">
+                    <button id="btn-load-more-opps" class="action-btn secondary" data-action="load-more-opps" style="padding: 8px 24px; border-radius: 20px; font-weight: 600;">
+                        載入更多 (${Math.min(currentOppPage * OPP_PAGE_LIMIT, totalCount)} / ${totalCount})
+                    </button>
+                </div>
+            `);
+        }
 
     } catch (error) {
         console.error('Fetch table data failed:', error);
-        listContent.innerHTML = `<div class="alert alert-error">載入表格失敗: ${error.message}</div>`;
+        if (!isAppend) {
+            listContent.innerHTML = `<div class="alert alert-error">載入表格失敗: ${error.message}</div>`;
+        } else {
+            const btn = document.getElementById('btn-load-more-opps');
+            if (btn) {
+                btn.innerHTML = '載入失敗，請重試';
+                btn.disabled = false;
+            }
+        }
     }
 }
 
 function handleOpportunitiesSearch(event) {
-    handleSearch(() => fetchAndRenderOpportunitiesTable());
+    handleSearch(() => {
+        currentOppPage = 1;
+        fetchAndRenderOpportunitiesTable(false);
+    });
 }
 
 function handleOppSort(field) {
@@ -316,7 +360,8 @@ function handleOppSort(field) {
         currentOppSort.field = field;
         currentOppSort.direction = 'desc'; 
     }
-    fetchAndRenderOpportunitiesTable();
+    currentOppPage = 1;
+    fetchAndRenderOpportunitiesTable(false);
 }
 
 function renderOpportunitiesTable(opportunities) {
@@ -373,6 +418,13 @@ function renderOpportunitiesTable(opportunities) {
                     <th class="col-actions">操作</th>
                 </tr></thead><tbody>`;
 
+    html += renderOpportunityRows(opportunities);
+    
+    return html + '</tbody></table></div>';
+}
+
+function renderOpportunityRows(opportunities) {
+    let html = '';
     const systemConfig = window.CRM_APP?.systemConfig || {};
     const stageNotes = new Map((systemConfig['機會階段'] || []).map(s => [s.value, s.note || s.value]));
     const typeColors = new Map((systemConfig['機會種類'] || []).map(t => [t.value, t.color]));
@@ -383,17 +435,18 @@ function renderOpportunitiesTable(opportunities) {
         const typeColor = typeColors.get(opp.opportunityType) || '#9ca3af';
         const modelColor = modelColors.get(opp.salesModel) || '#6b7280';
         
-        // Fully converged contract usage
         const channelText = opp.salesChannel || '-';
         const lastActivityDate = opp.effectiveLastActivity ? new Date(opp.effectiveLastActivity).toLocaleDateString('zh-TW') : '-';
 
         const oppParams = JSON.stringify({ opportunityId: opp.opportunityId }).replace(/"/g, '&quot;');
-        
         const safeOppName = (opp.opportunityName || '').replace(/"/g, '&quot;');
+
+        // Calculate absolute row index spanning across pages
+        const absoluteIdx = (currentOppPage - 1) * OPP_PAGE_LIMIT + index + 1;
 
         html += `
             <tr>
-                <td class="col-idx">${index + 1}</td>
+                <td class="col-idx">${absoluteIdx}</td>
                 <td style="white-space:nowrap;">${lastActivityDate}</td>
                 <td><span class="opp-type-chip" style="background:${typeColor}">${opp.opportunityType || '未分類'}</span></td>
                 <td style="min-width:180px;">
@@ -421,7 +474,7 @@ function renderOpportunitiesTable(opportunities) {
             </tr>`;
     });
 
-    return html + '</tbody></table></div>';
+    return html;
 }
 
 async function confirmDeleteOpportunity(oppId, opportunityName) {
@@ -432,7 +485,8 @@ async function confirmDeleteOpportunity(oppId, opportunityName) {
         try {
             const result = await authedFetch(`/api/opportunities/${oppId}`, { method: 'DELETE' });
             if (result.success) {
-                await loadOpportunities(document.getElementById('opportunities-list-search')?.value || '');
+                currentOppPage = 1;
+                fetchAndRenderOpportunitiesTable(false);
             } else { throw new Error(result.details || '刪除操作失敗'); }
         } catch (error) { if (error.message !== 'Unauthorized') console.error('刪除失敗:', error); }
         finally { hideLoading(); }
