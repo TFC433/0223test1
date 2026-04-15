@@ -1,16 +1,16 @@
 // public/scripts/events/event-editor-standalone.js
 /**
- * @version Phase 8.10 Final Stable
- * @date 2026-04-14
- * @purpose Phase 8 Production：修正儲存 UX（成功提示＋關閉編輯器＋避免強制回到 Dashboard／router 迴圈）+ Mutation Stale Integration
- * @description [Bugfix Patch] Unified close paths and removed divergent HTML scroll lock to prevent UI freeze on Cancel/ESC.
+ * @version Phase 8.11 Final Stable
+ * @date 2026-04-15
+ * @purpose Phase 8.11 Production：修正外部關閉 (ESC/Backdrop) 導致的 Scroll Lock 凍結問題
+ * @description [Bugfix Patch] Added MutationObserver to guarantee _unlockScroll fires when modal is hidden externally.
  */
 
 // 職責：獨立的事件編輯器控制器 (含 DT Placeholders)
 // (Refactored: Fix Zero-Dimension Trap via ResizeObserver - Loop Safe)
 
 // [Forensics Probe] Debug Counter
-console.log('%c[EventEditorStandalone] LOADED Phase 8.10 Final Stable Production 2026-03-12 (Patched)', 'color:#22c55e;font-weight:bold;');
+console.log('%c[EventEditorStandalone] LOADED Phase 8.11 Final Stable Production (Patched)', 'color:#22c55e;font-weight:bold;');
 
 window._DEBUG_EDITOR_OPEN_COUNT ||= 0;
 
@@ -24,6 +24,7 @@ const EventEditorStandalone = (() => {
     
     let _isInitialized = false;
     let _resizeObserver = null;
+    let _modalObserver = null; // [Fix] Observer for external close detection
     
     // [Fix] State flags for scroll lock and re-entry guard
     let _isOpening = false;
@@ -118,6 +119,17 @@ const EventEditorStandalone = (() => {
                     }
                 }
             });
+        }
+
+        // [Fix] Initialize MutationObserver to catch external close (ESC / backdrop click)
+        if (!_modalObserver && _modal) {
+            _modalObserver = new MutationObserver(() => {
+                if (_modal.style.display === 'none' || window.getComputedStyle(_modal).display === 'none') {
+                    _unlockScroll();
+                    if (_resizeObserver) _resizeObserver.disconnect();
+                }
+            });
+            _modalObserver.observe(_modal, { attributes: true, attributeFilter: ['style', 'class'] });
         }
 
         _isInitialized = true;
