@@ -6,8 +6,11 @@
  * - Table: companies
  * - Schema: Strict adherence to provided JSON schema
  * - Constraints: No rowIndex, No guessing, No update/delete
- * - Version: 1.2.0 (Performance Fix: Added getTargetCompanyEventActivities to avoid dashboard memory hydration)
- * - Date: 2026-03-12
+ * - Version: 1.3.0 (Phase 11 - Company List DB-First lastActivity)
+ * - Date: 2026-04-15
+ * - Changelog: 
+ * - [PHASE 11] Added View-first read path ('v_companies_summary') with graceful fallback to table.
+ * - [PHASE 10] Migrated opportunityCount to backend.
  */
 
 const { supabase } = require('../config/supabase');
@@ -16,6 +19,7 @@ class CompanySqlReader {
 
     constructor() {
         this.tableName = 'companies';
+        this.viewName = 'v_companies_summary'; // Phase 11 DB-First Target
     }
 
     /**
@@ -68,6 +72,19 @@ class CompanySqlReader {
      */
     async getCompanies() {
         try {
+            // --- STAGE 1: DB-First View Path ---
+            const viewRes = await supabase.from(this.viewName).select('*');
+            if (!viewRes.error && viewRes.data) {
+                return viewRes.data.map(row => this._mapRowToDto(row));
+            }
+
+            if (viewRes.error && viewRes.error.code !== '42P01') {
+                 console.warn('[CompanySqlReader] View query failed with non-42P01 error:', viewRes.error);
+            } else if (viewRes.error) {
+                 console.warn('[CompanySqlReader] View v_companies_summary not found. Falling back to base table.');
+            }
+
+            // --- STAGE 2: Legacy Fallback ---
             const { data, error } = await supabase
                 .from(this.tableName)
                 .select('*');
@@ -131,7 +148,7 @@ class CompanySqlReader {
     _mapRowToDto(row) {
         if (!row) return null;
 
-        return {
+        const dto = {
             // Identity
             companyId: row.company_id,
             companyName: row.company_name,
@@ -153,6 +170,14 @@ class CompanySqlReader {
             createdBy: row.created_by,
             updatedBy: row.updated_by
         };
+
+        // Phase 11: Safely map DB-First lastActivity if view is active
+        if (row.last_activity) {
+            dto.lastActivity = new Date(row.last_activity).toISOString();
+            dto._hasNativeActivity = true;
+        }
+
+        return dto;
     }
 }
 

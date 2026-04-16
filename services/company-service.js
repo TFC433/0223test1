@@ -1,13 +1,12 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * @version 8.4.0 (Phase 10 - Backend Opportunity Counting)
+ * @version 8.5.0 (Phase 11 - DB-First lastActivity)
  * @date 2026-04-15
  * @changelog 
+ * - [PATCH PHASE 11] Added graceful DB-First bypass for full interactions/eventLogs tables using _hasNativeActivity.
  * - [PATCH PHASE 10] Added lightweight opportunity counting. Removed frontend dependency on page=0.
  * - [PATCH] Unified interaction logging entry point: replaced interactionWriter with interactionService. No behavior change.
- * - [PHASE 9.3] Fixed semantic mismatch: routed RAW potential contacts fetch explicitly to contactService.getPotentialContacts instead of ambiguously overloading contactReader.getContacts.
- * - [PHASE 9.3] Replaced fallback contactReader.getContactList() with robust contactSqlReader fallback.
  */
 
 class CompanyService {
@@ -61,7 +60,9 @@ class CompanyService {
             lastUpdateTime: raw.lastUpdateTime || raw.updatedTime || raw.updated_time || '',
             creator: raw.creator || raw.createdBy || raw.created_by || '',
             lastModifier: raw.lastModifier || raw.updatedBy || raw.updated_by || '',
-            rowIndex: raw.rowIndex
+            rowIndex: raw.rowIndex,
+            lastActivity: raw.lastActivity || null,
+            _hasNativeActivity: raw._hasNativeActivity || false
         };
     }
 
@@ -204,10 +205,13 @@ class CompanyService {
                 companies = companies.filter(c => c.engagementRating === filters.rating);
             }
 
-            // [PATCH Phase 10] Replaced frontend /api/opportunities?page=0 dependency with lightweight backend column fetch
+            // Detect if the reader successfully used the v_companies_summary View
+            const hasNativeActivity = companies.length > 0 && companies[0]._hasNativeActivity;
+
+            // [PATCH Phase 11] Condition interactions/event_logs full fetch upon lack of Native Activity
             const [interactions, eventLogs, oppCompanyData] = await Promise.all([
-                this.interactionSqlReader.getInteractions(),
-                this.eventLogSqlReader ? this.eventLogSqlReader.getEventLogs() : this.eventLogReader.getEventLogs(),
+                hasNativeActivity ? Promise.resolve([]) : this.interactionSqlReader.getInteractions(),
+                hasNativeActivity ? Promise.resolve([]) : (this.eventLogSqlReader ? this.eventLogSqlReader.getEventLogs() : this.eventLogReader.getEventLogs()),
                 this.opportunitySqlReader && typeof this.opportunitySqlReader.getAllOpportunityCompanyNames === 'function' 
                     ? this.opportunitySqlReader.getAllOpportunityCompanyNames() 
                     : Promise.resolve([])
@@ -215,16 +219,18 @@ class CompanyService {
 
             const lastActivityMap = new Map();
             
-            const updateActivity = (companyId, dateStr) => {
-                if (!companyId || !dateStr) return;
-                const ts = new Date(dateStr).getTime();
-                if (isNaN(ts)) return;
-                const current = lastActivityMap.get(companyId) || 0;
-                if (ts > current) lastActivityMap.set(companyId, ts);
-            };
+            if (!hasNativeActivity) {
+                const updateActivity = (companyId, dateStr) => {
+                    if (!companyId || !dateStr) return;
+                    const ts = new Date(dateStr).getTime();
+                    if (isNaN(ts)) return;
+                    const current = lastActivityMap.get(companyId) || 0;
+                    if (ts > current) lastActivityMap.set(companyId, ts);
+                };
 
-            interactions.forEach(item => updateActivity(item.companyId, item.interactionTime || item.date));
-            eventLogs.forEach(item => updateActivity(item.companyId, item.createdTime));
+                interactions.forEach(item => updateActivity(item.companyId, item.interactionTime || item.date));
+                eventLogs.forEach(item => updateActivity(item.companyId, item.createdTime));
+            }
 
             // Aggregate Opportunity Counts safely in Node.js memory
             const oppCountMap = new Map();
@@ -236,11 +242,16 @@ class CompanyService {
             });
 
             const result = companies.map(comp => {
-                let lastTs = lastActivityMap.get(comp.companyId);
+                let lastTs = null;
                 
-                if (!lastTs && comp.createdTime) {
-                    const createdTs = new Date(comp.createdTime).getTime();
-                    if (!isNaN(createdTs)) lastTs = createdTs;
+                if (comp._hasNativeActivity && comp.lastActivity) {
+                    lastTs = new Date(comp.lastActivity).getTime();
+                } else {
+                    lastTs = lastActivityMap.get(comp.companyId);
+                    if (!lastTs && comp.createdTime) {
+                        const createdTs = new Date(comp.createdTime).getTime();
+                        if (!isNaN(createdTs)) lastTs = createdTs;
+                    }
                 }
 
                 const normalizedCompName = this._normalizeCompanyName(comp.companyName);
@@ -254,7 +265,9 @@ class CompanyService {
             });
 
             result.sort((a, b) => b._sortTs - a._sortTs);
-            return result.map(({ _sortTs, ...rest }) => rest);
+            
+            // Clean up temporary internal flags before sending to controller/frontend
+            return result.map(({ _sortTs, _hasNativeActivity, ...rest }) => rest);
 
         } catch (error) {
             console.error('[CompanyService] List Error:', error);
