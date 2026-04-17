@@ -1,8 +1,9 @@
 /**
  * public/scripts/opportunities/opportunity-modals.js
- * @version v5.0.9
- * @date 2026-03-13
+ * @version v5.0.10
+ * @date 2026-04-17
  * @changelog
+ * - Fix empty contact creation by trimming mainContact in payload
  * - Fix wizard card search residual input state
  * - Add success notification after opportunity creation
  * - Auto navigate to created opportunity detail page
@@ -752,7 +753,7 @@ document.addEventListener('submit', async function(e) {
         
         const payload = {
             customerCompany: stateData.companyName,
-            mainContact: stateData.mainContact,
+            mainContact: (stateData.mainContact || '').trim(),
             contactPhone: stateData.contactPhone,
             county: stateData.county,
             

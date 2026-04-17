@@ -4,9 +4,11 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.12.0 (Phase A - Interaction Logging Patch)
- * @date 2026-04-16
+ * @version 8.12.2 (Phase A - Identity & Empty Contact Patch)
+ * @date 2026-04-17
  * @description 
+ * - [PATCH] Prevent empty/whitespace contact creation during scaffolding.
+ * - [PATCH] Fixed modifier extraction to correctly resolve string identities and req.user.name for create and modify flows.
  * - [PATCH] Added system interaction logging for Create Opportunity (Phase A).
  * - [PATCH] Unified interaction logging entry point: replaced direct interactionWriter calls with interactionService. No behavior change.
  * - [PHASE 8.14] Refactored addContactToOpportunity to pure SQL. Removed legacy RAW sheet writers (getOrCreateCompany, getOrCreateContact, updateContactStatus). Reused existing SQL contacts by name and companyId.
@@ -76,6 +78,12 @@ class OpportunityService {
             .trim();
     }
 
+    _resolveModifier(user) {
+        if (!user) return 'System';
+        if (typeof user === 'string') return user;
+        return user.name || user.displayName || user.username || 'System';
+    }
+
     async _fetchOpportunities() {
         if (!this.opportunitySqlReader) {
             throw new Error("[Phase7 Boundary Violation] OpportunitySqlReader is required");
@@ -101,7 +109,7 @@ class OpportunityService {
 
     async createOpportunity(opportunityData, user) {
         try {
-            const modifier = user.displayName || user.username || 'System';
+            const modifier = this._resolveModifier(user);
 
             if (opportunityData.customerCompany) {
                 const normalizedComp = this._normalizeCompanyName(opportunityData.customerCompany);
@@ -120,8 +128,9 @@ class OpportunityService {
                     }, modifier);
                 }
 
-                if (opportunityData.mainContact) {
-                    const normalizedContact = opportunityData.mainContact.toLowerCase().trim();
+                const safeMainContact = (opportunityData.mainContact || '').trim();
+                if (safeMainContact) {
+                    const normalizedContact = safeMainContact.toLowerCase();
                     const allContacts = await this.contactSqlReader.getContacts();
                     const existingContact = allContacts.find(c => 
                         (c.name || '').toLowerCase().trim() === normalizedContact && 
@@ -130,7 +139,7 @@ class OpportunityService {
 
                     if (!existingContact) {
                         await this.contactSqlWriter.createContact({
-                            name: opportunityData.mainContact,
+                            name: safeMainContact,
                             companyId: targetCompanyId,
                             phone: opportunityData.contactPhone || ''
                         }, modifier);
@@ -264,7 +273,7 @@ class OpportunityService {
 
     async updateOpportunity(opportunityId, updateData, user) {
         try {
-            const modifier = user.displayName || user.username || 'System';
+            const modifier = this._resolveModifier(user);
             
             const originalOpportunity = await this.opportunitySqlReader.getOpportunityById(opportunityId);
             
@@ -320,7 +329,7 @@ class OpportunityService {
     
     async addContactToOpportunity(opportunityId, contactData, user) {
         try {
-            const modifier = user.displayName || user.username || 'System';
+            const modifier = this._resolveModifier(user);
             let contactToLink;
             let logTitle = '關聯聯絡人';
 
@@ -391,7 +400,7 @@ class OpportunityService {
 
     async deleteContactLink(opportunityId, contactId, user) {
         try {
-            const modifier = user.displayName || user.username || 'System';
+            const modifier = this._resolveModifier(user);
             
             const contact = this.contactSqlReader 
                 ? await this.contactSqlReader.getContactById(contactId)
@@ -419,7 +428,7 @@ class OpportunityService {
 
     async deleteOpportunity(opportunityId, user) {
         try {
-            const modifier = user.displayName || user.username || 'System';
+            const modifier = this._resolveModifier(user);
             
             const opportunity = await this.opportunitySqlReader.getOpportunityById(opportunityId);
             
