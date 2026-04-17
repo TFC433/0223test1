@@ -4,10 +4,10 @@
 /**
  * services/opportunity-service.js
  * 機會案件業務邏輯層 (Service Layer)
- * @version 8.11.0 (Phase 9 - Metadata Decoupling)
- * @date 2026-04-15
+ * @version 8.12.0 (Phase A - Interaction Logging Patch)
+ * @date 2026-04-16
  * @description 
- * - [PATCH] Added getOpportunityYears to fetch distinct creation years safely.
+ * - [PATCH] Added system interaction logging for Create Opportunity (Phase A).
  * - [PATCH] Unified interaction logging entry point: replaced direct interactionWriter calls with interactionService. No behavior change.
  * - [PHASE 8.14] Refactored addContactToOpportunity to pure SQL. Removed legacy RAW sheet writers (getOrCreateCompany, getOrCreateContact, updateContactStatus). Reused existing SQL contacts by name and companyId.
  * - [PHASE 8.13] Implemented SQL-only scaffolding for company and contact within createOpportunity. Injected contactSqlWriter.
@@ -139,6 +139,18 @@ class OpportunityService {
             }
 
             const result = await this.opportunitySqlWriter.createOpportunity(opportunityData, modifier);
+            
+            // [Phase A Patch] Create Interaction Log for New Opportunity
+            if (result && result.success) {
+                const oppName = opportunityData.opportunityName || '未命名機會';
+                const owner = opportunityData.assignee || modifier || '未指定';
+                await this._logOpportunityInteraction(
+                    result.id,
+                    '建立機會',
+                    `建立機會：「${oppName}」（負責人：${owner}）`,
+                    modifier
+                );
+            }
             
             return result;
         } catch (error) {

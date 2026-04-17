@@ -1,9 +1,10 @@
 /**
  * services/company-service.js
  * 公司業務邏輯層
- * @version 8.5.0 (Phase 11 - DB-First lastActivity)
- * @date 2026-04-15
+ * @version 8.6.0 (Phase A - Interaction Logging Patch)
+ * @date 2026-04-16
  * @changelog 
+ * - [PATCH] Added system interaction logging for Create Company (Phase A).
  * - [PATCH PHASE 11] Added graceful DB-First bypass for full interactions/eventLogs tables using _hasNativeActivity.
  * - [PATCH PHASE 10] Added lightweight opportunity counting. Removed frontend dependency on page=0.
  * - [PATCH] Unified interaction logging entry point: replaced interactionWriter with interactionService. No behavior change.
@@ -164,6 +165,16 @@ class CompanyService {
             if (!this.companySqlWriter) throw new Error('CompanySqlWriter not injected');
             
             const result = await this.companySqlWriter.createCompany(dataToWrite, modifier);
+            
+            // [Phase A Patch] Create Interaction Log for New Company
+            if (result && result.success) {
+                await this._logCompanyInteraction(
+                    companyId,
+                    '建立公司',
+                    `建立公司：「${companyName}」`,
+                    modifier
+                );
+            }
             
             if (this.companyReader && this.companyReader.invalidateCache) {
                 this.companyReader.invalidateCache('companyList');
