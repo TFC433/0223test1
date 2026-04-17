@@ -2,11 +2,18 @@
 /**
  * ============================================================================
  * File: public/scripts/contacts/contacts.js
- * Version: v8.4.0 (Phase 8.4 Core UI Pagination Controls)
- * Date: 2026-04-15
+ * Version: v8.9.0 (Phase 8.9 CORE Top Info Bar Two-Line Layout Refactor)
+ * Date: 2026-04-21
  * Author: Gemini
  *
  * Change Log:
+ * - [UX Polish] Refactored CORE tab top info bar into a clean two-line layout.
+ * - [UX Polish] Removed redundant sorting text description from the info bar.
+ * - [Feature] Refactored CORE page size selector into pill-style buttons in the top info bar.
+ * - [Feature] Added `currentCorePageSize` state and UI control for dynamic CORE pagination sizing (50/100/500/1000).
+ * - [Bugfix] Fixed CORE row numbering to use continuous global index based on `currentCorePageSize` instead of hardcoded 100.
+ * - [Feature] Added `currentCoreSortOrder` state and UI toggle for ASC/DESC global sorting of CORE contacts.
+ * - [Feature] BUGFIX: Removed redundant post-pagination sort from CORE tab rendering, as global sorting is now handled correctly by the backend before slicing.
  * - [Feature] Added explicit page state tracking (`currentCorePage`) and UI controls for CORE contacts.
  * - [Feature] Supported search-triggered page resets and post-delete empty-page auto-correction for CORE list.
  * - [Performance] Removed fetchAllCoreContacts bypass loop.
@@ -27,6 +34,8 @@ let currentContactsTab = 'list'; // 'list' | 'cards' | 'core'
 let currentEditRowIndex = null;
 let currentCoreEditContactId = null;
 let contactsOperationMode = false;
+let currentCoreSortOrder = 'desc'; // [Patch] Core sorting state
+let currentCorePageSize = 100; // [Patch] Core dynamic pagination limit
 
 // ==================== 主要功能函式 ====================
 
@@ -81,6 +90,9 @@ async function loadContacts(query = '') {
     // 移除舊監聽器並綁定新的 (事件委派核心)
     container.removeEventListener('click', handleContactListClick);
     container.addEventListener('click', handleContactListClick);
+    
+    container.removeEventListener('change', handleContactListChange);
+    container.addEventListener('change', handleContactListChange);
 
     // 綁定搜尋輸入
     const searchInputEl = document.getElementById('contacts-page-search');
@@ -111,6 +123,14 @@ function toggleContactsOperationMode() {
     contactsOperationMode = !contactsOperationMode;
     const currentQuery = document.getElementById('contacts-page-search')?.value || '';
     filterAndRenderContacts(currentQuery);
+}
+
+function handleContactListChange(e) {
+    if (e.target.dataset.action === 'change-core-limit') {
+        currentCorePageSize = parseInt(e.target.value, 10) || 100;
+        currentCorePage = 1;
+        filterAndRenderContacts(document.getElementById('contacts-page-search')?.value || '');
+    }
 }
 
 function handleContactListClick(e) {
@@ -180,6 +200,26 @@ function handleContactListClick(e) {
                 currentCorePage++;
                 filterAndRenderContacts(document.getElementById('contacts-page-search')?.value || '');
             }
+            break;
+
+        // [Patch] CORE Sort Toggle
+        case 'toggle-core-sort':
+            currentCoreSortOrder = currentCoreSortOrder === 'desc' ? 'asc' : 'desc';
+            currentCorePage = 1; // Reset to page 1 on sort change
+            filterAndRenderContacts(document.getElementById('contacts-page-search')?.value || '');
+            break;
+
+        // [Patch] CORE Page Size Pills Toggle
+        case 'set-core-limit':
+            const newSize = parseInt(payload.size, 10);
+            if (!newSize || newSize === currentCorePageSize) return;
+
+            currentCorePageSize = newSize;
+            currentCorePage = 1;
+
+            filterAndRenderContacts(
+                document.getElementById('contacts-page-search')?.value || ''
+            );
             break;
 
         case 'edit-card':
@@ -259,8 +299,8 @@ async function filterAndRenderContacts(query = '') {
         listContent.innerHTML = `<div class="loading show"><div class="spinner"></div><p>載入正式聯絡人資料中...</p></div>`;
         
         try {
-            // [Patch] Execute search strictly via API bound to current page state
-            const res = await authedFetch(`/api/contacts/list?page=${currentCorePage}&limit=100&q=${encodeURIComponent(safeQuery)}`);
+            // [Patch] Execute search strictly via API bound to current page state, limit, and sort order
+            const res = await authedFetch(`/api/contacts/list?page=${currentCorePage}&limit=${currentCorePageSize}&q=${encodeURIComponent(safeQuery)}&order=${currentCoreSortOrder}`);
             coreContactsData = (res && res.data) ? res.data : [];
             
             // Extract pagination metadata
@@ -268,7 +308,7 @@ async function filterAndRenderContacts(query = '') {
                 coreContactsTotal = res.pagination.totalItems !== undefined ? res.pagination.totalItems : coreContactsData.length;
                 corePaginationState.hasNext = !!res.pagination.hasNext;
                 corePaginationState.hasPrev = !!res.pagination.hasPrev;
-                corePaginationState.totalPages = res.pagination.total || Math.ceil(coreContactsTotal / 100) || 1;
+                corePaginationState.totalPages = res.pagination.total || Math.ceil(coreContactsTotal / currentCorePageSize) || 1;
                 
                 // [Patch] Delete boundary auto-correction: if current page vanishes, step back
                 if (coreContactsData.length === 0 && currentCorePage > 1) {
@@ -289,13 +329,7 @@ async function filterAndRenderContacts(query = '') {
         }
 
         filteredData = [...coreContactsData];
-        
-        // [UX Polish] Sort CORE contacts by update time descending
-        filteredData.sort((a, b) => {
-            const timeA = new Date(a.lastUpdateTime || a.createdTime || 0).getTime();
-            const timeB = new Date(b.lastUpdateTime || b.createdTime || 0).getTime();
-            return timeB - timeA;
-        });
+        // [Bugfix] Local sort removed: Global sorting is now properly enforced at the service layer before slicing.
 
     } else {
         // [In-Memory] RAW Data slice
@@ -312,13 +346,28 @@ async function filterAndRenderContacts(query = '') {
         const label = currentContactsTab === 'core' ? '正式聯絡人' : '潛在客戶';
         const displayCount = currentContactsTab === 'core' ? coreContactsTotal : filteredData.length;
         
-        let htmlContent = `共 ${displayCount} 筆${label}`;
-        
         if (currentContactsTab === 'core') {
-            htmlContent += ` <span style="margin-left: 10px; font-size: 0.85em; background: var(--bg-hover, #f1f5f9); padding: 3px 8px; border-radius: 4px; color: var(--text-secondary);">「依最後更新時間排序（新到舊）」</span>`;
+            // [Patch] Add page size pills to top info bar (Line 1)
+            const sizes = [50, 100, 500, 1000];
+            let pillsHtml = sizes.map(size => {
+                const isActive = size === currentCorePageSize;
+                const style = isActive
+                    ? 'background: var(--accent-blue, #3b82f6); color: white; border: 1px solid var(--accent-blue, #3b82f6); font-weight: 600;'
+                    : 'background: white; color: var(--text-secondary); border: 1px solid var(--border-color); font-weight: 500;';
+                return `<button data-action="set-core-limit" data-size="${size}" style="padding: 2px 8px; font-size: 0.85em; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-left: 4px; ${style}">${size}</button>`;
+            }).join('');
+
+            countDisplay.innerHTML = `
+                <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">
+                    <div style="font-size: 0.9em; color: var(--text-secondary); display: flex; align-items: center;">
+                        每頁顯示: ${pillsHtml}
+                    </div>
+                    <div>共 ${displayCount} 筆${label}</div>
+                </div>
+            `;
+        } else {
+            countDisplay.innerHTML = `共 ${displayCount} 筆${label}`;
         }
-        
-        countDisplay.innerHTML = htmlContent;
     }
 
     if (currentContactsTab === 'list') {
@@ -339,10 +388,12 @@ async function filterAndRenderContacts(query = '') {
 // --- [Patch] CORE Pagination Helper ---
 function renderCorePagination() {
     return `
-        <div class="pagination-controls" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-            <button class="action-btn" data-action="core-prev" ${!corePaginationState.hasPrev ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background: white;"'}>上一頁</button>
-            <span style="color: var(--text-secondary); font-weight: 500;">第 ${currentCorePage} / ${corePaginationState.totalPages} 頁</span>
-            <button class="action-btn" data-action="core-next" ${!corePaginationState.hasNext ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background: white;"'}>下一頁</button>
+        <div class="pagination-controls" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color); flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <button class="action-btn" data-action="core-prev" ${!corePaginationState.hasPrev ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background: white;"'}>上一頁</button>
+                <span style="color: var(--text-secondary); font-weight: 500;">第 ${currentCorePage} / ${corePaginationState.totalPages} 頁</span>
+                <button class="action-btn" data-action="core-next" ${!corePaginationState.hasNext ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : 'style="background: white;"'}>下一頁</button>
+            </div>
         </div>
     `;
 }
@@ -515,7 +566,7 @@ function renderCoreContactsTable(data) {
                         <th>職位</th>
                         <th>手機</th>
                         <th>Email</th>
-                        <th>最後更新</th>
+                        <th>最後更新 <button class="action-btn small" data-action="toggle-core-sort" style="margin-left:4px; padding: 0 4px; background: transparent; border: none; cursor: pointer;">${currentCoreSortOrder === 'desc' ? '⬇️' : '⬆️'}</button></th>
                         <th style="text-align: right; white-space: nowrap;">
                             操作
                             <button class="action-btn small" data-action="toggle-operations" style="margin-left: 6px; padding: 2px 8px; font-size: 0.8rem; border-radius: 4px; border: 1px solid; cursor: pointer; transition: all 0.2s; ${toggleBtnStyle}">
@@ -527,8 +578,8 @@ function renderCoreContactsTable(data) {
                 <tbody>
     `;
 
-    // Calculate absolute index to maintain visual consistency across pages
-    const indexOffset = (currentCorePage - 1) * 100;
+    // Calculate absolute index to maintain visual consistency across pages based on dynamic limit
+    const indexOffset = (currentCorePage - 1) * currentCorePageSize;
 
     data.forEach((contact, index) => {
         let updateTimeStr = '-';

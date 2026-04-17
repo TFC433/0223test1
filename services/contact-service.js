@@ -1,9 +1,12 @@
 /**
  * services/contact-service.js
  * 聯絡人業務邏輯服務層
- * @version 8.13.0
- * @date 2026-03-23
+ * @version 8.16.0
+ * @date 2026-04-19
  * @changelog
+ * - [PHASE 8.16] FEATURE: Integrated dynamic limit handling for CORE pagination to support user-selected page sizes.
+ * - [PHASE 8.15] FEATURE: Added dynamic global sorting (ASC/DESC) to CORE contacts search, exposed via `searchOfficialContacts`.
+ * - [PHASE 8.14] BUGFIX: Moved CORE contact sorting (updatedTime/createdTime DESC) to happen globally BEFORE pagination slice in `searchOfficialContacts`, ensuring correct cross-page ordering.
  * - [PHASE 8.13] Extracted _applyExhibitionAutoTag helper for shared exhibition logic. Added lazy auto-tag and write-back to getPotentialContacts to ensure unclassified RAW leads get tagged seamlessly during list hydration without breaking tri-state protection.
  * - [PHASE 8.9] Added getPotentialContactByRow helper for secure backend ownership validation.
  * - [PHASE 8.5] Normalized exhibition data display: Auto-tag fallback now explicitly formats the exhibition_name with its date range suffix before saving to the RAW sheet (Column R). This guarantees historical data integrity for past exhibitions.
@@ -241,7 +244,7 @@ class ContactService {
         }
     }
 
-    async searchOfficialContacts(query, page = 1) {
+    async searchOfficialContacts(query, page = 1, sort = 'updatedTime', order = 'desc', limit = null) {
         try {
             let contacts = await this._fetchOfficialContactsWithCompanies();
 
@@ -253,7 +256,15 @@ class ContactService {
                 );
             }
 
-            const pageSize = (this.config && this.config.PAGINATION) ? this.config.PAGINATION.CONTACTS_PER_PAGE : 20;
+            // Global sort strictly before slicing to ensure true pagination order
+            const isDesc = order.toLowerCase() !== 'asc';
+            contacts.sort((a, b) => {
+                const timeA = new Date(a.updatedTime || a.lastUpdateTime || a.createdTime || 0).getTime();
+                const timeB = new Date(b.updatedTime || b.lastUpdateTime || b.createdTime || 0).getTime();
+                return isDesc ? timeB - timeA : timeA - timeB;
+            });
+
+            const pageSize = limit ? parseInt(limit, 10) : ((this.config && this.config.PAGINATION) ? this.config.PAGINATION.CONTACTS_PER_PAGE : 20);
             const startIndex = (page - 1) * pageSize;
             const paginated = contacts.slice(startIndex, startIndex + pageSize);
 

@@ -1,9 +1,11 @@
 /**
  * controllers/contact.controller.js
  * 聯絡人模組控制器
- * * @version 8.1.0 (Phase 8.2 RAW Physical Delete)
- * * @date 2026-03-16
+ * * @version 8.3.0
+ * * @date 2026-04-19
  * * @description 負責處理聯絡人相關的 HTTP 請求，驗證參數，並呼叫對應的 Service。
+ * * [Feature] Handled `limit` parameter for searchContactList to enable dynamic CORE pagination sizing.
+ * * [Feature] Handled `sort` and `order` parameters for searchContactList to enable dynamic CORE sorting.
  * * [Feature] Added deleteRawContact for physical Google Sheet row deletion.
  *
  * ============================================================================
@@ -78,8 +80,11 @@ class ContactController {
         try {
             const query = req.query.q || '';
             const page = parseInt(req.query.page || 1);
+            const sort = req.query.sort || 'updatedTime';
+            const order = req.query.order || 'desc';
+            const limit = req.query.limit ? parseInt(req.query.limit, 10) : null;
             
-            const result = await this.contactService.searchOfficialContacts(query, page);
+            const result = await this.contactService.searchOfficialContacts(query, page, sort, order, limit);
             res.json(result);
         } catch (error) {
             handleApiError(res, error, 'Search Contact List');
