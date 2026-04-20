@@ -18,7 +18,10 @@ window.CRM_APP.pageConfig = {
     'opportunity-details': { title: '機會詳細資料', subtitle: '檢視機會的所有關聯資訊', loaded: true },
     
     // ★★★ 【新增】商品成本管理頁面 ★★★
-    'products': { title: '商品成本管理', subtitle: '檢視市場商品成本與定價策略 (機密)', loaded: false }
+    'products': { title: '商品成本管理', subtitle: '檢視市場商品成本與定價策略 (機密)', loaded: false },
+
+    // ★★★ 【新增】內部運營頁面 ★★★
+    'internal-ops': { title: '進度追蹤', subtitle: '內部運營與專案進度管理', loaded: false }
 };
 // 2. 下拉選單元素 ID 與 Config Key 的對應
 window.CRM_APP.dropdownMappings = {

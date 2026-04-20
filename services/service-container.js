@@ -4,9 +4,10 @@
 /**
  * services/service-container.js
  * 服務容器 (IoC Container)
- * @version 9.4.0
- * @date 2026-03-21
+ * @version 9.5.0
+ * @date 2026-04-20
  * @changelog
+ * - [V9.5.0] Added initialization and dependency injection for Internal Operations module.
  * - [V9.4.0] Instantiated ContactService with systemService injection for Fallback Auto-Tag requirements.
  * - [PATCH] Enforced architectural rule: InteractionService is the single authoritative entry point for interaction creation. Removed deprecated `interactionWriter` from exported services. Cleaned up stale DI comments.
  * - [PATCH] Updated dependency injection: replaced interactionWriter with interactionService for OpportunityService and CompanyService to unify interaction logging entry point.
@@ -36,6 +37,7 @@ const WeeklyBusinessSqlReader = require('../data/weekly-business-sql-reader');
 const AnnouncementReader = require('../data/announcement-reader');
 const AnnouncementSqlReader = require('../data/announcement-sql-reader');
 const ProductReader = require('../data/product-reader');
+const InternalOpsReader = require('../data/internal-ops-reader');
 
 // --- Import Writers ---
 const ContactWriter = require('../data/contact-writer'); // EXCLUSIVELY FOR RAW
@@ -50,6 +52,7 @@ const WeeklyBusinessSqlWriter = require('../data/weekly-business-sql-writer');
 const AnnouncementWriter = require('../data/announcement-writer');
 const AnnouncementSqlWriter = require('../data/announcement-sql-writer');
 const ProductWriter = require('../data/product-writer');
+const InternalOpsWriter = require('../data/internal-ops-writer');
 
 // --- Import Domain Services ---
 const AuthService = require('./auth-service');
@@ -67,6 +70,7 @@ const ProductService = require('./product-service');
 const AnnouncementService = require('./announcement-service');
 const EventService = require('./event-service');
 const SystemService = require('./system-service');
+const InternalOpsService = require('./internal-ops-service');
 
 // --- Import Controllers ---
 const AuthController = require('../controllers/auth.controller');
@@ -84,7 +88,7 @@ let services = null;
 async function initializeServices() {
     if (services) return services;
 
-    console.log('🚀 [System] 正在初始化 Service Container (v9.4.0 SQL-Only CORE)...');
+    console.log('🚀 [System] 正在初始化 Service Container (v9.5.0 SQL-Only CORE + Internal Ops)...');
 
     try {
         // 1. Infrastructure
@@ -111,6 +115,7 @@ async function initializeServices() {
         const announcementSqlReader = new AnnouncementSqlReader();
         const systemReader = new SystemReader(sheets, config.IDS.SYSTEM);
         const productReader = new ProductReader(sheets, config.IDS.PRODUCT);
+        const internalOpsReader = new InternalOpsReader(sheets, config.IDS.INTERNAL_OPS);
 
         // 3. Writers
         // RAW Keep
@@ -130,6 +135,7 @@ async function initializeServices() {
         const announcementSqlWriter = new AnnouncementSqlWriter();
         const systemWriter = new SystemWriter(sheets, config.IDS.SYSTEM, systemReader);
         const productWriter = new ProductWriter(sheets, config.IDS.PRODUCT, productReader);
+        const internalOpsWriter = new InternalOpsWriter(sheets, config.IDS.INTERNAL_OPS, internalOpsReader);
 
         // 4. Domain Services
         const calendarService = new CalendarService(calendar);
@@ -264,6 +270,8 @@ async function initializeServices() {
             dateHelpers
         );
 
+        const internalOpsService = new InternalOpsService(internalOpsReader, internalOpsWriter, config);
+
         // 5. Controllers
         const authController = new AuthController(authService);
         const systemController = new SystemController(systemService, dashboardService);
@@ -292,6 +300,7 @@ async function initializeServices() {
             announcementService,
             eventService,
             systemService,
+            internalOpsService,
             authController,
             systemController,
             announcementController,
@@ -307,7 +316,9 @@ async function initializeServices() {
             weeklyBusinessReader: weeklyReader,
             weeklyBusinessWriter: weeklyWriter,
             systemReader, systemWriter,
-            eventLogReader: eventLogSqlReader 
+            eventLogReader: eventLogSqlReader,
+            internalOpsReader,
+            internalOpsWriter
         };
 
         return services;

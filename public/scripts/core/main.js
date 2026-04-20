@@ -183,6 +183,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof loadWeeklyBusinessPage === 'function') window.CRM_APP.pageModules['weekly-business'] = loadWeeklyBusinessPage;
         if (typeof navigateToWeeklyDetail === 'function') window.CRM_APP.pageModules['weekly-detail'] = navigateToWeeklyDetail;
         if (typeof loadSalesAnalysisPage === 'function') window.CRM_APP.pageModules['sales-analysis'] = loadSalesAnalysisPage;
+        
+        // 註冊內部運營頁面模組
+        if (typeof loadInternalOpsPage === 'function') window.CRM_APP.pageModules['internal-ops'] = loadInternalOpsPage;
+
         CRM_APP.init();
     }
 });

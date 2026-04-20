@@ -1,8 +1,8 @@
 /**
  * routes/index.js
  * API 總路由入口
- * * @version 6.1.9 (Fixed: Move Line Route out of Auth)
- * @date 2026-01-15
+ * * @version 6.2.0 (Added Internal Ops Routes)
+ * @date 2026-04-20
  */
 const express = require('express');
 const router = express.Router();
@@ -26,6 +26,7 @@ const eventRoutes = require('./event.routes');
 const lineLeadsRoutes = require('./line-leads.routes');
 const externalRoutes = require('./external.routes');
 const calendarRoutes = require('./calendar.routes');
+const internalOpsRoutes = require('./internal-ops.routes');
 
 // ==========================================
 // 1. 公開/特殊驗證路由 (Public / Custom Auth)
@@ -61,12 +62,13 @@ router.use('/sales-analysis', salesRoutes);
 router.use('/interactions', interactionRoutes);
 router.use('/events', eventRoutes);
 router.use('/calendar', calendarRoutes);
+router.use('/internal-ops', internalOpsRoutes);
 
 // ==========================================
 // 3. 404 與 根路徑
 // ==========================================
 router.get('/', (req, res) => {
-    res.json({ status: 'online', message: 'TFC CRM API v6.1.9' });
+    res.json({ status: 'online', message: 'TFC CRM API v6.2.0' });
 });
 
 router.use('*', (req, res) => {

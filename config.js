@@ -1,11 +1,12 @@
 /**
  * config.js
  * 系統核心設定檔
- * @version 5.1.0 (Phase 8.3 Auto-Tag Support)
- * @date 2026-03-21
+ * @version 5.2.0 (Phase 8.4 Internal Ops Support)
+ * @date 2026-04-20
  * @description 定義全域環境變數、Sheet ID 路由表、資料源切換開關與系統常數。
  * 本次重構新增 IDS 與 DATA_SOURCES 物件以支援多資料源架構。
  * * Changelog:
+ * - [V5.2.0] Added INTERNAL_OPS tracking fields and Google Sheet definitions.
  * - [V5.1.0] Repurposed CONTACT_FIELDS index 17 to EXHIBITION_NAME and index 18 to IS_EXHIBITION.
  * This enables the Fallback Auto-Tag feature safely within the A-Z column constraint.
  */
@@ -38,7 +39,10 @@ module.exports = {
 
         // 5. 市場商品資料 (Domain: Products)
         // 使用既有的 MARKET_PRODUCT_SHEET_ID
-        PRODUCT: process.env.MARKET_PRODUCT_SHEET_ID
+        PRODUCT: process.env.MARKET_PRODUCT_SHEET_ID,
+
+        // 6. 內部運營與進度追蹤 (Domain: Internal Operations)
+        INTERNAL_OPS: process.env.INTERNAL_OPS_SHEET_ID
     },
 
     // ============================================================
@@ -54,7 +58,8 @@ module.exports = {
         SYSTEM: 'SHEET',
         PRODUCT: 'SHEET',
         AUTH: 'SHEET',
-        WEEKLY: 'SHEET'
+        WEEKLY: 'SHEET',
+        INTERNAL_OPS: 'SHEET'
     },
 
     // --- 保留舊有設定以供尚未重構的模組讀取 (Legacy Support) ---
@@ -93,7 +98,12 @@ module.exports = {
         ANNOUNCEMENTS: '佈告欄',
 
         // 市場商品資料
-        MARKET_PRODUCTS: '市場商品資料'
+        MARKET_PRODUCTS: '市場商品資料',
+
+        // 內部運營模組
+        TEAM_WORKLOAD: '團隊成員負荷',
+        DEV_PROJECTS: '開發案件追蹤',
+        SUBSCRIPTION_OPS: '訂閱制管理'
     },
 
     // 重構：機會案件 - 標準標題名稱定義

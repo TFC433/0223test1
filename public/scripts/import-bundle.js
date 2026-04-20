@@ -54,9 +54,10 @@ const scripts = [
     
     // ★★★ 【新增】商品模組腳本 ★★★
     "scripts/products/products.js",
-    "scripts/products/product-detail-modal.js"
+    "scripts/products/product-detail-modal.js",
 
-
+    // ★★★ 【新增】內部運營模組腳本 ★★★
+    "scripts/internal-ops/internal-ops.js"
 
 ];
 
