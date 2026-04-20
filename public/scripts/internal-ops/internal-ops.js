@@ -1,10 +1,11 @@
 // public/scripts/internal-ops/internal-ops.js
 /**
  * public/scripts/internal-ops/internal-ops.js
- * 內部運營與進度追蹤 前端模組 (Phase 4.7)
- * @version 1.6.0
+ * 內部運營與進度追蹤 前端模組 (Phase 4.8)
+ * @version 1.7.0
  * @date 2026-04-20
  * @changelog
+ * - [1.7.0] Normalized Color System - Implemented single-source color strategy with derived opacity for badges
  * - [1.6.0] Externalized color system for badges (Role, Stage, Status, Workload) to System Config and added index column to Dev Projects table
  * - [1.5.0] Upgraded Team Workload table UI readability with index column and color badges
  * - [1.4.0] Added workload level indicator badge (Green/Yellow/Red) based on main task count
@@ -30,6 +31,34 @@
  * - [1.0.1] Fixed API response parsing to support both plain array and { success, data } formats
  * @description 負責進度追蹤頁面的 DOM 建立與資料渲染 (團隊成員負荷、開發案件追蹤、訂閱制管理)
  */
+
+function hexToRgb(hex) {
+    if (!hex) return null;
+    const cleaned = hex.replace('#', '');
+    const bigint = parseInt(cleaned, 16);
+    if (isNaN(bigint)) return null;
+    return {
+        r: (bigint >> 16) & 255,
+        g: (bigint >> 8) & 255,
+        b: bigint & 255
+    };
+}
+
+function buildColorSet(hex) {
+    let rgb = hexToRgb(hex);
+    if (!rgb) {
+        hex = '#616161';
+        rgb = hexToRgb(hex);
+    }
+    if (!rgb) return null;
+
+    return {
+        text: hex,
+        bgLight: `rgba(${rgb.r},${rgb.g},${rgb.b},0.12)`,
+        bgMid: `rgba(${rgb.r},${rgb.g},${rgb.b},0.18)`,
+        border: `rgba(${rgb.r},${rgb.g},${rgb.b},0.28)`
+    };
+}
 
 window.loadInternalOpsPage = async function(params) {
     const pageContainer = document.getElementById('page-internal-ops');
@@ -83,7 +112,7 @@ window.loadInternalOpsPage = async function(params) {
             .internal-ops-actions { display: flex; gap: 8px; }
             .internal-ops-btn { padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; border: 1px solid #ddd; background: #fff; }
             .internal-ops-btn:hover { background: #f0f0f0; }
-            .progress-badge { padding: 3px 8px; border-radius: 12px; background: #e3f2fd; color: #1976d2; font-size: 0.8rem; font-weight: bold; }
+            .progress-badge { padding: 3px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
         `;
         pageContainer.appendChild(style);
 
@@ -284,60 +313,59 @@ function renderTeamWorkload(data) {
     if (!data || data.length === 0) return '';
 
     // Helpers for config-driven styling
-    function getConfigColor(type, text, fallbackBg, fallbackColor) {
-        if (!text || text === '-') return { bg: fallbackBg, color: fallbackColor };
+    function getConfigColor(type, text, fallbackHex) {
+        if (!text || text === '-') return buildColorSet(fallbackHex);
         const list = window.__systemConfig[type] || [];
         const item = list.find(i => i.note === text || i.value === text);
         if (item && item.style) {
-            // Return config style, default text to white for custom badges
-            return { bg: item.style, color: '#ffffff' }; 
+            return buildColorSet(item.style);
         }
-        return { bg: fallbackBg, color: fallbackColor };
+        return buildColorSet(fallbackHex);
     }
 
-    function getBadgeHtml(text, bg, color) {
+    function getBadgeHtml(text, colorSet) {
         if (!text || text === '-') return '-';
-        return `<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:600; background:${bg}; color:${color};">${text}</span>`;
+        return `<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:600; background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border};">${text}</span>`;
     }
 
     function getRoleBadge(role) {
-        let fallbackBg = role === '主負責人' ? '#e3f2fd' : '#f5f5f5';
-        let fallbackColor = role === '主負責人' ? '#1976d2' : '#616161';
-        const { bg, color } = getConfigColor('擔當角色', role, fallbackBg, fallbackColor);
-        return getBadgeHtml(role, bg, color);
+        let fallbackHex = role === '主負責人' ? '#1976d2' : '#616161';
+        const colorSet = getConfigColor('擔當角色', role, fallbackHex);
+        return getBadgeHtml(role, colorSet);
     }
 
     function getStatusBadge(status) {
-        let fallbackBg = '#eeeeee', fallbackColor = '#757575';
+        let fallbackHex = '#616161';
         switch(status) {
-            case '進行中': fallbackBg = '#e3f2fd'; fallbackColor = '#1976d2'; break;
-            case '卡關': fallbackBg = '#ffebee'; fallbackColor = '#c62828'; break;
-            case '已完成': fallbackBg = '#e8f5e9'; fallbackColor = '#2e7d32'; break;
-            case '暫停': fallbackBg = '#fff8e1'; fallbackColor = '#f9a825'; break;
+            case '進行中': fallbackHex = '#1976d2'; break;
+            case '卡關': fallbackHex = '#c62828'; break;
+            case '已完成': fallbackHex = '#2e7d32'; break;
+            case '暫停': fallbackHex = '#f9a825'; break;
         }
-        const { bg, color } = getConfigColor('開發狀態', status, fallbackBg, fallbackColor);
-        return getBadgeHtml(status, bg, color);
+        const colorSet = getConfigColor('開發狀態', status, fallbackHex);
+        return getBadgeHtml(status, colorSet);
     }
 
     function getStageBadge(stage) {
-        let fallbackBg = '#f5f5f5', fallbackColor = '#616161';
+        let fallbackHex = '#616161';
         switch(stage) {
-            case '開發中': fallbackBg = '#e3f2fd'; fallbackColor = '#1976d2'; break;
-            case '測試中': fallbackBg = '#f3e5f5'; fallbackColor = '#6a1b9a'; break;
-            case '已上線': fallbackBg = '#e8f5e9'; fallbackColor = '#2e7d32'; break;
+            case '開發中': fallbackHex = '#1976d2'; break;
+            case '測試中': fallbackHex = '#6a1b9a'; break;
+            case '已上線': fallbackHex = '#2e7d32'; break;
         }
-        const { bg, color } = getConfigColor('開發階段', stage, fallbackBg, fallbackColor);
-        return getBadgeHtml(stage, bg, color);
+        const colorSet = getConfigColor('開發階段', stage, fallbackHex);
+        return getBadgeHtml(stage, colorSet);
     }
 
     function getProgressBadge(progressText) {
         if (!progressText) progressText = '0%';
         const val = parseInt(progressText.replace('%', ''), 10) || 0;
-        let bg, color;
-        if (val < 30) { bg = '#eeeeee'; color = '#757575'; }
-        else if (val > 70) { bg = '#e8f5e9'; color = '#2e7d32'; }
-        else { bg = '#e3f2fd'; color = '#1976d2'; }
-        return `<span class="progress-badge" style="background:${bg}; color:${color}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${progressText}</span>`;
+        let fallbackHex;
+        if (val < 30) { fallbackHex = '#616161'; }
+        else if (val > 70) { fallbackHex = '#2e7d32'; }
+        else { fallbackHex = '#1976d2'; }
+        const colorSet = buildColorSet(fallbackHex);
+        return `<span class="progress-badge" style="background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${progressText}</span>`;
     }
 
     const groups = {};
@@ -399,23 +427,23 @@ function renderTeamWorkload(data) {
         
         // Load indicator badge logic (based on main task count)
         const mainCount = groupData.main;
-        let fallbackBg, fallbackColor, loadText;
+        let fallbackHex, loadText;
         if (mainCount >= 6) {
-            fallbackBg = '#ffebee'; fallbackColor = '#c62828'; loadText = '負荷高';
+            fallbackHex = '#c62828'; loadText = '負荷高';
         } else if (mainCount >= 3) {
-            fallbackBg = '#fff8e1'; fallbackColor = '#f9a825'; loadText = '負荷中';
+            fallbackHex = '#f9a825'; loadText = '負荷中';
         } else {
-            fallbackBg = '#e8f5e9'; fallbackColor = '#2e7d32'; loadText = '負荷低';
+            fallbackHex = '#2e7d32'; loadText = '負荷低';
         }
         
-        const { bg, color } = getConfigColor('負荷量表', loadText, fallbackBg, fallbackColor);
+        const colorSet = getConfigColor('負荷量表', loadText, fallbackHex);
         
         let badgeText = loadText;
         if (loadText === '負荷高') badgeText += '｜過載';
         else if (loadText === '負荷中') badgeText += '｜注意';
         else if (loadText === '負荷低') badgeText += '｜正常';
 
-        const loadBadge = `<span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-left: 8px; background: ${bg}; color: ${color};">${badgeText}</span>`;
+        const loadBadge = `<span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-left: 8px; background: ${colorSet.bgLight}; color: ${colorSet.text}; border: 1px solid ${colorSet.border};">${badgeText}</span>`;
 
         html += `
             <div class="member-workload-card" style="border: 1px solid #eee; border-radius: 8px; overflow: hidden; background: #fff;">
@@ -456,52 +484,53 @@ function renderDevProjects(data) {
     window.__internalOpsDevProjectsData = data; // 保存資料供編輯 modal 讀取
 
     // Helpers to utilize config colors for dev projects section as well
-    function getConfigColor(type, text, fallbackBg, fallbackColor) {
-        if (!text || text === '-') return { bg: fallbackBg, color: fallbackColor };
+    function getConfigColor(type, text, fallbackHex) {
+        if (!text || text === '-') return buildColorSet(fallbackHex);
         const list = window.__systemConfig[type] || [];
         const item = list.find(i => i.note === text || i.value === text);
         if (item && item.style) {
-            return { bg: item.style, color: '#ffffff' }; 
+            return buildColorSet(item.style);
         }
-        return { bg: fallbackBg, color: fallbackColor };
+        return buildColorSet(fallbackHex);
     }
 
-    function getBadgeHtml(text, bg, color) {
+    function getBadgeHtml(text, colorSet) {
         if (!text || text === '-') return '-';
-        return `<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:600; background:${bg}; color:${color};">${text}</span>`;
+        return `<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.75rem; font-weight:600; background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border};">${text}</span>`;
     }
 
     function getStatusBadge(status) {
-        let fallbackBg = '#eeeeee', fallbackColor = '#757575';
+        let fallbackHex = '#616161';
         switch(status) {
-            case '進行中': fallbackBg = '#e3f2fd'; fallbackColor = '#1976d2'; break;
-            case '卡關': fallbackBg = '#ffebee'; fallbackColor = '#c62828'; break;
-            case '已完成': fallbackBg = '#e8f5e9'; fallbackColor = '#2e7d32'; break;
-            case '暫停': fallbackBg = '#fff8e1'; fallbackColor = '#f9a825'; break;
+            case '進行中': fallbackHex = '#1976d2'; break;
+            case '卡關': fallbackHex = '#c62828'; break;
+            case '已完成': fallbackHex = '#2e7d32'; break;
+            case '暫停': fallbackHex = '#f9a825'; break;
         }
-        const { bg, color } = getConfigColor('開發狀態', status, fallbackBg, fallbackColor);
-        return getBadgeHtml(status, bg, color);
+        const colorSet = getConfigColor('開發狀態', status, fallbackHex);
+        return getBadgeHtml(status, colorSet);
     }
 
     function getStageBadge(stage) {
-        let fallbackBg = '#f5f5f5', fallbackColor = '#616161';
+        let fallbackHex = '#616161';
         switch(stage) {
-            case '開發中': fallbackBg = '#e3f2fd'; fallbackColor = '#1976d2'; break;
-            case '測試中': fallbackBg = '#f3e5f5'; fallbackColor = '#6a1b9a'; break;
-            case '已上線': fallbackBg = '#e8f5e9'; fallbackColor = '#2e7d32'; break;
+            case '開發中': fallbackHex = '#1976d2'; break;
+            case '測試中': fallbackHex = '#6a1b9a'; break;
+            case '已上線': fallbackHex = '#2e7d32'; break;
         }
-        const { bg, color } = getConfigColor('開發階段', stage, fallbackBg, fallbackColor);
-        return getBadgeHtml(stage, bg, color);
+        const colorSet = getConfigColor('開發階段', stage, fallbackHex);
+        return getBadgeHtml(stage, colorSet);
     }
 
     function getProgressBadge(progressText) {
         if (!progressText) progressText = '0%';
         const val = parseInt(progressText.replace('%', ''), 10) || 0;
-        let bg, color;
-        if (val < 30) { bg = '#eeeeee'; color = '#757575'; }
-        else if (val > 70) { bg = '#e8f5e9'; color = '#2e7d32'; }
-        else { bg = '#e3f2fd'; color = '#1976d2'; }
-        return `<span class="progress-badge" style="background:${bg}; color:${color}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${progressText}</span>`;
+        let fallbackHex;
+        if (val < 30) { fallbackHex = '#616161'; }
+        else if (val > 70) { fallbackHex = '#2e7d32'; }
+        else { fallbackHex = '#1976d2'; }
+        const colorSet = buildColorSet(fallbackHex);
+        return `<span class="progress-badge" style="background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${progressText}</span>`;
     }
 
     const rows = data.map((item, index) => `

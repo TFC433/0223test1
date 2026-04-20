@@ -1,12 +1,15 @@
+// tfc433/0223test1/0223test1-414989b3734fe392e53bab71f508b8df0df17bf6/services/system-service.js
 /**
  * services/system-service.js
  * 系統服務模組
- * @version 2.1.0
- * @date 2026-03-21
+ * @version 2.1.1
+ * @date 2026-04-20
  * @description 接管所有業務邏輯 (Defaults/Filter/Sort) 與 User 操作流程控制。
  * * Changelog:
  * - [V2.1.0] Appended exact '展會設定' keys to DEFAULT_SETTINGS to support safe fallback configuration.
  * - [Fix] Implemented case-insensitive, value-or-note matching for config merge to prevent duplicate pre-seeded defaults (e.g., Event Types).
+ * - [V2.1.1] Fixed missing `style` mapping for newly created System Config items (ensures column F color is applied to all config groups, not only default-seeded ones)
+ * - [Cleanup] Removed temporary forensic debug logging for System Config raw inspection
  */
 
 class SystemService {
@@ -71,6 +74,7 @@ class SystemService {
                                 note: note || item,
                                 order: parseInt(order) || 99,
                                 color: color || null,
+                                style: color || null,
                                 value2: value2 || null, 
                                 value3: value3 || null, 
                                 category: category || '其他' 
