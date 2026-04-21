@@ -1,9 +1,10 @@
 // public/scripts/sales/sales-analysis-components.js
 /**
- * @version 1.3.1 (Bug Fix Patch)
+ * @version 1.5.1 (UI Semantic Patch)
  * @date 2026-04-21
  * @changelog
- * - [Bug Fix] Replaced toISOString() with local date formatting to prevent timezone shift issues for Quick Date buttons.
+ * - [UI Semantic Patch] Updated renderAllCharts to conditionally display "歷史月份分布 (件數)" when in All History mode.
+ * - [Task 1] Merged all active KPIs into a single responsive flex row.
  */
 
 const SalesAnalysisComponents = {
@@ -49,13 +50,15 @@ const SalesAnalysisComponents = {
             .sort-icon { margin-left: 4px; font-size: 0.8em; color: #9ca3af; }
             .pagination-container { display: flex; align-items: center; justify-content: center; gap: 15px; }
             .page-btn { padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; cursor: pointer; }
-            @media (min-width: 1000px) { .four-charts-row { display: grid !important; grid-template-columns: repeat(4, 1fr) !important; gap: 16px; } }
+            
+            @media (min-width: 1000px) { 
+                .three-charts-row { display: grid !important; grid-template-columns: 2fr 1fr 1fr !important; gap: 16px; }
+            }
         `;
         document.head.appendChild(style);
     },
 
     getMainLayout: function(start, end) {
-        // [Task 2] 內部輔助函式：使用本地時間以避免時區偏移
         const formatDateLocal = (date) => {
             const y = date.getFullYear();
             const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -103,9 +106,10 @@ const SalesAnalysisComponents = {
                     </div>
                 </div>
                 <div id="sales-overview-content" class="widget-content"><div class="loading show"><div class="spinner"></div></div></div>
-                <div id="sales-kpi-content" class="widget-content" style="margin-top: 16px;"></div>
+                <div id="sales-kpi-content" style="display: none;"></div>
             </div>
-            <div id="sales-charts-container" class="dashboard-grid-flexible four-charts-row" style="margin-top: 24px; display:block;"></div>
+            
+            <div id="sales-charts-container" style="margin-top: 24px; display:block;"></div>
             
             <div class="dashboard-widget" style="margin-top: 24px;">
                 <div class="widget-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); gap: 15px;">
@@ -144,40 +148,65 @@ const SalesAnalysisComponents = {
 
     renderSalesOverviewAndKpis: function(ov, kpis) {
         const container = document.getElementById('sales-overview-content');
-        const kpiContainer = document.getElementById('sales-kpi-content');
-        if(!container || !kpiContainer) return;
+        if(!container) return;
 
         const fmtM = v => (v||0).toLocaleString('zh-TW', {style:'currency', currency:'TWD', minimumFractionDigits:0});
         
         container.innerHTML = `
-            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);"> 
-                <div class="stat-card solid-fill solid-green"><div class="stat-header"><div class="stat-icon">${this._icons.money}</div><div class="stat-label">總成交金額</div></div><div class="stat-number">${fmtM(ov.totalWonValue)}</div></div>
-                <div class="stat-card blue"><div class="stat-header"><div class="stat-icon" style="background:var(--accent-blue);">${this._icons.check}</div><div class="stat-label">總成交案件數</div></div><div class="stat-number">${ov.totalWonDeals} 件</div></div>
-                <div class="stat-card" style="background:var(--bg-secondary); border: 1px dashed var(--border-color); display:flex; align-items:center; justify-content:center; color:var(--text-muted); min-height:100px; border-radius:8px;"><span>(保留區塊)</span></div>
-                <div class="stat-card" style="background:var(--bg-secondary); border: 1px dashed var(--border-color); display:flex; align-items:center; justify-content:center; color:var(--text-muted); min-height:100px; border-radius:8px;"><span>(保留區塊)</span></div>
-            </div>`;
-
-        kpiContainer.innerHTML = `
-            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);"> 
-                <div class="stat-card solid-fill solid-teal"><div class="stat-header"><div class="stat-label">直販</div></div><div class="stat-number">${kpis.direct} 家</div></div>
-                <div class="stat-card solid-fill solid-blue"><div class="stat-header"><div class="stat-label">SI販售</div></div><div class="stat-number">${kpis.si} 家</div></div>
-                <div class="stat-card solid-fill solid-purple"><div class="stat-header"><div class="stat-label">MTB販售</div></div><div class="stat-number">${kpis.mtb} 家</div></div>
+            <div style="display: flex; flex-wrap: wrap; gap: 16px;"> 
+                <div class="stat-card solid-fill solid-green" style="flex: 3; min-width: 200px;"><div class="stat-header"><div class="stat-icon">${this._icons.money}</div><div class="stat-label">總成交金額</div></div><div class="stat-number">${fmtM(ov.totalWonValue)}</div></div>
+                <div class="stat-card blue" style="flex: 2; min-width: 150px;"><div class="stat-header"><div class="stat-icon" style="background:var(--accent-blue);">${this._icons.check}</div><div class="stat-label">總成交案件數</div></div><div class="stat-number">${ov.totalWonDeals} 件</div></div>
+                <div class="stat-card solid-fill solid-teal" style="flex: 1.5; min-width: 100px;"><div class="stat-header"><div class="stat-label">直販</div></div><div class="stat-number">${kpis.direct} 家</div></div>
+                <div class="stat-card solid-fill solid-blue" style="flex: 1.5; min-width: 100px;"><div class="stat-header"><div class="stat-label">SI販售</div></div><div class="stat-number">${kpis.si} 家</div></div>
+                <div class="stat-card solid-fill solid-purple" style="flex: 1.5; min-width: 100px;"><div class="stat-header"><div class="stat-label">MTB販售</div></div><div class="stat-number">${kpis.mtb} 家</div></div>
             </div>`;
     },
 
-    renderAllCharts: function(typeData, sourceData, productData, channelData) {
+    // [Semantic UI Patch] 根據 isAllHistory 切換顯示標題
+    renderAllCharts: function(typeData, sourceData, productData, channelData, trendData, isAllHistory = false) {
         const container = document.getElementById('sales-charts-container');
         if (!container) return;
         
+        const trendTitle = isAllHistory ? '歷史月份分布 (件數)' : '每月成交趨勢 (件數)';
+        
         container.innerHTML = `
-            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">成交類型 (依金額計)</h2></div><div id="chart-pie-type" style="height: 300px;"></div></div>
-            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">成交來源 (依金額計)</h2></div><div id="chart-pie-source" style="height: 300px;"></div></div>
-            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title" style="color:var(--text-muted);">熱銷商品</h2></div><div style="height: 300px; background:var(--bg-secondary); border: 1px dashed var(--border-color); border-radius: 8px; display:flex; align-items:center; justify-content:center; color:var(--text-muted);">(保留區塊)</div></div>
-            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title" style="color:var(--text-muted);">商流通路</h2></div><div style="height: 300px; background:var(--bg-secondary); border: 1px dashed var(--border-color); border-radius: 8px; display:flex; align-items:center; justify-content:center; color:var(--text-muted);">(保留區塊)</div></div>
+            <div class="three-charts-row">
+                <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">${trendTitle}</h2></div><div id="chart-area-trend" style="height: 300px;"></div></div>
+                <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">成交類型 (依金額計)</h2></div><div id="chart-pie-type" style="height: 300px;"></div></div>
+                <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">成交來源 (依金額計)</h2></div><div id="chart-pie-source" style="height: 300px;"></div></div>
+            </div>
         `;
 
         setTimeout(() => {
             if (typeof createThemedChart !== 'function') return;
+            
+            const currentMonth = new Date().getMonth(); 
+            createThemedChart('chart-area-trend', {
+                chart: { type: 'area', margin: [20, 15, 30, 40] },
+                title: { text: '' },
+                xAxis: { 
+                    categories: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+                    plotBands: [{
+                        from: currentMonth - 0.5,
+                        to: currentMonth + 0.5,
+                        color: 'rgba(59, 130, 246, 0.08)',
+                        label: { text: '本月', style: { color: '#9ca3af', fontSize: '10px' }, y: 15 }
+                    }]
+                },
+                yAxis: { title: { text: '' }, allowDecimals: false },
+                legend: { enabled: false },
+                tooltip: { pointFormat: '<b>{point.y} 件</b>' },
+                plotOptions: { 
+                    area: { 
+                        fillColor: 'rgba(59, 130, 246, 0.2)', 
+                        lineColor: '#3b82f6', 
+                        lineWidth: 2,
+                        marker: { radius: 3, fillColor: '#3b82f6' }
+                    } 
+                },
+                series: [{ name: '成交件數', data: (trendData || []).map(d => d.count) }]
+            });
+
             const pieOpt = (name, data) => ({
                 chart: { type: 'pie', margin: [0, 0, 0, 0] }, title: { text: '' }, 
                 tooltip: { pointFormat: '<b>{point.percentage:.1f}%</b> ({point.y:,.0f})' },

@@ -1,11 +1,10 @@
 // public/scripts/sales/sales-analysis.js
 /**
- * @version 1.7.2 (Bug Fix Patch)
+ * @version 1.8.1 (UI Semantic Patch)
  * @date 2026-04-21
  * @changelog
- * - [Bug Fix] Replaced || with ?? in fetchAndRenderSalesData for startDate and endDate to strictly preserve null or empty string states for "歷史全資料".
- * - [Bug Fix] Fixed "歷史全資料" inconsistent logic by explicitly handling null parameters.
- * - [Bug Fix] Fixed timezone bug causing YTD to show as 12/31 instead of 01/01 by replacing toISOString() with local date formatter.
+ * - [UI Semantic Patch] Passed isAllHistory flag to dynamically change Trend Chart title when in "歷史全資料" mode.
+ * - [UI Enhancement] Added Monthly Trend Chart (Area Chart) utilizing frontend displayedDeals.
  */
 
 // 輔助函式：使用本地時區格式化日期為 YYYY-MM-DD
@@ -14,6 +13,20 @@ function formatDateLocal(date) {
     const m = String(date.getMonth() + 1).padStart(2, '0');
     const d = String(date.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
+}
+
+// 輔助函式：計算 1-12 月成交趨勢 (件數)
+function calculateMonthlyTrend(deals) {
+    const trend = Array.from({length: 12}, (_, i) => ({ month: i + 1, count: 0 }));
+    (deals || []).forEach(d => {
+        if (d.wonDate) {
+            const date = new Date(d.wonDate);
+            if (!isNaN(date.getTime())) {
+                trend[date.getMonth()].count += 1;
+            }
+        }
+    });
+    return trend;
 }
 
 // 全域狀態管理
@@ -37,12 +50,10 @@ async function loadSalesAnalysisPage(startDateISO, endDateISO) {
     if (!container) return;
 
     if (startDateISO === undefined && endDateISO === undefined) {
-        // 初始載入預設為 YTD (使用 Local Time 避免 12/31 Bug)
         const now = new Date();
         salesStartDate = formatDateLocal(new Date(now.getFullYear(), 0, 1));
         salesEndDate = formatDateLocal(now);
     } else if (startDateISO === null && endDateISO === null) {
-        // 明確捕捉 null 代表歷史全資料，確保狀態清空
         salesStartDate = '';
         salesEndDate = '';
     } else {
@@ -105,7 +116,6 @@ function refreshSalesAnalysis() {
         document.getElementById('sales-overview-content').innerHTML = '<div class="loading show"><div class="spinner"></div></div>';
         document.getElementById('sales-kpi-content').innerHTML = '';
         document.getElementById('won-deals-content').innerHTML = '<div class="loading show" style="padding: 20px;"><div class="spinner"></div></div>';
-        // 傳遞 null 以觸發明確的清除邏輯
         loadSalesAnalysisPage(null, null);
     } 
     else if (startDate && endDate) {
@@ -124,7 +134,6 @@ function refreshSalesAnalysis() {
 
 async function fetchAndRenderSalesData(startDate, endDate) {
     try {
-        // [Bug Fix] 使用 ?? 取代 || 確保不會誤判空字串或 null
         const sParam = startDate ?? '';
         const eParam = endDate ?? '';
         const mParam = currentSalesModelFilter || 'all'; 
@@ -147,13 +156,19 @@ async function fetchAndRenderSalesData(startDate, endDate) {
         displayedDeals = [...(salesAnalysisData.wonDeals || [])];
         sortDeals(currentSortState.field, currentSortState.direction, true);
 
+        const trendData = calculateMonthlyTrend(displayedDeals);
+        // [Semantic UI Patch] 偵測是否為全歷史資料
+        const isAllHistory = (sParam === '' && eParam === '');
+
         if (salesAnalysisData.overview && salesAnalysisData.kpis && salesAnalysisData.byType) {
             SalesAnalysisComponents.renderSalesOverviewAndKpis(salesAnalysisData.overview, salesAnalysisData.kpis);
             SalesAnalysisComponents.renderAllCharts(
                 salesAnalysisData.byType || [], 
                 salesAnalysisData.bySource || [], 
                 salesAnalysisData.byProduct || [], 
-                salesAnalysisData.byChannel || []
+                salesAnalysisData.byChannel || [],
+                trendData,
+                isAllHistory // 傳遞全歷史標記
             );
         } else {
             console.warn('[Sales Analysis] Backend SSOT data incomplete, falling back to local computation.');
@@ -195,8 +210,12 @@ function updateDashboard(deals) {
     const sourceData = SalesAnalysisHelper.calculateGroupStats(deals, 'opportunitySource', 'value');
     const productData = SalesAnalysisHelper.calculateProductStats(deals);
     const channelData = SalesAnalysisHelper.calculateChannelStats(deals);
+    
+    const trendData = calculateMonthlyTrend(deals);
+    // [Semantic UI Patch] 降級模式亦偵測是否為全歷史資料
+    const isAllHistory = (salesStartDate === '' && salesEndDate === '');
 
-    SalesAnalysisComponents.renderAllCharts(typeData, sourceData, productData, channelData);
+    SalesAnalysisComponents.renderAllCharts(typeData, sourceData, productData, channelData, trendData, isAllHistory);
 }
 
 function renderPaginatedTable() {
