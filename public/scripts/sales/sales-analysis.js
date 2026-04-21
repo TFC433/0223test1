@@ -1,24 +1,33 @@
 // public/scripts/sales/sales-analysis.js
 /**
- * @version 1.5.1
+ * @version 1.7.2 (Bug Fix Patch)
  * @date 2026-04-21
  * @changelog
- * - [2026-04-21] Phase 4 Fix: Aligned CSV export dataset with UI filtered dataset (Option A). Restored safe fallback mechanism for dashboard rendering if backend SSOT is unavailable.
- * - [2026-04-21] Phase 4: Transferred full dataset ownership and filter state to backend SSOT.
+ * - [Bug Fix] Replaced || with ?? in fetchAndRenderSalesData for startDate and endDate to strictly preserve null or empty string states for "歷史全資料".
+ * - [Bug Fix] Fixed "歷史全資料" inconsistent logic by explicitly handling null parameters.
+ * - [Bug Fix] Fixed timezone bug causing YTD to show as 12/31 instead of 01/01 by replacing toISOString() with local date formatter.
  */
+
+// 輔助函式：使用本地時區格式化日期為 YYYY-MM-DD
+function formatDateLocal(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
 
 // 全域狀態管理
 let salesAnalysisData = null; 
 let salesStartDate = null;
 let salesEndDate = null;
-let allWonDeals = [];         // 供全域選項提取的資料
-let displayedDeals = [];      // 當下顯示在 Table 的資料 (由後端提供，已套用過濾)
+let allWonDeals = [];         
+let displayedDeals = [];      
 let currentSalesModelFilter = 'all';
 
 // 列表狀態
 let currentSortState = { field: 'wonDate', direction: 'desc' };
 let currentPage = 1;
-let rowsPerPage = 10; 
+let rowsPerPage = 100;
 
 /**
  * 入口函數
@@ -27,12 +36,18 @@ async function loadSalesAnalysisPage(startDateISO, endDateISO) {
     const container = document.getElementById('page-sales-analysis');
     if (!container) return;
 
-    if (!startDateISO || !endDateISO) {
-        salesStartDate = null;
-        salesEndDate = null;
+    if (startDateISO === undefined && endDateISO === undefined) {
+        // 初始載入預設為 YTD (使用 Local Time 避免 12/31 Bug)
+        const now = new Date();
+        salesStartDate = formatDateLocal(new Date(now.getFullYear(), 0, 1));
+        salesEndDate = formatDateLocal(now);
+    } else if (startDateISO === null && endDateISO === null) {
+        // 明確捕捉 null 代表歷史全資料，確保狀態清空
+        salesStartDate = '';
+        salesEndDate = '';
     } else {
-        salesStartDate = startDateISO;
-        salesEndDate = endDateISO;
+        salesStartDate = startDateISO || '';
+        salesEndDate = endDateISO || '';
     }
 
     currentSalesModelFilter = 'all';
@@ -46,12 +61,37 @@ async function loadSalesAnalysisPage(startDateISO, endDateISO) {
     const refreshBtn = document.getElementById('sales-refresh-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', refreshSalesAnalysis);
 
-    const clearBtn = document.getElementById('sales-clear-btn');
-    if (clearBtn) clearBtn.addEventListener('click', clearSalesFilter);
-
     // 3. 獲取數據
     await fetchAndRenderSalesData(salesStartDate, salesEndDate);
 }
+
+// 快速過濾日期選擇
+window.setQuickDate = function(range) {
+    const now = new Date();
+    let start = '';
+    let end = '';
+    const todayStr = formatDateLocal(now); 
+    
+    if (range === 'ytd') {
+        start = formatDateLocal(new Date(now.getFullYear(), 0, 1)); 
+        end = todayStr;
+    } else if (range === '30d') {
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        start = formatDateLocal(thirtyDaysAgo); 
+        end = todayStr;
+    } else if (range === 'all') {
+        start = '';
+        end = '';
+    }
+
+    const startInput = document.getElementById('sales-start-date');
+    const endInput = document.getElementById('sales-end-date');
+    if(startInput) startInput.value = start;
+    if(endInput) endInput.value = end;
+    
+    refreshSalesAnalysis();
+};
 
 function refreshSalesAnalysis() {
     const startDateInput = document.getElementById('sales-start-date');
@@ -61,7 +101,14 @@ function refreshSalesAnalysis() {
     const startDate = startDateInput.value;
     const endDate = endDateInput.value;
 
-    if (startDate && endDate) {
+    if (startDate === '' && endDate === '') {
+        document.getElementById('sales-overview-content').innerHTML = '<div class="loading show"><div class="spinner"></div></div>';
+        document.getElementById('sales-kpi-content').innerHTML = '';
+        document.getElementById('won-deals-content').innerHTML = '<div class="loading show" style="padding: 20px;"><div class="spinner"></div></div>';
+        // 傳遞 null 以觸發明確的清除邏輯
+        loadSalesAnalysisPage(null, null);
+    } 
+    else if (startDate && endDate) {
         if (startDate <= endDate) {
             document.getElementById('sales-overview-content').innerHTML = '<div class="loading show"><div class="spinner"></div></div>';
             document.getElementById('sales-kpi-content').innerHTML = '';
@@ -75,17 +122,11 @@ function refreshSalesAnalysis() {
     }
 }
 
-function clearSalesFilter() {
-    document.getElementById('sales-overview-content').innerHTML = '<div class="loading show"><div class="spinner"></div></div>';
-    document.getElementById('sales-kpi-content').innerHTML = '';
-    document.getElementById('won-deals-content').innerHTML = '<div class="loading show" style="padding: 20px;"><div class="spinner"></div></div>';
-    loadSalesAnalysisPage(null, null);
-}
-
 async function fetchAndRenderSalesData(startDate, endDate) {
     try {
-        const sParam = startDate || '';
-        const eParam = endDate || '';
+        // [Bug Fix] 使用 ?? 取代 || 確保不會誤判空字串或 null
+        const sParam = startDate ?? '';
+        const eParam = endDate ?? '';
         const mParam = currentSalesModelFilter || 'all'; 
 
         const result = await authedFetch(`/api/sales-analysis?startDate=${sParam}&endDate=${eParam}&salesModel=${encodeURIComponent(mParam)}`);
@@ -101,15 +142,11 @@ async function fetchAndRenderSalesData(startDate, endDate) {
             select.value = currentSalesModelFilter;
         }
         
-        const options = salesAnalysisData.paginationOptions || [10, 20, 50, 100];
-        rowsPerPage = options[0];
-        SalesAnalysisComponents.initPaginationOptions(options, rowsPerPage);
+        SalesAnalysisComponents.initPaginationOptions([50, 100, 500], rowsPerPage);
 
-        // Table: 直接取用後端過濾後的資料
         displayedDeals = [...(salesAnalysisData.wonDeals || [])];
         sortDeals(currentSortState.field, currentSortState.direction, true);
 
-        // Dashboard: 優先使用後端 SSOT，若資料異常則安全降級 (Safe Fallback)
         if (salesAnalysisData.overview && salesAnalysisData.kpis && salesAnalysisData.byType) {
             SalesAnalysisComponents.renderSalesOverviewAndKpis(salesAnalysisData.overview, salesAnalysisData.kpis);
             SalesAnalysisComponents.renderAllCharts(
@@ -124,15 +161,6 @@ async function fetchAndRenderSalesData(startDate, endDate) {
         }
 
         renderPaginatedTable();
-
-        const dRange = document.getElementById('sales-date-range-display');
-        if(dRange) {
-            if (startDate && endDate) {
-                dRange.textContent = `資料期間：${new Date(startDate + 'T00:00:00').toLocaleDateString('zh-TW')} - ${new Date(endDate + 'T00:00:00').toLocaleDateString('zh-TW')}`;
-            } else {
-                dRange.textContent = `資料期間：全歷史資料`;
-            }
-        }
 
     } catch (error) {
         console.error('載入失敗:', error);
@@ -156,7 +184,6 @@ function sortDeals(field, direction, sortDisplayedOnly = false) {
     if (!sortDisplayedOnly) displayedDeals = [...allWonDeals];
 }
 
-// [Phase 4 Fix] 還原 updateDashboard 供 Safe Fallback 使用
 function updateDashboard(deals) {
     if (typeof SalesAnalysisHelper.calculateOverview !== 'function') return;
 
@@ -215,11 +242,11 @@ window.handleSortTable = function(field) {
     renderPaginatedTable();
 };
 
-window.handleRowsPerPageChange = function() {
-    const select = document.getElementById('rows-per-page-select');
-    if (select) {
-        rowsPerPage = parseInt(select.value);
+window.handleRowsPerPageChange = function(value) {
+    if (value) {
+        rowsPerPage = parseInt(value);
         currentPage = 1; 
+        SalesAnalysisComponents.initPaginationOptions([50, 100, 500], rowsPerPage);
         renderPaginatedTable();
     }
 };
@@ -234,7 +261,6 @@ window.changePage = function(delta) {
 };
 
 window.exportSalesToCSV = function() {
-    // [Phase 4 Fix] CSV 嚴格跟隨 UI 目前呈現的過濾結果 (Option A)，避免數據範圍矛盾
     const csvContent = SalesAnalysisHelper.generateCSV(displayedDeals);
     if (!csvContent) return;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

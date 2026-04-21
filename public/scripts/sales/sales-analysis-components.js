@@ -1,4 +1,10 @@
 // public/scripts/sales/sales-analysis-components.js
+/**
+ * @version 1.3.1 (Bug Fix Patch)
+ * @date 2026-04-21
+ * @changelog
+ * - [Bug Fix] Replaced toISOString() with local date formatting to prevent timezone shift issues for Quick Date buttons.
+ */
 
 const SalesAnalysisComponents = {
     _icons: {
@@ -13,14 +19,12 @@ const SalesAnalysisComponents = {
         let style = document.getElementById(styleId);
         
         if (style) {
-            // [修正] 如果樣式已存在，將其移到 head 最末端以確保在 SPA 切換時的優先權
             document.head.appendChild(style);
             return;
         }
 
         style = document.createElement('style');
         style.id = styleId;
-        // [修正] 增加 #page-sales-analysis 前綴提升權重，防止被其他頁面的 .stat-card 樣式覆蓋
         style.innerHTML = `
             #page-sales-analysis .stat-card.solid-fill { border-left: none !important; color: white !important; transition: transform 0.2s ease; }
             #page-sales-analysis .stat-card.solid-fill:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.15); }
@@ -43,7 +47,7 @@ const SalesAnalysisComponents = {
             .custom-select-control { background-color: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
             .sortable-header { cursor: pointer; user-select: none; }
             .sort-icon { margin-left: 4px; font-size: 0.8em; color: #9ca3af; }
-            .pagination-container { display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 20px; }
+            .pagination-container { display: flex; align-items: center; justify-content: center; gap: 15px; }
             .page-btn { padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; background-color: white; cursor: pointer; }
             @media (min-width: 1000px) { .four-charts-row { display: grid !important; grid-template-columns: repeat(4, 1fr) !important; gap: 16px; } }
         `;
@@ -51,40 +55,88 @@ const SalesAnalysisComponents = {
     },
 
     getMainLayout: function(start, end) {
-        // 若 start/end 為 null 或空值，則不填入 input value
+        // [Task 2] 內部輔助函式：使用本地時間以避免時區偏移
+        const formatDateLocal = (date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+
         const sVal = start || '';
         const eVal = end || '';
-        const rangeText = (start && end) ? `${start} - ${end}` : '全歷史資料';
+        const rangeText = (start && end) ? `${start} - ${end}` : '歷史全資料';
+
+        const now = new Date();
+        const todayStr = formatDateLocal(now);
+        const ytdStr = formatDateLocal(new Date(now.getFullYear(), 0, 1));
+        const thirtyDate = new Date();
+        thirtyDate.setDate(thirtyDate.getDate() - 30);
+        const thirtyStr = formatDateLocal(thirtyDate);
+
+        let activeRange = 'custom';
+        if (sVal === '' && eVal === '') activeRange = 'all';
+        else if (sVal === ytdStr && eVal === todayStr) activeRange = 'ytd';
+        else if (sVal === thirtyStr && eVal === todayStr) activeRange = '30d';
+
+        const btnClass = (range) => range === activeRange ? 'action-btn primary quick-date-btn' : 'action-btn secondary quick-date-btn';
 
         return `
             <div class="dashboard-widget">
-                <div class="widget-header" style="align-items: flex-start;">
-                    <div><h2 class="widget-title">績效概覽</h2><p id="sales-date-range-display" style="color: var(--text-muted); font-size: 0.9rem; margin-top: 5px;">資料期間：${rangeText}</p></div>
-                    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                        <div class="form-group" style="margin-bottom: 0;"><label class="form-label" style="font-size: 0.8rem;">開始日期</label><input type="date" id="sales-start-date" class="form-input form-input-sm" value="${sVal}"></div>
-                        <div class="form-group" style="margin-bottom: 0;"><label class="form-label" style="font-size: 0.8rem;">結束日期</label><input type="date" id="sales-end-date" class="form-input form-input-sm" value="${eVal}"></div>
-                        <div style="display:flex; gap:10px; margin-top: 20px;">
-                            <button id="sales-refresh-btn" class="action-btn primary" style="height: 40px;">查詢</button>
-                            <button id="sales-clear-btn" class="action-btn secondary" style="height: 40px;">清除篩選</button>
+                <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 15px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <h2 class="widget-title" style="margin: 0;">績效概覽</h2>
+                        <span id="sales-date-range-display" style="color: var(--text-muted); font-size: 0.85rem;">資料期間：${rangeText}</span>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 6px;">
+                            <button class="${btnClass('all')}" style="padding: 4px 10px; font-size: 0.85rem;" onclick="window.setQuickDate('all')">歷史全資料</button>
+                            <button class="${btnClass('ytd')}" style="padding: 4px 10px; font-size: 0.85rem;" onclick="window.setQuickDate('ytd')">YTD</button>
+                            <button class="${btnClass('30d')}" style="padding: 4px 10px; font-size: 0.85rem;" onclick="window.setQuickDate('30d')">最近30天</button>
                         </div>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <input type="date" id="sales-start-date" style="width: 140px; padding: 4px 8px; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 4px; background: #fff;" value="${sVal}">
+                            <span style="color: var(--text-muted); font-size: 0.85rem;">-</span>
+                            <input type="date" id="sales-end-date" style="width: 140px; padding: 4px 8px; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 4px; background: #fff;" value="${eVal}">
+                        </div>
+                        <button id="sales-refresh-btn" class="action-btn primary" style="padding: 4px 12px; font-size: 0.85rem;">查詢</button>
                     </div>
                 </div>
                 <div id="sales-overview-content" class="widget-content"><div class="loading show"><div class="spinner"></div></div></div>
                 <div id="sales-kpi-content" class="widget-content" style="margin-top: 16px;"></div>
             </div>
             <div id="sales-charts-container" class="dashboard-grid-flexible four-charts-row" style="margin-top: 24px; display:block;"></div>
+            
             <div class="dashboard-widget" style="margin-top: 24px;">
                 <div class="widget-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); gap: 15px;">
-                    <div style="display: flex; align-items: baseline; gap: 15px;"><h2 class="widget-title">成交案件列表</h2><span style="font-size: 0.9rem; color: var(--text-muted);">共 <span id="deals-count-display">0</span> 筆</span></div>
+                    <div style="display: flex; align-items: baseline; gap: 15px;">
+                        <h2 class="widget-title">成交案件列表</h2>
+                        <span style="font-size: 0.9rem; color: var(--text-muted);">共 <span id="deals-count-display">0</span> 筆</span>
+                    </div>
                     <div style="display: flex; gap: 15px; align-items: center;">
-                        <button class="action-btn secondary" onclick="exportSalesToCSV()">匯出 CSV</button>
-                        <select id="rows-per-page-select" class="custom-select-control" onchange="handleRowsPerPageChange()"></select>
-                        <select id="sales-model-filter" class="custom-select-control" onchange="handleSalesModelFilterChange()"><option value="all">全部商流</option></select>
+                        <div id="rows-per-page-container" style="display:flex; gap: 5px; align-items:center;">
+                             <span style="font-size:0.85rem; color:var(--text-muted);">每頁顯示：</span>
+                             <div id="rows-per-page-buttons" style="display:flex; gap:5px;"></div>
+                        </div>
+                        <select id="sales-model-filter" class="custom-select-control" style="padding: 4px 8px; font-size: 0.85rem;" onchange="handleSalesModelFilterChange()"><option value="all">全部商流</option></select>
                     </div>
                 </div>
+                
                 <div id="won-deals-content" class="widget-content" style="padding: 0;"></div>
-                <div id="pagination-container" class="pagination-container" style="display: none;">
-                    <button class="page-btn" onclick="changePage(-1)" id="btn-prev-page">上一頁</button><span class="page-info" id="page-info-display"></span><button class="page-btn" onclick="changePage(1)" id="btn-next-page">下一頁</button>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 0 10px 15px 10px;">
+                    <div style="flex: 1;"></div>
+                    <div id="pagination-container" class="pagination-container" style="display: none; flex: 1; justify-content: center;">
+                        <button class="page-btn" onclick="changePage(-1)" id="btn-prev-page">上一頁</button>
+                        <span class="page-info" id="page-info-display"></span>
+                        <button class="page-btn" onclick="changePage(1)" id="btn-next-page">下一頁</button>
+                    </div>
+                    <div style="flex: 1; display: flex; justify-content: flex-end;">
+                        <button class="action-btn secondary" style="padding: 4px 10px; font-size: 0.8rem; display: flex; align-items: center; gap: 4px;" onclick="exportSalesToCSV()">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                            匯出 CSV
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -101,8 +153,8 @@ const SalesAnalysisComponents = {
             <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);"> 
                 <div class="stat-card solid-fill solid-green"><div class="stat-header"><div class="stat-icon">${this._icons.money}</div><div class="stat-label">總成交金額</div></div><div class="stat-number">${fmtM(ov.totalWonValue)}</div></div>
                 <div class="stat-card blue"><div class="stat-header"><div class="stat-icon" style="background:var(--accent-blue);">${this._icons.check}</div><div class="stat-label">總成交案件數</div></div><div class="stat-number">${ov.totalWonDeals} 件</div></div>
-                <div class="stat-card purple"><div class="stat-header"><div class="stat-icon" style="background:var(--accent-purple);">${this._icons.avg}</div><div class="stat-label">平均成交金額</div></div><div class="stat-number">${fmtM(ov.averageDealValue)}</div></div>
-                <div class="stat-card orange"><div class="stat-header"><div class="stat-icon" style="background:var(--accent-orange);">${this._icons.cycle}</div><div class="stat-label">平均成交週期</div></div><div class="stat-number">${ov.averageSalesCycleInDays} 天</div></div>
+                <div class="stat-card" style="background:var(--bg-secondary); border: 1px dashed var(--border-color); display:flex; align-items:center; justify-content:center; color:var(--text-muted); min-height:100px; border-radius:8px;"><span>(保留區塊)</span></div>
+                <div class="stat-card" style="background:var(--bg-secondary); border: 1px dashed var(--border-color); display:flex; align-items:center; justify-content:center; color:var(--text-muted); min-height:100px; border-radius:8px;"><span>(保留區塊)</span></div>
             </div>`;
 
         kpiContainer.innerHTML = `
@@ -117,14 +169,11 @@ const SalesAnalysisComponents = {
         const container = document.getElementById('sales-charts-container');
         if (!container) return;
         
-        const prodH = Math.max(300, productData.length * 30);
-        const chanH = Math.max(300, channelData.length * 30);
-
         container.innerHTML = `
             <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">成交類型 (依金額計)</h2></div><div id="chart-pie-type" style="height: 300px;"></div></div>
             <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">成交來源 (依金額計)</h2></div><div id="chart-pie-source" style="height: 300px;"></div></div>
-            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">熱銷商品</h2></div><div style="max-height: 300px; overflow-y:auto;"><div id="chart-bar-product" style="height: ${prodH}px;"></div></div></div>
-            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title">商流通路</h2></div><div style="max-height: 300px; overflow-y:auto;"><div id="chart-bar-channel" style="height: ${chanH}px;"></div></div></div>
+            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title" style="color:var(--text-muted);">熱銷商品</h2></div><div style="height: 300px; background:var(--bg-secondary); border: 1px dashed var(--border-color); border-radius: 8px; display:flex; align-items:center; justify-content:center; color:var(--text-muted);">(保留區塊)</div></div>
+            <div class="dashboard-widget"><div class="widget-header"><h2 class="widget-title" style="color:var(--text-muted);">商流通路</h2></div><div style="height: 300px; background:var(--bg-secondary); border: 1px dashed var(--border-color); border-radius: 8px; display:flex; align-items:center; justify-content:center; color:var(--text-muted);">(保留區塊)</div></div>
         `;
 
         setTimeout(() => {
@@ -139,8 +188,6 @@ const SalesAnalysisComponents = {
 
             createThemedChart('chart-pie-type', pieOpt('類型', typeData));
             createThemedChart('chart-pie-source', pieOpt('來源', sourceData));
-            createThemedChart('chart-bar-product', { chart: { type: 'bar' }, title: { text: '' }, xAxis: { categories: productData.map(d => d.name) }, yAxis: { title: { text: '數量' } }, legend: { enabled: false }, series: [{ name: '數量', data: productData.map(d => d.y), color: '#8b5cf6' }] });
-            createThemedChart('chart-bar-channel', { chart: { type: 'bar' }, title: { text: '' }, xAxis: { categories: channelData.map(d => d.name) }, yAxis: { title: { text: '金額' } }, legend: { enabled: false }, series: [{ name: '金額', data: channelData.map(d => d.y), color: '#10b981' }] });
         }, 50);
     },
 
@@ -180,9 +227,12 @@ const SalesAnalysisComponents = {
     },
 
     initPaginationOptions: function(options, current) {
-        const select = document.getElementById('rows-per-page-select');
-        if (!select) return;
-        select.innerHTML = options.map(opt => `<option value="${opt}" ${opt === current ? 'selected' : ''}>${opt} 筆</option>`).join('');
+        const container = document.getElementById('rows-per-page-buttons');
+        if (!container) return;
+        const fixedOptions = [50, 100, 500];
+        container.innerHTML = fixedOptions.map(opt => 
+            `<button class="action-btn ${opt === current ? 'primary' : 'secondary'}" style="padding: 4px 8px; font-size: 0.8rem;" onclick="handleRowsPerPageChange(${opt})">${opt}</button>`
+        ).join('');
     },
 
     updatePaginationControls: function(current, totalCount, perPage) {

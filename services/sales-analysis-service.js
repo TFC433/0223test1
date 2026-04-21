@@ -1,13 +1,14 @@
 /**
  * services/sales-analysis-service.js
  * 銷售分析服務
- * * @version 6.0.0 (Phase 5-A - Base Dataset SQL Pushdown & Fully Converged SSOT)
+ * * @version 6.1.1 (UI/UX Patch Fix - Chart Colors)
  * @date 2026-04-21
  * @description 全面掌管日期、商流過濾與 Dashboard KPI 的聚合計算，並將基礎條件下推至資料層以提昇效能。
  * 依賴注入：OpportunityReader, SystemService, Config
  * @changelog
- * - [2026-04-21] Phase 5-A: Changed to consume getSalesAnalysisBaseDeals() pushing stage filtering to DB layer. Integrated all Phase 4 Fix logic natively.
- * - [2026-03-12] Migrated getSystemConfig from deprecated SystemReader to SystemService.
+ * - [2026-04-21] UI/UX Patch Fix: Passed eventTypeColors to _analyzeByDimension for byType chart.
+ * - [2026-04-21] UI/UX Patch: Added eventTypeColors extraction from systemConfig to fix opportunityType tag colors.
+ * - [2026-04-21] Phase 5-A: Changed to consume getSalesAnalysisBaseDeals() pushing stage filtering to DB layer.
  */
 
 class SalesAnalysisService {
@@ -30,10 +31,7 @@ class SalesAnalysisService {
     async getSalesAnalysisData(startDateISO, endDateISO, salesModelFilter = 'all') {
         console.log(`📈 [SalesAnalysisService] 計算成交分析資料 (SQL-Optimized SSOT Mode)...`);
 
-        // 1. [Phase 5-A] 透過 Reader 向下層請求已套用 stage='受注' 與 Date Range 的基礎資料集
-        // 這徹底避免了先將所有資料撈進 Node.js Memory 再慢慢 Filter 的效能浪費
         const baseDeals = await this.opportunityReader.getSalesAnalysisBaseDeals(startDateISO, endDateISO);
-        
         const systemConfig = await this.systemService.getSystemConfig();
 
         const salesModelColors = {};
@@ -43,7 +41,14 @@ class SalesAnalysisService {
             });
         }
 
-        // 2. 資料正規化 (確保數值為可運算格式與保留時間戳)
+        // [UI/UX Patch] 擷取機會種類顏色以供前端表格標籤與圖表使用
+        const eventTypeColors = {};
+        if (systemConfig['機會種類']) {
+            systemConfig['機會種類'].forEach(item => {
+                if (item.color) eventTypeColors[item.value] = item.color;
+            });
+        }
+
         const processedDeals = baseDeals.map(deal => {
             let value = 0;
             if (deal.opportunityValue) {
@@ -56,13 +61,10 @@ class SalesAnalysisService {
             };
         });
 
-        // 3. 商流過濾 (Backend-Owned Filter)
-        // 嚴格相等 (Exact Match) 以吻合前端業務邏輯
         const finalDeals = (salesModelFilter && salesModelFilter !== 'all')
             ? processedDeals.filter(d => d.salesModel === salesModelFilter)
             : processedDeals;
 
-        // 4. 計算 Overview KPI (基於最終過濾結果 finalDeals)
         let totalVal = 0;
         let totalDays = 0;
         let cycleCount = 0;
@@ -85,7 +87,6 @@ class SalesAnalysisService {
             averageSalesCycleInDays: cycleCount ? Math.round(totalDays / cycleCount) : 0
         };
 
-        // 5. 計算 KPI Cards (字串 Includes 比對 + 獨立公司數)
         const calcUnique = (keywords) => {
             const unique = new Set();
             finalDeals.forEach(d => {
@@ -103,7 +104,6 @@ class SalesAnalysisService {
             mtb: calcUnique(['MTB', '工具機'])
         };
         
-        // 從無過濾的總集萃取商流選項供下拉選單使用
         const filterOptions = [...new Set(processedDeals.map(d => d.salesModel).filter(Boolean))].sort();
 
         return {
@@ -111,23 +111,18 @@ class SalesAnalysisService {
             dealCount: finalDeals.length,
             overview,
             kpis,
-            byType: this._analyzeByDimension(finalDeals, 'opportunityType'),     
+            // [Fix] 傳入 eventTypeColors 使圖表顏色正確套用
+            byType: this._analyzeByDimension(finalDeals, 'opportunityType', eventTypeColors),     
             bySource: this._analyzeByDimension(finalDeals, 'opportunitySource'), 
             byChannel: this._analyzeChannels(finalDeals),
             byProduct: this._analyzeProducts(finalDeals),
-            
-            // finalDeals 供前端當下的 Table List 與 Dashboard 顯示
             wonDeals: finalDeals,
-            
-            // processedDeals 供下拉選單或業務除錯比對 (CSV依據Phase 4 Fix使用wonDeals)
             allWonDeals: processedDeals,
-            
             filterOptions,
-            salesModelColors
+            salesModelColors,
+            eventTypeColors 
         };
     }
-
-    // --- 內部輔助分析函式 ---
 
     _analyzeByDimension(deals, fieldKey, colorMap = {}) {
         const stats = {};
