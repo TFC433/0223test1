@@ -1,11 +1,12 @@
 /**
  * services/sales-analysis-service.js
  * 銷售分析服務
- * * @version 5.0.2 (Phase 5 Refactoring - SystemService Migration)
- * @date 2026-03-12
+ * * @version 5.1.0 (Phase 1 Safe Alignment)
+ * @date 2026-04-21
  * @description 負責處理成交金額、銷售渠道分析與產品組合統計。
  * 依賴注入：OpportunityReader, SystemService, Config
  * @changelog
+ * - [2026-04-21] Phase 1 Safe Alignment: Added Overview KPIs, Unique Customer KPIs, and ensured wonDeals dataset matches frontend expectations without modifying frontend behavior.
  * - [2026-03-12] Migrated getSystemConfig from deprecated SystemReader to SystemService.
  */
 
@@ -17,7 +18,7 @@ class SalesAnalysisService {
      */
     constructor(opportunityReader, systemService, config) {
         this.opportunityReader = opportunityReader;
-        this.systemService = systemService; // [Patch 2026-03-12]
+        this.systemService = systemService; 
         this.config = config;
         
         // --- !!! 重要設定 !!! ---
@@ -34,7 +35,6 @@ class SalesAnalysisService {
         console.log(`📈 [SalesAnalysisService] 計算成交分析資料...`);
 
         const allOpportunities = await this.opportunityReader.getOpportunities();
-        // [Patch 2026-03-12] Migrated to SystemService
         const systemConfig = await this.systemService.getSystemConfig();
 
         // 1. 準備設定資料傳給前端
@@ -62,7 +62,7 @@ class SalesAnalysisService {
             return dealDate >= start && dealDate <= end;
         });
 
-        // 3. 資料正規化 (處理金額)
+        // 3. 資料正規化 (處理金額與前置時間戳)
         const processedDeals = wonDeals.map(deal => {
             let value = 0;
             // 嘗試解析金額，移除逗號等符號
@@ -72,30 +72,74 @@ class SalesAnalysisService {
             
             return {
                 ...deal,
-                numericValue: value
+                numericValue: value,
+                // 提供 wonDate 以完美對齊前端 Helper 與 Table sorting 所需的邏輯
+                wonDate: deal.expectedCloseDate || deal.lastUpdateTime
             };
         });
 
-        // 4. 進行各項維度分析
+        // 4. 計算 Overview KPI (對齊前端 SalesAnalysisHelper.calculateOverview)
+        let totalVal = 0;
+        let totalDays = 0;
+        let cycleCount = 0;
+
+        processedDeals.forEach(d => {
+            totalVal += d.numericValue || 0;
+            if (d.createdTime && d.wonDate) {
+                const diff = Math.ceil(Math.abs(new Date(d.wonDate) - new Date(d.createdTime)) / 86400000);
+                if (!isNaN(diff)) { 
+                    totalDays += diff; 
+                    cycleCount++; 
+                }
+            }
+        });
+
+        const overview = {
+            totalWonValue: totalVal,
+            totalWonDeals: processedDeals.length,
+            averageDealValue: processedDeals.length ? totalVal / processedDeals.length : 0,
+            averageSalesCycleInDays: cycleCount ? Math.round(totalDays / cycleCount) : 0
+        };
+
+        // 5. 計算 KPI Cards - 獨立客戶數 (對齊前端 SalesAnalysisHelper.calculateKpis)
+        const calcUnique = (keywords) => {
+            const unique = new Set();
+            processedDeals.forEach(d => {
+                const m = (d.salesModel || '').trim();
+                // 使用字串 includes 並計算獨立的 customerCompany
+                if (keywords.some(kw => m.includes(kw)) && d.customerCompany) {
+                    unique.add(d.customerCompany.trim());
+                }
+            });
+            return unique.size;
+        };
+
+        const kpis = {
+            direct: calcUnique(['直販', '直接販售']),
+            si: calcUnique(['SI', '系統整合']),
+            mtb: calcUnique(['MTB', '工具機'])
+        };
+
+        // 6. 進行各項維度分析與封裝回傳
         return {
-            totalAmount: processedDeals.reduce((sum, d) => sum + d.numericValue, 0),
+            totalAmount: totalVal, 
             dealCount: processedDeals.length,
+            
+            // [Phase 1 Alignment] 提供與前端數學運算結果一致的物件
+            overview,
+            kpis,
             
             // 圖表數據
             bySalesModel: this._analyzeByDimension(processedDeals, 'salesModel', salesModelColors),
+            byType: this._analyzeByDimension(processedDeals, 'opportunityType'),     // 對齊前端 Type Chart
+            bySource: this._analyzeByDimension(processedDeals, 'opportunitySource'), // 對齊前端 Source Chart
             byChannel: this._analyzeChannels(processedDeals),
             byProduct: this._analyzeProducts(processedDeals),
             
             // 原始清單 (供前端表格使用)
-            // ★ 修正：對齊前端預期 key
-            wonDeals: processedDeals.map(d => ({
-                name: d.opportunityName,
-                client: d.customerCompany,
-                value: d.numericValue,
-                date: d.expectedCloseDate || d.lastUpdateTime,
-                model: d.salesModel,
-                channel: d.channelDetails || d.salesChannel
-            }))
+            // ★ 修正：取消原有過度簡化的 map()，保留完整欄位（包含 wonDate, assignee, currentStage 等），
+            // 確保前端 Helpers 與 Table Component 可以獲得完整的操作欄位而不出錯。
+            wonDeals: processedDeals
         };
     }
 
@@ -119,6 +163,7 @@ class SalesAnalysisService {
     _analyzeChannels(deals) {
         const stats = {};
         deals.forEach(deal => {
+            // [Phase 1 Alignment] 只針對聚合邏輯進行通路 fallback，不改變原始欄位
             let channelName = deal.channelDetails || deal.salesChannel;
             if (!channelName || channelName === '無' || channelName === '-') {
                 channelName = '直接販售'; 

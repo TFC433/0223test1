@@ -1,11 +1,18 @@
 // public/scripts/sales/sales-analysis.js
+/**
+ * @version 1.5.1
+ * @date 2026-04-21
+ * @changelog
+ * - [2026-04-21] Phase 4 Fix: Aligned CSV export dataset with UI filtered dataset (Option A). Restored safe fallback mechanism for dashboard rendering if backend SSOT is unavailable.
+ * - [2026-04-21] Phase 4: Transferred full dataset ownership and filter state to backend SSOT.
+ */
 
 // 全域狀態管理
 let salesAnalysisData = null; 
 let salesStartDate = null;
 let salesEndDate = null;
-let allWonDeals = [];         // 所有的成交案件
-let displayedDeals = [];      // 篩選與排序後的案件
+let allWonDeals = [];         // 供全域選項提取的資料
+let displayedDeals = [];      // 當下顯示在 Table 的資料 (由後端提供，已套用過濾)
 let currentSalesModelFilter = 'all';
 
 // 列表狀態
@@ -20,7 +27,6 @@ async function loadSalesAnalysisPage(startDateISO, endDateISO) {
     const container = document.getElementById('page-sales-analysis');
     if (!container) return;
 
-    // 若沒有傳入日期 (初始載入)，則設為 null (代表全歷史/不篩選)
     if (!startDateISO || !endDateISO) {
         salesStartDate = null;
         salesEndDate = null;
@@ -29,23 +35,19 @@ async function loadSalesAnalysisPage(startDateISO, endDateISO) {
         salesEndDate = endDateISO;
     }
 
+    currentSalesModelFilter = 'all';
+
     // 1. 注入 CSS
     SalesAnalysisComponents.injectStyles();
 
     // 2. 渲染基礎骨架
     container.innerHTML = SalesAnalysisComponents.getMainLayout(salesStartDate, salesEndDate);
 
-    // 綁定查詢按鈕事件
     const refreshBtn = document.getElementById('sales-refresh-btn');
-    if (refreshBtn) {
-        refreshBtn.addEventListener('click', refreshSalesAnalysis);
-    }
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshSalesAnalysis);
 
-    // 綁定清除篩選按鈕事件
     const clearBtn = document.getElementById('sales-clear-btn');
-    if (clearBtn) {
-        clearBtn.addEventListener('click', clearSalesFilter);
-    }
+    if (clearBtn) clearBtn.addEventListener('click', clearSalesFilter);
 
     // 3. 獲取數據
     await fetchAndRenderSalesData(salesStartDate, salesEndDate);
@@ -82,25 +84,45 @@ function clearSalesFilter() {
 
 async function fetchAndRenderSalesData(startDate, endDate) {
     try {
-        // 處理 null 日期：轉為空字串傳給後端
         const sParam = startDate || '';
         const eParam = endDate || '';
-        const result = await authedFetch(`/api/sales-analysis?startDate=${sParam}&endDate=${eParam}`);
+        const mParam = currentSalesModelFilter || 'all'; 
+
+        const result = await authedFetch(`/api/sales-analysis?startDate=${sParam}&endDate=${eParam}&salesModel=${encodeURIComponent(mParam)}`);
         if (!result.success || !result.data) throw new Error(result.error || '無法獲取分析數據');
         
         salesAnalysisData = result.data;
-        allWonDeals = salesAnalysisData.wonDeals || [];
-
+        
+        allWonDeals = salesAnalysisData.allWonDeals || [];
+        
         SalesAnalysisComponents.initSalesModelFilterOptions(allWonDeals);
+        const select = document.getElementById('sales-model-filter');
+        if (select && currentSalesModelFilter) {
+            select.value = currentSalesModelFilter;
+        }
         
         const options = salesAnalysisData.paginationOptions || [10, 20, 50, 100];
         rowsPerPage = options[0];
         SalesAnalysisComponents.initPaginationOptions(options, rowsPerPage);
 
-        sortDeals('wonDate', 'desc');
-        displayedDeals = [...allWonDeals];
+        // Table: 直接取用後端過濾後的資料
+        displayedDeals = [...(salesAnalysisData.wonDeals || [])];
+        sortDeals(currentSortState.field, currentSortState.direction, true);
 
-        updateDashboard(allWonDeals);
+        // Dashboard: 優先使用後端 SSOT，若資料異常則安全降級 (Safe Fallback)
+        if (salesAnalysisData.overview && salesAnalysisData.kpis && salesAnalysisData.byType) {
+            SalesAnalysisComponents.renderSalesOverviewAndKpis(salesAnalysisData.overview, salesAnalysisData.kpis);
+            SalesAnalysisComponents.renderAllCharts(
+                salesAnalysisData.byType || [], 
+                salesAnalysisData.bySource || [], 
+                salesAnalysisData.byProduct || [], 
+                salesAnalysisData.byChannel || []
+            );
+        } else {
+            console.warn('[Sales Analysis] Backend SSOT data incomplete, falling back to local computation.');
+            updateDashboard(displayedDeals);
+        }
+
         renderPaginatedTable();
 
         const dRange = document.getElementById('sales-date-range-display');
@@ -134,7 +156,10 @@ function sortDeals(field, direction, sortDisplayedOnly = false) {
     if (!sortDisplayedOnly) displayedDeals = [...allWonDeals];
 }
 
+// [Phase 4 Fix] 還原 updateDashboard 供 Safe Fallback 使用
 function updateDashboard(deals) {
+    if (typeof SalesAnalysisHelper.calculateOverview !== 'function') return;
+
     const overview = SalesAnalysisHelper.calculateOverview(deals);
     const kpis = SalesAnalysisHelper.calculateKpis(deals);
     SalesAnalysisComponents.renderSalesOverviewAndKpis(overview, kpis);
@@ -165,14 +190,18 @@ function renderPaginatedTable() {
     SalesAnalysisComponents.updatePaginationControls(currentPage, displayedDeals.length, rowsPerPage);
 }
 
-window.handleSalesModelFilterChange = function() {
+window.handleSalesModelFilterChange = async function() {
     const select = document.getElementById('sales-model-filter');
     currentSalesModelFilter = select ? select.value : 'all';
-    displayedDeals = currentSalesModelFilter !== 'all' ? allWonDeals.filter(d => d.salesModel === currentSalesModelFilter) : [...allWonDeals];
-    sortDeals(currentSortState.field, currentSortState.direction, true);
+    
+    document.getElementById('sales-overview-content').innerHTML = '<div class="loading show"><div class="spinner"></div></div>';
+    const wonDealsContent = document.getElementById('won-deals-content');
+    if(wonDealsContent) {
+        wonDealsContent.innerHTML = '<div class="loading show" style="padding: 20px;"><div class="spinner"></div></div>';
+    }
+    
     currentPage = 1;
-    renderPaginatedTable();
-    updateDashboard(displayedDeals);
+    await fetchAndRenderSalesData(salesStartDate, salesEndDate);
 };
 
 window.handleSortTable = function(field) {
@@ -205,13 +234,14 @@ window.changePage = function(delta) {
 };
 
 window.exportSalesToCSV = function() {
-    const csvContent = SalesAnalysisHelper.generateCSV(allWonDeals, salesStartDate, salesEndDate);
+    // [Phase 4 Fix] CSV 嚴格跟隨 UI 目前呈現的過濾結果 (Option A)，避免數據範圍矛盾
+    const csvContent = SalesAnalysisHelper.generateCSV(displayedDeals);
     if (!csvContent) return;
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `成交案件分析_${salesStartDate}_至_${salesEndDate}.csv`;
+    link.download = `成交案件分析_${salesStartDate || '全部'}_至_${salesEndDate || '全部'}.csv`;
     link.click();
     showNotification(`已開始下載 CSV`, 'success');
 };
