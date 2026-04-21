@@ -2,9 +2,12 @@
 /**
  * public/scripts/internal-ops/internal-ops.js
  * 內部運營與進度追蹤 前端模組 (Phase 4.8)
- * @version 1.7.0
- * @date 2026-04-20
+ * @version 1.7.3
+ * @date 2026-04-21
  * @changelog
+ * - [1.7.3] UI Patch (Step 3): Added collapsible behavior to Team Workload member groups to improve readability. Default state is collapsed.
+ * - [1.7.2] UI Patch (Step 2): Unified visual language, headers, spacing, and table/card tones across all three sections.
+ * - [1.7.1] UI Patch (Step 1): Added compact visual progress bar to Dev Projects table for better at-a-glance readability.
  * - [1.7.0] Normalized Color System - Implemented single-source color strategy with derived opacity for badges
  * - [1.6.0] Externalized color system for badges (Role, Stage, Status, Workload) to System Config and added index column to Dev Projects table
  * - [1.5.0] Upgraded Team Workload table UI readability with index column and color badges
@@ -67,51 +70,68 @@ window.loadInternalOpsPage = async function(params) {
     // 1. 建立頁面骨架 (若尚未建立)
     if (!pageContainer.querySelector('.internal-ops-container')) {
         pageContainer.innerHTML = `
-            <div class="internal-ops-container dashboard-grid-flexible" style="display: flex; flex-direction: column; gap: 20px; padding: 20px;">
+            <div class="internal-ops-container dashboard-grid-flexible" style="display: flex; flex-direction: column; gap: 24px; padding: 24px;">
                 
-                <div class="dashboard-widget" style="width: 100%;">
-                    <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="dashboard-widget internal-ops-widget" style="width: 100%;">
+                    <div class="widget-header internal-ops-header">
                         <h2 class="widget-title">開發案件追蹤</h2>
                         <button class="action-btn primary btn-sm" onclick="openDevProjectModal()">
                             <span class="btn-text">新增</span>
                         </button>
                     </div>
-                    <div class="widget-content" id="internal-ops-dev-projects-content" style="overflow-x: auto;">
-                        </div>
+                    <div class="widget-content internal-ops-content no-pad" id="internal-ops-dev-projects-content" style="overflow-x: auto;">
+                    </div>
                 </div>
 
-                <div class="dashboard-widget" style="width: 100%;">
-                    <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="dashboard-widget internal-ops-widget" style="width: 100%;">
+                    <div class="widget-header internal-ops-header">
                         <h2 class="widget-title">團隊成員負荷</h2>
-                        </div>
-                    <div class="widget-content" id="internal-ops-team-workload-content" style="overflow-x: auto; padding: 15px;">
-                        </div>
+                    </div>
+                    <div class="widget-content internal-ops-content with-pad" id="internal-ops-team-workload-content" style="overflow-x: auto;">
+                    </div>
                 </div>
 
-                <div class="dashboard-widget" style="width: 100%;">
-                    <div class="widget-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="dashboard-widget internal-ops-widget" style="width: 100%;">
+                    <div class="widget-header internal-ops-header">
                         <h2 class="widget-title">訂閱制管理</h2>
                         <button class="action-btn primary btn-sm" onclick="alert('TODO: 新增訂閱紀錄 開發中')">
                             <span class="btn-text">新增</span>
                         </button>
                     </div>
-                    <div class="widget-content" id="internal-ops-subscriptions-content" style="overflow-x: auto;">
-                        </div>
+                    <div class="widget-content internal-ops-content no-pad" id="internal-ops-subscriptions-content" style="overflow-x: auto;">
+                    </div>
                 </div>
 
             </div>
         `;
         
-        // 加入輕量的 Table CSS (確保不影響全局)
         const style = document.createElement('style');
         style.textContent = `
+            /* Widget Layout Unification */
+            .internal-ops-widget { background: #fff; border-radius: 8px; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); overflow: hidden; }
+            .internal-ops-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #e5e7eb; background: #fff; }
+            .internal-ops-header h2 { margin: 0; font-size: 1.1rem; color: #111827; font-weight: 600; }
+            .internal-ops-content.no-pad { padding: 0; }
+            .internal-ops-content.with-pad { padding: 20px; }
+            
+            /* Table Unification */
             .internal-ops-table { width: 100%; border-collapse: collapse; min-width: 900px; }
-            .internal-ops-table th, .internal-ops-table td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; font-size: 0.9rem; }
-            .internal-ops-table th { background-color: #f8f9fa; font-weight: 600; color: #555; }
-            .internal-ops-table tr:hover { background-color: #fcfcfc; }
+            .internal-ops-table th { background-color: #f9fafb; font-weight: 600; color: #4b5563; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 0.85rem; letter-spacing: 0.02em; }
+            .internal-ops-table td { padding: 12px 20px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 0.9rem; color: #374151; vertical-align: middle; }
+            .internal-ops-table tr:last-child td { border-bottom: none; }
+            .internal-ops-table tr:hover { background-color: #f3f4f6; }
+            
+            /* Team Workload Cards Unification */
+            .member-workload-card { border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+            .member-workload-header { background: #f9fafb; padding: 14px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; transition: background-color 0.2s; }
+            .member-workload-header:hover { background: #f3f4f6; }
+            .member-workload-header h3 { margin: 0; font-size: 1.05rem; color: #111827; display: flex; align-items: center; font-weight: 600; }
+            .toggle-icon { transition: transform 0.2s ease-in-out; margin-right: 8px; flex-shrink: 0; color: #6b7280; }
+            
+            /* Buttons & Badges */
             .internal-ops-actions { display: flex; gap: 8px; }
-            .internal-ops-btn { padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; border: 1px solid #ddd; background: #fff; }
-            .internal-ops-btn:hover { background: #f0f0f0; }
+            .internal-ops-btn { padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; cursor: pointer; border: 1px solid #d1d5db; background: #fff; color: #374151; font-weight: 500; transition: all 0.2s; }
+            .internal-ops-btn:hover { background: #f3f4f6; }
             .progress-badge { padding: 3px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
         `;
         pageContainer.appendChild(style);
@@ -394,7 +414,10 @@ function renderTeamWorkload(data) {
     // 2. Sort members
     const memberNames = Object.keys(groups).sort();
     
-    let html = '<div class="team-workload-groups" style="display: flex; flex-direction: column; gap: 20px;">';
+    let html = '<div class="team-workload-groups" style="display: flex; flex-direction: column; gap: 24px;">';
+    
+    // SVG toggle icon
+    const toggleIcon = `<svg class="toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
 
     memberNames.forEach(member => {
         const groupData = groups[member];
@@ -443,32 +466,37 @@ function renderTeamWorkload(data) {
         else if (loadText === '負荷中') badgeText += '｜注意';
         else if (loadText === '負荷低') badgeText += '｜正常';
 
-        const loadBadge = `<span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-left: 8px; background: ${colorSet.bgLight}; color: ${colorSet.text}; border: 1px solid ${colorSet.border};">${badgeText}</span>`;
+        const loadBadge = `<span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-left: 12px; background: ${colorSet.bgLight}; color: ${colorSet.text}; border: 1px solid ${colorSet.border};">${badgeText}</span>`;
 
         html += `
-            <div class="member-workload-card" style="border: 1px solid #eee; border-radius: 8px; overflow: hidden; background: #fff;">
-                <div style="background: #f8f9fa; padding: 12px 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
-                    <h3 style="margin: 0; font-size: 1.1rem; color: #333; display: flex; align-items: center;">
+            <div class="member-workload-card">
+                <div class="member-workload-header" onclick="window.toggleWorkload(this)">
+                    <h3>
+                        ${toggleIcon}
                         ${member} 
-                        <span style="font-size: 0.9rem; color: #666; font-weight: normal; margin-left: 8px;">（主責 ${groupData.main}｜協作 ${groupData.collab}｜總 ${totalCount}）</span>
+                        <span style="font-size: 0.9rem; color: #6b7280; font-weight: normal; margin-left: 8px;">（主責 ${groupData.main}｜協作 ${groupData.collab}｜總 ${totalCount}）</span>
                         ${loadBadge}
                     </h3>
                 </div>
-                <table class="internal-ops-table" style="margin: 0; border-top: none;">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>商品名稱</th>
-                            <th>開發階段</th>
-                            <th>擔當角色</th>
-                            <th>狀態</th>
-                            <th>商品開發進度</th>
-                            <th>開始日</th>
-                            <th>預計完成日</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
+                <div class="member-workload-body" style="display: none;">
+                    <div style="overflow-x: auto;">
+                        <table class="internal-ops-table" style="margin: 0; border-top: none;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 50px;">#</th>
+                                    <th>商品名稱</th>
+                                    <th>開發階段</th>
+                                    <th>擔當角色</th>
+                                    <th>狀態</th>
+                                    <th>商品開發進度</th>
+                                    <th>開始日</th>
+                                    <th>預計完成日</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         `;
     });
@@ -476,6 +504,19 @@ function renderTeamWorkload(data) {
     html += '</div>';
     return html;
 }
+
+// [Task 5] 全域切換函數 (Minimal-diff toggle logic)
+window.toggleWorkload = function(headerElement) {
+    const body = headerElement.nextElementSibling;
+    const icon = headerElement.querySelector('.toggle-icon');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        if (icon) icon.style.transform = 'rotate(90deg)';
+    } else {
+        body.style.display = 'none';
+        if (icon) icon.style.transform = 'rotate(0deg)';
+    }
+};
 
 /**
  * 渲染：開發案件追蹤
@@ -522,15 +563,25 @@ function renderDevProjects(data) {
         return getBadgeHtml(stage, colorSet);
     }
 
+    // Compact visual progress bar
     function getProgressBadge(progressText) {
         if (!progressText) progressText = '0%';
         const val = parseInt(progressText.replace('%', ''), 10) || 0;
+        const clampedVal = Math.min(Math.max(val, 0), 100);
         let fallbackHex;
         if (val < 30) { fallbackHex = '#616161'; }
         else if (val > 70) { fallbackHex = '#2e7d32'; }
         else { fallbackHex = '#1976d2'; }
         const colorSet = buildColorSet(fallbackHex);
-        return `<span class="progress-badge" style="background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${progressText}</span>`;
+        
+        return `
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 120px;">
+                <span class="progress-badge" style="background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; min-width: 40px; text-align: center;">${progressText}</span>
+                <div style="flex: 1; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden;">
+                    <div style="width: ${clampedVal}%; height: 100%; background: ${colorSet.text};"></div>
+                </div>
+            </div>
+        `;
     }
 
     const rows = data.map((item, index) => `
@@ -559,7 +610,7 @@ function renderDevProjects(data) {
         <table class="internal-ops-table">
             <thead>
                 <tr>
-                    <th>#</th>
+                    <th style="width: 50px;">#</th>
                     <th>商品名稱</th>
                     <th>商機案件</th>
                     <th>功能項目</th>
