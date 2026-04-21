@@ -1,9 +1,9 @@
 /**
  * data/opportunity-reader.js
  * 專門負責讀取所有與「機會案件」相關資料的類別
- * * @version 6.1.2 (Fix: Remove Aggregation Logic)
- * @date 2026-01-27
- * @description 實作 Strict Mode，移除內部 require 與聚合邏輯，回歸純粹的資料讀取職責。
+ * * @version 6.2.0 (Phase 5-A - Interface Alignment for Sales Analysis)
+ * @date 2026-04-21
+ * @description 實作 Strict Mode，移除內部 require 與聚合邏輯，並同步 Phase 5-A 之資料集抽取介面。
  */
 
 const BaseReader = require('./base-reader');
@@ -42,6 +42,26 @@ class OpportunityReader extends BaseReader {
     }
 
     /**
+     * [Phase 5-A] 專供 Sales Analysis 模組使用之基礎過濾資料
+     * 確保與 SQL Reader 的介面隔離與對齊，維持依賴注入穩定性。
+     */
+    async getSalesAnalysisBaseDeals(startDateISO, endDateISO) {
+        const allOpportunities = await this.getOpportunities();
+        const start = startDateISO ? new Date(startDateISO) : new Date(0);
+        const end = endDateISO ? new Date(endDateISO) : new Date();
+
+        return allOpportunities.filter(opp => {
+            if (opp.currentStage !== '受注') return false;
+            
+            const dateStr = opp.expectedCloseDate || opp.lastUpdateTime;
+            if (!dateStr) return false;
+            
+            const dealDate = new Date(dateStr);
+            return dealDate >= start && dealDate <= end;
+        });
+    }
+
+    /**
      * 取得所有機會案件 (核心函式)
      * @returns {Promise<Array<object>>} - 保證回傳陣列
      */
@@ -50,30 +70,25 @@ class OpportunityReader extends BaseReader {
         const range = `${this.config.SHEETS.OPPORTUNITIES}!A:ZZ`;
 
         try {
-            // ★★★ 使用 this.targetSpreadsheetId ★★★
             const response = await this.sheets.spreadsheets.values.get({
                 spreadsheetId: this.targetSpreadsheetId, 
                 range: range,
             });
 
             const rows = response.data.values;
-            // 防呆：如果完全沒資料，回傳空陣列
             if (!rows || !Array.isArray(rows) || rows.length === 0) {
                 console.warn('[OpportunityReader] Google Sheet 回傳空資料');
                 return []; 
             }
 
-            // 解析標題列
             const headerRow = rows[0];
             const headerMap = this._buildHeaderMap(headerRow);
             const FIELD_NAMES = this.config.OPPORTUNITY_FIELD_NAMES;
 
-            // 檢查關鍵欄位
             if (headerMap[FIELD_NAMES.ID] === undefined) {
                 console.warn(`⚠️ [OpportunityReader] 警告：找不到核心標題 "${FIELD_NAMES.ID}"`);
             }
 
-            // 解析資料列
             const opportunities = [];
             for (let i = 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -87,7 +102,6 @@ class OpportunityReader extends BaseReader {
                     
                     salesModel: this._getValue(row, headerMap, FIELD_NAMES.SALES_MODEL),
                     
-                    // 將 '主要通路/下單方' 對應到 channelDetails
                     channelDetails: this._getValue(row, headerMap, FIELD_NAMES.CHANNEL),
                     salesChannel: this._getValue(row, headerMap, FIELD_NAMES.CHANNEL),
 
@@ -123,14 +137,12 @@ class OpportunityReader extends BaseReader {
                 }
             }
 
-            // 排序
             opportunities.sort((a, b) => {
                 const timeA = a.lastUpdateTime || a.createdTime;
                 const timeB = b.lastUpdateTime || b.createdTime;
                 return new Date(timeB) - new Date(timeA);
             });
 
-            // 寫入快取
             if (this.cache) {
                 this.cache[cacheKey] = opportunities;
             }
@@ -143,15 +155,10 @@ class OpportunityReader extends BaseReader {
         }
     }
 
-    /**
-     * 搜尋並分頁機會案件
-     * 負責執行查詢、過濾、排序與分頁的單一真相
-     */
     async searchOpportunities(query, page = 1, filters = {}, sortOptions = null) {
         let opportunities = await this.getOpportunities();
         if (!Array.isArray(opportunities)) opportunities = [];
 
-        // 1. Keyword Search
         if (query) {
             const searchTerm = query.toLowerCase();
             opportunities = opportunities.filter(o => {
@@ -163,19 +170,16 @@ class OpportunityReader extends BaseReader {
             });
         }
 
-        // 2. Attribute Filters
         if (filters.assignee) opportunities = opportunities.filter(o => o.assignee === filters.assignee);
         if (filters.type) opportunities = opportunities.filter(o => o.opportunityType === filters.type);
         if (filters.stage) opportunities = opportunities.filter(o => o.currentStage === filters.stage);
         
-        // 3. Sorting (若有指定排序選項則執行，否則維持 getOpportunities 的預設排序)
         if (sortOptions && sortOptions.field) {
             const field = sortOptions.field;
             const dir = sortOptions.direction === 'asc' ? 1 : -1;
             
             opportunities.sort((a, b) => {
                 let valA, valB;
-                // Special handling for legacy time field fallback
                 if (field === 'lastUpdateTime') {
                     valA = new Date(a.lastUpdateTime || a.createdTime).getTime();
                     valB = new Date(b.lastUpdateTime || b.createdTime).getTime();
@@ -190,7 +194,6 @@ class OpportunityReader extends BaseReader {
             });
         }
 
-        // 4. Pagination
         if (!page || page <= 0) {
             return opportunities;
         }

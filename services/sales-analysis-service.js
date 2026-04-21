@@ -1,12 +1,12 @@
 /**
  * services/sales-analysis-service.js
  * 銷售分析服務
- * * @version 5.1.0 (Phase 1 Safe Alignment)
+ * * @version 6.0.0 (Phase 5-A - Base Dataset SQL Pushdown & Fully Converged SSOT)
  * @date 2026-04-21
- * @description 負責處理成交金額、銷售渠道分析與產品組合統計。
+ * @description 全面掌管日期、商流過濾與 Dashboard KPI 的聚合計算，並將基礎條件下推至資料層以提昇效能。
  * 依賴注入：OpportunityReader, SystemService, Config
  * @changelog
- * - [2026-04-21] Phase 1 Safe Alignment: Added Overview KPIs, Unique Customer KPIs, and ensured wonDeals dataset matches frontend expectations without modifying frontend behavior.
+ * - [2026-04-21] Phase 5-A: Changed to consume getSalesAnalysisBaseDeals() pushing stage filtering to DB layer. Integrated all Phase 4 Fix logic natively.
  * - [2026-03-12] Migrated getSystemConfig from deprecated SystemReader to SystemService.
  */
 
@@ -21,24 +21,21 @@ class SalesAnalysisService {
         this.systemService = systemService; 
         this.config = config;
         
-        // --- !!! 重要設定 !!! ---
         this.WON_STAGE_VALUE = '受注'; 
     }
 
     /**
-     * 獲取指定時間範圍內的成交分析數據
-     * @param {string} startDateISO - 開始日期 (ISO 格式字串)
-     * @param {string} endDateISO - 結束日期 (ISO 格式字串)
-     * @returns {Promise<object>} - 包含分析結果的物件
+     * 獲取分析數據 (SQL-Optimized SSOT Mode)
      */
-    async getSalesAnalysisData(startDateISO, endDateISO) {
-        console.log(`📈 [SalesAnalysisService] 計算成交分析資料...`);
+    async getSalesAnalysisData(startDateISO, endDateISO, salesModelFilter = 'all') {
+        console.log(`📈 [SalesAnalysisService] 計算成交分析資料 (SQL-Optimized SSOT Mode)...`);
 
-        const allOpportunities = await this.opportunityReader.getOpportunities();
+        // 1. [Phase 5-A] 透過 Reader 向下層請求已套用 stage='受注' 與 Date Range 的基礎資料集
+        // 這徹底避免了先將所有資料撈進 Node.js Memory 再慢慢 Filter 的效能浪費
+        const baseDeals = await this.opportunityReader.getSalesAnalysisBaseDeals(startDateISO, endDateISO);
+        
         const systemConfig = await this.systemService.getSystemConfig();
 
-        // 1. 準備設定資料傳給前端
-        // (A) 銷售模式顏色對應表
         const salesModelColors = {};
         if (systemConfig['銷售模式']) {
             systemConfig['銷售模式'].forEach(item => {
@@ -46,44 +43,31 @@ class SalesAnalysisService {
             });
         }
 
-        const start = startDateISO ? new Date(startDateISO) : new Date(0); // 預設很久以前
-        const end = endDateISO ? new Date(endDateISO) : new Date(); // 預設現在
-
-        // 2. 篩選「受注」且「在時間範圍內」的案件
-        const wonDeals = allOpportunities.filter(opp => {
-            // 階段必須是受注
-            if (opp.currentStage !== this.WON_STAGE_VALUE) return false;
-            
-            // 判斷日期 (使用預計結案日或最後更新日)
-            const dateStr = opp.expectedCloseDate || opp.lastUpdateTime;
-            if (!dateStr) return false;
-            
-            const dealDate = new Date(dateStr);
-            return dealDate >= start && dealDate <= end;
-        });
-
-        // 3. 資料正規化 (處理金額與前置時間戳)
-        const processedDeals = wonDeals.map(deal => {
+        // 2. 資料正規化 (確保數值為可運算格式與保留時間戳)
+        const processedDeals = baseDeals.map(deal => {
             let value = 0;
-            // 嘗試解析金額，移除逗號等符號
             if (deal.opportunityValue) {
                 value = parseFloat(String(deal.opportunityValue).replace(/,/g, '')) || 0;
             }
-            
             return {
                 ...deal,
                 numericValue: value,
-                // 提供 wonDate 以完美對齊前端 Helper 與 Table sorting 所需的邏輯
                 wonDate: deal.expectedCloseDate || deal.lastUpdateTime
             };
         });
 
-        // 4. 計算 Overview KPI (對齊前端 SalesAnalysisHelper.calculateOverview)
+        // 3. 商流過濾 (Backend-Owned Filter)
+        // 嚴格相等 (Exact Match) 以吻合前端業務邏輯
+        const finalDeals = (salesModelFilter && salesModelFilter !== 'all')
+            ? processedDeals.filter(d => d.salesModel === salesModelFilter)
+            : processedDeals;
+
+        // 4. 計算 Overview KPI (基於最終過濾結果 finalDeals)
         let totalVal = 0;
         let totalDays = 0;
         let cycleCount = 0;
 
-        processedDeals.forEach(d => {
+        finalDeals.forEach(d => {
             totalVal += d.numericValue || 0;
             if (d.createdTime && d.wonDate) {
                 const diff = Math.ceil(Math.abs(new Date(d.wonDate) - new Date(d.createdTime)) / 86400000);
@@ -96,17 +80,16 @@ class SalesAnalysisService {
 
         const overview = {
             totalWonValue: totalVal,
-            totalWonDeals: processedDeals.length,
-            averageDealValue: processedDeals.length ? totalVal / processedDeals.length : 0,
+            totalWonDeals: finalDeals.length,
+            averageDealValue: finalDeals.length ? totalVal / finalDeals.length : 0,
             averageSalesCycleInDays: cycleCount ? Math.round(totalDays / cycleCount) : 0
         };
 
-        // 5. 計算 KPI Cards - 獨立客戶數 (對齊前端 SalesAnalysisHelper.calculateKpis)
+        // 5. 計算 KPI Cards (字串 Includes 比對 + 獨立公司數)
         const calcUnique = (keywords) => {
             const unique = new Set();
-            processedDeals.forEach(d => {
+            finalDeals.forEach(d => {
                 const m = (d.salesModel || '').trim();
-                // 使用字串 includes 並計算獨立的 customerCompany
                 if (keywords.some(kw => m.includes(kw)) && d.customerCompany) {
                     unique.add(d.customerCompany.trim());
                 }
@@ -119,27 +102,28 @@ class SalesAnalysisService {
             si: calcUnique(['SI', '系統整合']),
             mtb: calcUnique(['MTB', '工具機'])
         };
+        
+        // 從無過濾的總集萃取商流選項供下拉選單使用
+        const filterOptions = [...new Set(processedDeals.map(d => d.salesModel).filter(Boolean))].sort();
 
-        // 6. 進行各項維度分析與封裝回傳
         return {
             totalAmount: totalVal, 
-            dealCount: processedDeals.length,
-            
-            // [Phase 1 Alignment] 提供與前端數學運算結果一致的物件
+            dealCount: finalDeals.length,
             overview,
             kpis,
+            byType: this._analyzeByDimension(finalDeals, 'opportunityType'),     
+            bySource: this._analyzeByDimension(finalDeals, 'opportunitySource'), 
+            byChannel: this._analyzeChannels(finalDeals),
+            byProduct: this._analyzeProducts(finalDeals),
             
-            // 圖表數據
-            bySalesModel: this._analyzeByDimension(processedDeals, 'salesModel', salesModelColors),
-            byType: this._analyzeByDimension(processedDeals, 'opportunityType'),     // 對齊前端 Type Chart
-            bySource: this._analyzeByDimension(processedDeals, 'opportunitySource'), // 對齊前端 Source Chart
-            byChannel: this._analyzeChannels(processedDeals),
-            byProduct: this._analyzeProducts(processedDeals),
+            // finalDeals 供前端當下的 Table List 與 Dashboard 顯示
+            wonDeals: finalDeals,
             
-            // 原始清單 (供前端表格使用)
-            // ★ 修正：取消原有過度簡化的 map()，保留完整欄位（包含 wonDate, assignee, currentStage 等），
-            // 確保前端 Helpers 與 Table Component 可以獲得完整的操作欄位而不出錯。
-            wonDeals: processedDeals
+            // processedDeals 供下拉選單或業務除錯比對 (CSV依據Phase 4 Fix使用wonDeals)
+            allWonDeals: processedDeals,
+            
+            filterOptions,
+            salesModelColors
         };
     }
 
@@ -163,7 +147,6 @@ class SalesAnalysisService {
     _analyzeChannels(deals) {
         const stats = {};
         deals.forEach(deal => {
-            // [Phase 1 Alignment] 只針對聚合邏輯進行通路 fallback，不改變原始欄位
             let channelName = deal.channelDetails || deal.salesChannel;
             if (!channelName || channelName === '無' || channelName === '-') {
                 channelName = '直接販售'; 

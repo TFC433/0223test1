@@ -4,14 +4,12 @@
  * - Type: SQL Reader (Read-Only)
  * - Target: PostgreSQL (Supabase)
  * - Table: opportunities
- * - Version: 2.3.0 (Phase 10 - Company List Lightweight Aggregation)
- * - Date: 2026-04-15
+ * - Version: 2.4.0 (Phase 5-A - Base Dataset SQL Pushdown for Sales Analysis)
+ * - Date: 2026-04-21
  * - Changelog: 
+ * - [PHASE 5-A] Added getSalesAnalysisBaseDeals() to push stage filtering to DB, reducing JS memory footprint.
  * - [PHASE 10] Added getAllOpportunityCompanyNames() for lightweight cross-module counting without FKs.
  * - [PHASE 9-D] Fixed post-pagination JS filtering. Migrated probability to native SQL.
- * - [PHASE 9] Added getOpportunityYears() to fetch distinct creation years safely.
- * - [PHASE 9-B.1] Added nullsFirst: false to .order() calls to ensure NULL values sort to the bottom.
- * - [PHASE 9-B] DB-First effectiveLastActivity integration via 'v_opportunities_summary' view.
  */
 
 const { supabase } = require('../config/supabase');
@@ -20,12 +18,50 @@ class OpportunitySqlReader {
 
     constructor() {
         this.tableName = 'opportunities';
-        this.viewName = 'v_opportunities_summary'; // Phase 9-B DB-First Target
+        this.viewName = 'v_opportunities_summary'; 
+    }
+
+    /**
+     * [Phase 5-A] 專供 Sales Analysis 模組使用之基礎過濾資料
+     * @description 將 stage 條件下推至 SQL 減少傳輸負載，並在 Node 端嚴格套用業務時間過濾規則。
+     */
+    async getSalesAnalysisBaseDeals(startDateISO, endDateISO) {
+        try {
+            // Push base filter (stage) to SQL directly to cut payload significantly
+            const { data, error } = await supabase.from(this.viewName).select('*')
+                .eq('current_stage', '受注');
+
+            if (error) {
+                // Fallback to table if view is missing
+                if (error.code !== '42P01') throw new Error(`[OpportunitySqlReader] DB Error: ${error.message}`);
+                const fallbackRes = await supabase.from(this.tableName).select('*').eq('current_stage', '受注');
+                if (fallbackRes.error) throw new Error(`[OpportunitySqlReader] DB Error: ${fallbackRes.error.message}`);
+                return this._applySalesAnalysisTimeFilter(fallbackRes.data, startDateISO, endDateISO);
+            }
+
+            return this._applySalesAnalysisTimeFilter(data, startDateISO, endDateISO);
+        } catch (error) {
+            console.error('[OpportunitySqlReader] getSalesAnalysisBaseDeals Error:', error);
+            throw error;
+        }
+    }
+
+    _applySalesAnalysisTimeFilter(data, startDateISO, endDateISO) {
+        const start = startDateISO ? new Date(startDateISO) : new Date(0);
+        const end = endDateISO ? new Date(endDateISO) : new Date();
+
+        const filtered = (data || []).filter(row => {
+            const dateStr = row.expected_close_date || row.updated_time;
+            if (!dateStr) return false;
+            const dealDate = new Date(dateStr);
+            return dealDate >= start && dealDate <= end;
+        });
+
+        return filtered.map(row => this._mapRowToDto(row));
     }
 
     async getOpportunityYears() {
         try {
-            // Lightweight column fetch to deduplicate in Node (safest fallback for distinct operations via Supabase JS)
             const { data, error } = await supabase
                 .from(this.tableName)
                 .select('created_time');
@@ -47,9 +83,6 @@ class OpportunitySqlReader {
         }
     }
 
-    /**
-     * [Phase 10] Lightweight fetch for backend relational counting via soft-link
-     */
     async getAllOpportunityCompanyNames() {
         try {
             const { data, error } = await supabase
@@ -92,13 +125,11 @@ class OpportunitySqlReader {
         if (!opportunityId) throw new Error('OpportunitySqlReader: opportunityId is required');
 
         try {
-            // [Phase 9-B] Try DB-First View
             const viewRes = await supabase.from(this.viewName).select('*').eq('opportunity_id', opportunityId).single();
             if (!viewRes.error && viewRes.data) {
                 return this._mapRowToDto(viewRes.data);
             }
 
-            // Fallback
             const { data, error } = await supabase
                 .from(this.tableName)
                 .select('*')
@@ -157,13 +188,11 @@ class OpportunitySqlReader {
 
     async getOpportunities() {
         try {
-            // --- [Phase 9-B] ATTEMPT DB-FIRST VIEW PATH ---
             const viewRes = await supabase.from(this.viewName).select('*');
             if (!viewRes.error && viewRes.data) {
                 return viewRes.data.map(row => this._mapRowToDto(row));
             }
 
-            // --- LEGACY COMPATIBILITY FALLBACK ---
             const oppsPromise = supabase.from(this.tableName).select('*');
             const intsPromise = supabase.from('interactions').select('opportunity_id, interaction_time, created_time');
 
@@ -206,13 +235,9 @@ class OpportunitySqlReader {
 
     async searchOpportunitiesTable({ q, filters = {}, sortField, sortDirection, limit, offset }) {
         try {
-            // =================================================================
-            // STAGE 1: TRUE DB-FIRST PATH (Using SQL View)
-            // =================================================================
             try {
                 let dbQuery = supabase.from(this.viewName).select('*', { count: 'exact' });
                 
-                // Native Filters
                 if (filters.type && filters.type !== 'all') dbQuery = dbQuery.eq('opportunity_type', filters.type);
                 if (filters.source && filters.source !== 'all') dbQuery = dbQuery.eq('source', filters.source);
                 if (filters.stage && filters.stage !== 'all') dbQuery = dbQuery.eq('current_stage', filters.stage);
@@ -230,7 +255,6 @@ class OpportunitySqlReader {
                     dbQuery = dbQuery.gte('created_time', `${y}-01-01T00:00:00Z`).lt('created_time', `${y + 1}-01-01T00:00:00Z`);
                 }
 
-                // [Patch Phase 9-D] Safely migrated probability to native SQL
                 if (filters.probability && filters.probability !== 'all') {
                     dbQuery = dbQuery.gte('win_probability', Number(filters.probability));
                 }
@@ -239,7 +263,6 @@ class OpportunitySqlReader {
                     dbQuery = dbQuery.or(`opportunity_name.ilike.%${q}%,customer_company.ilike.%${q}%`);
                 }
 
-                // DB-First Time Filter
                 if (filters.time && filters.time !== 'all') {
                     const timeMap = { '7': 7, '30': 30, '90': 90 };
                     const days = timeMap[filters.time];
@@ -249,7 +272,6 @@ class OpportunitySqlReader {
                     }
                 }
 
-                // DB-First Sorting
                 const sortMap = {
                     effectiveLastActivity: 'effective_last_activity',
                     opportunityName: 'opportunity_name',
@@ -273,7 +295,6 @@ class OpportunitySqlReader {
                 
                 dbQuery = dbQuery.order(dbColumn, { ascending: sortDirection === 'asc', nullsFirst: false });
 
-                // [Patch Phase 9-D] If we must post-filter potentialSpecification, skip native .range() to prevent page truncation
                 const requiresJsPostFilter = filters.potentialSpecification && filters.potentialSpecification !== 'all';
 
                 if (!requiresJsPostFilter && limit && limit > 0) {
@@ -308,7 +329,6 @@ class OpportunitySqlReader {
                     return { data: results, total: viewCount || results.length };
                 }
 
-                // If error is anything EXCEPT missing view, throw it
                 if (viewError && viewError.code !== '42P01') {
                     throw viewError; 
                 }
@@ -318,14 +338,10 @@ class OpportunitySqlReader {
                 }
             }
 
-            // =================================================================
-            // STAGE 2: LEGACY COMPATIBILITY FALLBACK
-            // =================================================================
             console.warn('[OpportunitySqlReader] View v_opportunities_summary not found. Falling back to JS aggregation.');
 
             const isNativeSort = sortField && sortField !== 'effectiveLastActivity';
             
-            // [Patch Phase 9-D] Removed probability from JS filters trigger
             const hasJsFilters = 
                 (filters.time && filters.time !== 'all') ||
                 (filters.potentialSpecification && filters.potentialSpecification !== 'all');
@@ -342,7 +358,6 @@ class OpportunitySqlReader {
             if (filters.channel && filters.channel !== 'all') query = query.eq('sales_channel', filters.channel);
             if (filters.scale && filters.scale !== 'all') query = query.eq('equipment_scale', filters.scale);
             
-            // [Patch Phase 9-D] Added probability natively to Fallback
             if (filters.probability && filters.probability !== 'all') {
                 query = query.gte('win_probability', Number(filters.probability));
             }
@@ -362,7 +377,6 @@ class OpportunitySqlReader {
                 query = query.or(`opportunity_name.ilike.%${q}%,customer_company.ilike.%${q}%`);
             }
 
-            // --- SQL FAST-PATH ---
             if (useFastPath) {
                 const sortMap = {
                     opportunityName: 'opportunity_name',
@@ -399,7 +413,6 @@ class OpportunitySqlReader {
                 };
             }
 
-            // --- FALLBACK PATH ---
             const oppsRes = await query;
             if (oppsRes.error) throw new Error(`[OpportunitySqlReader] DB Error: ${oppsRes.error.message}`);
             
@@ -431,7 +444,6 @@ class OpportunitySqlReader {
                 return dto;
             });
 
-            // JS Filter for potentialSpecification only
             if (filters.potentialSpecification && filters.potentialSpecification !== 'all') {
                 const val = filters.potentialSpecification;
                 results = results.filter(opp => {
