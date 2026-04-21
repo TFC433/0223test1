@@ -252,7 +252,7 @@ const SalesAnalysisComponents = {
         const select = document.getElementById('sales-model-filter');
         if (!select) return;
         const models = [...new Set(deals.map(d => d.salesModel).filter(Boolean))];
-        select.innerHTML = '<option value="all">全部顯示</option>' + models.sort().map(m => `<option value="${m}">${m}</option>`).join('');
+        select.innerHTML = '<option value="all">通路 - 篩選</option>' + models.sort().map(m => `<option value="${m}">${m}</option>`).join('');
     },
 
     initPaginationOptions: function(options, current) {
