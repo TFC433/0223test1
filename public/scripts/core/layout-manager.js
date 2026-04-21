@@ -150,11 +150,17 @@ const LayoutManager = {
             </a>
         `;
 
-        const systemConfigItem = Array.from(sidebarNav.children).find(li => li.textContent.includes('系統設定'));
-        if (systemConfigItem) {
-            sidebarNav.insertBefore(adminItem, systemConfigItem);
+        const internalOpsLink = document.querySelector('.sidebar-nav .nav-link[data-page="internal-ops"]');
+        if (internalOpsLink && internalOpsLink.closest('.nav-item')) {
+            const internalOpsItem = internalOpsLink.closest('.nav-item');
+            internalOpsItem.insertAdjacentElement('afterend', adminItem);
         } else {
-            sidebarNav.appendChild(adminItem);
+            const systemConfigItem = Array.from(sidebarNav.children).find(li => li.textContent.includes('系統設定'));
+            if (systemConfigItem) {
+                sidebarNav.insertBefore(adminItem, systemConfigItem);
+            } else {
+                sidebarNav.appendChild(adminItem);
+            }
         }
     },
 
