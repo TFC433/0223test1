@@ -1,4 +1,10 @@
 // public/scripts/import-bundle.js
+/**
+ * @version 1.0.1
+ * @date 2026-04-22
+ * @changelog
+ * - [1.0.1] Bug Fix: Added newly split internal-ops render modules to the load chain to resolve "Render function missing" runtime errors.
+ */
 // 職責：僅作為腳本引用的集中管理處，不含任何業務邏輯
 
 const scripts = [
@@ -57,6 +63,9 @@ const scripts = [
     "scripts/products/product-detail-modal.js",
 
     // ★★★ 【新增】內部運營模組腳本 ★★★
+    "scripts/internal-ops/internal-ops-dev-projects.js",
+    "scripts/internal-ops/internal-ops-team-workload.js",
+    "scripts/internal-ops/internal-ops-subscriptions.js",
     "scripts/internal-ops/internal-ops.js"
 
 ];
