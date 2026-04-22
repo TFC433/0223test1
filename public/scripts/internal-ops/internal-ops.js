@@ -2,13 +2,18 @@
 /**
  * public/scripts/internal-ops/internal-ops.js
  * 內部運營與進度追蹤 前端模組 - 頁面核心與模態框外殼 (Phase 4.8)
- * @version 1.8.2
+ * @version 1.8.7
  * @date 2026-04-22
  * @changelog
- * - [1.8.2] UI Patch: Modal UX upgrades - Made Assignee required with default placeholder, synced progress slider with numeric input, and made Related Opportunity optional.
- * - [1.8.1] UI Patch: Enhanced Dev Projects Opportunity selector with frontend keyword filtering. Maintained strict assigneeCode/projectName mapping and preserved data integrity via data-name attribute.
- * - [1.8.0] UI/Data-Wiring Patch (Phase A): Upgraded Dev Projects UX. Implemented opportunity select mapping assigneeCode to opportunityId, collaborators multi-select, and progress slider.
- * - [1.7.8] UI Patch: Renamed Dev Project modal labels (Product->Project, Project->Opportunity, Feature->Function) to match refined semantic meaning.
+ * - [1.8.7] Debug Patch: Injected focused trace logs for dp-status to monitor data flow consistency from config to submit payload.
+ * - [1.8.6] Debug Patch: Hardened dp-status restore logic with string trimming.
+ * - [1.8.5] Logic Patch: Aligned dp-status modal population strictly with dp-devStage, removing all fallback and legacy "(保留)" logic.
+ * - [1.8.4] Cleanup Patch: Removed stale DOM reference (dp-progress-val) in openDevProjectModal causing TypeError on modal open.
+ * - [1.8.3] UI/Data-Control Patch: Made "開發狀態" (Status) fully controlled by System Config in Dev Projects modal.
+ * - [1.8.2] UI Patch: Modal UX upgrades - Made Assignee required with default placeholder, synced progress slider.
+ * - [1.8.1] UI Patch: Enhanced Dev Projects Opportunity selector with frontend keyword filtering.
+ * - [1.8.0] UI/Data-Wiring Patch (Phase A): Upgraded Dev Projects UX. Implemented opportunity select mapping.
+ * - [1.7.8] UI Patch: Renamed Dev Project modal labels.
  * - [1.7.7] Refactor (Phase 1): Split render responsibilities into separate module files.
  * @description 負責進度追蹤頁面的 DOM 建立、共用拉取邏輯與 CRUD 模態框事件處理。
  */
@@ -210,11 +215,6 @@ window.loadInternalOpsPage = async function(params) {
                             <div style="flex: 1;">
                                 <label style="display:block; margin-bottom: 4px; font-size: 0.9rem; font-weight: 600;">狀態</label>
                                 <select id="dp-status" style="width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;">
-                                    <option value="未開始">未開始</option>
-                                    <option value="進行中">進行中</option>
-                                    <option value="卡關">卡關</option>
-                                    <option value="已完成">已完成</option>
-                                    <option value="暫停">暫停</option>
                                 </select>
                             </div>
                             <div style="flex: 1;">
@@ -344,6 +344,7 @@ async function populateDevProjectDropdowns() {
     const devStageSelect = document.getElementById('dp-devStage');
     const collabContainer = document.getElementById('dp-collaborators-container');
     const oppSelect = document.getElementById('dp-projectName');
+    const statusSelect = document.getElementById('dp-status');
 
     try {
         const configRes = await (typeof authedFetch === 'function' ? authedFetch('/api/config') : fetch('/api/config').then(r => r.json()));
@@ -351,7 +352,6 @@ async function populateDevProjectDropdowns() {
 
         const members = config['團隊成員'] || [];
         if (members.length > 0) {
-            // [Task 1] Required with placeholder default
             assigneeSelect.innerHTML = '<option value="" disabled selected>請選擇</option>' + members.map(m => `<option value="${m.value}">${m.note}</option>`).join('');
             
             collabContainer.innerHTML = members.map((m, idx) => `
@@ -374,6 +374,14 @@ async function populateDevProjectDropdowns() {
             devStageSelect.innerHTML = fallbackStages.map(s => `<option value="${s}">${s}</option>`).join('');
         }
 
+        const statuses = config['開發狀態'] || [];
+        // [DEBUG LOG A] Dropdown population
+        console.log('[STATUS][CONFIG]', statuses);
+        if (statuses.length > 0) {
+            statusSelect.innerHTML = statuses.map(s => `<option value="${s.value}">${s.note}</option>`).join('');
+            statusSelect.value = statuses[0].value;
+        }
+
         const oppRes = await (typeof authedFetch === 'function' ? authedFetch('/api/opportunities') : fetch('/api/opportunities').then(r => r.json()));
         const oppData = Array.isArray(oppRes) ? oppRes : (oppRes && oppRes.data ? oppRes.data : []);
         
@@ -385,6 +393,7 @@ async function populateDevProjectDropdowns() {
         assigneeSelect.innerHTML = '<option value="">(載入失敗)</option>';
         devStageSelect.innerHTML = '<option value="">(載入失敗)</option>';
         oppSelect.innerHTML = '<option value="">(商機載入失敗)</option>';
+        statusSelect.innerHTML = '<option value="">(載入失敗)</option>';
     }
 }
 
@@ -394,7 +403,6 @@ window.openDevProjectModal = function(devId = null) {
     document.getElementById('dp-devId').value = '';
     document.getElementById('dp-modal-title').textContent = '新增開發案件';
     
-    // [Task 2] Slider & Numeric reset
     const slider = document.getElementById('dp-progress-slider');
     const numInput = document.getElementById('dp-progress');
     if(slider) slider.value = 0;
@@ -407,7 +415,6 @@ window.openDevProjectModal = function(devId = null) {
     const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     document.getElementById('dp-startDate').value = today;
 
-    // Load dynamic dropdowns first
     populateDevProjectDropdowns().then(() => {
         if (devId && window.__internalOpsDevProjectsData) {
             const item = window.__internalOpsDevProjectsData.find(data => data.devId === devId);
@@ -425,6 +432,24 @@ window.openDevProjectModal = function(devId = null) {
                 if (item.devStage) {
                     const option = Array.from(devStageSelect.options).find(opt => opt.value === item.devStage || opt.text === item.devStage);
                     if (option) devStageSelect.value = option.value;
+                }
+
+                const statusSelect = document.getElementById('dp-status');
+                if (item.status) {
+                    // [DEBUG LOG B] Modal open
+                    console.log('[STATUS][EDIT LOAD]', item.status);
+                    
+                    const val = (item.status || '').trim();
+                    const option = Array.from(statusSelect.options).find(opt => 
+                        (opt.value || '').trim() === val || 
+                        (opt.text || '').trim() === val
+                    );
+                    
+                    if (option) {
+                        statusSelect.value = option.value;
+                    } else {
+                        console.warn('[dp-status] no match for:', item.status);
+                    }
                 }
 
                 const oppSelect = document.getElementById('dp-projectName');
@@ -457,9 +482,7 @@ window.openDevProjectModal = function(devId = null) {
                 
                 document.getElementById('dp-productName').value = item.productName || '';
                 document.getElementById('dp-featureName').value = item.featureName || '';
-                document.getElementById('dp-status').value = item.status || '未開始';
                 
-                // [Task 2] Slider & Numeric setup
                 const pVal = parseInt((item.progress || '').replace('%', ''), 10) || 0;
                 if(numInput) numInput.value = pVal;
                 if(slider) slider.value = pVal;
@@ -487,12 +510,15 @@ window.submitDevProject = async function(event) {
     const oppSelect = document.getElementById('dp-projectName');
     const selectedOpportunityId = oppSelect.value;
     const selectedOption = oppSelect.options[oppSelect.selectedIndex];
-    // [Task 3] Handle empty optional opportunity
     const selectedOpportunityName = (selectedOption && selectedOption.value !== '') ? (selectedOption.getAttribute('data-name') || selectedOption.text) : '';
 
     const collabCheckboxes = document.querySelectorAll('.dp-collab-chk:checked');
     const collabsJoined = Array.from(collabCheckboxes).map(c => c.value).join('｜');
     
+    // [DEBUG LOG C] Submit
+    const submittedStatus = document.getElementById('dp-status').value;
+    console.log('[STATUS][SUBMIT]', { selectedValue: submittedStatus });
+
     const data = {
         productCode: '', 
         productName: document.getElementById('dp-productName').value,
@@ -506,7 +532,7 @@ window.submitDevProject = async function(event) {
         collaborators: collabsJoined,
         
         devStage: document.getElementById('dp-devStage').value,
-        status: document.getElementById('dp-status').value,
+        status: submittedStatus,
         progress: progressRaw ? progressRaw + '%' : '',
         priority: '', 
         startDate: document.getElementById('dp-startDate').value,
