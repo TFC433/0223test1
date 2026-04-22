@@ -2,36 +2,16 @@
 /**
  * public/scripts/internal-ops/internal-ops.js
  * 內部運營與進度追蹤 前端模組 (Phase 4.8)
- * @version 1.7.3
- * @date 2026-04-21
+ * @version 1.7.6
+ * @date 2026-04-22
  * @changelog
- * - [1.7.3] UI Patch (Step 3): Added collapsible behavior to Team Workload member groups to improve readability. Default state is collapsed.
- * - [1.7.2] UI Patch (Step 2): Unified visual language, headers, spacing, and table/card tones across all three sections.
- * - [1.7.1] UI Patch (Step 1): Added compact visual progress bar to Dev Projects table for better at-a-glance readability.
- * - [1.7.0] Normalized Color System - Implemented single-source color strategy with derived opacity for badges
- * - [1.6.0] Externalized color system for badges (Role, Stage, Status, Workload) to System Config and added index column to Dev Projects table
- * - [1.5.0] Upgraded Team Workload table UI readability with index column and color badges
- * - [1.4.0] Added workload level indicator badge (Green/Yellow/Red) based on main task count
- * - [1.3.0] Upgraded Team Workload to Participation View and reordered sections (Dev Projects first)
- * - [1.2.3] Enhanced Team Workload metrics to display main, collab, and total counts
- * - [1.2.2] Upgraded Input Model for Dev Projects (added startDate, collaborators, devStage dropdown, and renamed UI labels)
- * - [1.2.1] Changed Team Workload data source to dev-projects and updated grouping logic
- * - [1.2.0] Implemented CRUD UI and logic for Dev Projects section
- * - [1.1.0] Converted Team Workload section to a grouped read-only view and removed UI entry points for CRUD
- * - [1.0.14] Ensured default selection for dropdown in create mode
- * - [1.0.13] Fixed dropdown selection mismatch issue by finding matching option by text or value
- * - [1.0.12] Fixed async timing issue when setting dropdown values by returning promise from population function
- * - [1.0.11] Fixed unauthenticated fetch call for system config in dropdown population
- * - [1.0.10] Switched to direct API fetch for dropdown config to bypass stale cache issues and removed frontend filtering
- * - [1.0.9] Fixed boolean/string check for enabled status in team member dropdown
- * - [1.0.8] Fixed boolean check for enabled status in team member dropdown
- * - [1.0.7] Added enabled filter for team members
- * - [1.0.6] Fixed dropdown data source logic to handle grouped config object correctly
- * - [1.0.5] Fixed system config assignment to retain grouped object structure
- * - [1.0.4] Fixed System Config API path and hardened team member filter logic
- * - [1.0.3] Integrated System Config for dropdowns (memberName, taskType), default date, and UI tweaks
- * - [1.0.2] Added CRUD UI and logic for Team Workload section
- * - [1.0.1] Fixed API response parsing to support both plain array and { success, data } formats
+ * - [1.7.6] UI Patch: Refined Dev Projects table layout. Reordered columns, merged actual and theoretical progress into a single stacked column, and converted action buttons into an expandable toggle.
+ * - [1.7.5] UI Patch: Upgraded Dev Projects table. Added start date and theoretical progress bar, removed update time column.
+ * - [1.7.4] UI Patch: Replaced featureName with productName in Team Workload, removed unused columns, and added workload bar.
+ * - [1.7.3] UI Patch: Added collapsible behavior to Team Workload member groups.
+ * - [1.7.2] UI Patch: Unified visual language, headers, spacing, and table/card tones across all three sections.
+ * - [1.7.1] UI Patch: Added compact visual progress bar to Dev Projects table.
+ * - [1.7.0] Normalized Color System - Implemented single-source color strategy.
  * @description 負責進度追蹤頁面的 DOM 建立與資料渲染 (團隊成員負荷、開發案件追蹤、訂閱制管理)
  */
 
@@ -67,7 +47,6 @@ window.loadInternalOpsPage = async function(params) {
     const pageContainer = document.getElementById('page-internal-ops');
     if (!pageContainer) return;
 
-    // 1. 建立頁面骨架 (若尚未建立)
     if (!pageContainer.querySelector('.internal-ops-container')) {
         pageContainer.innerHTML = `
             <div class="internal-ops-container dashboard-grid-flexible" style="display: flex; flex-direction: column; gap: 24px; padding: 24px;">
@@ -136,7 +115,6 @@ window.loadInternalOpsPage = async function(params) {
         `;
         pageContainer.appendChild(style);
 
-        // 加入 Team Workload Modal DOM (保留，即便目前入口隱藏，避免破壞潛在依賴)
         const modalHtml = `
             <div id="internal-ops-team-workload-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center;">
                 <div style="background: #fff; padding: 24px; border-radius: 8px; width: 500px; max-width: 90%;">
@@ -194,7 +172,6 @@ window.loadInternalOpsPage = async function(params) {
         `;
         pageContainer.insertAdjacentHTML('beforeend', modalHtml);
 
-        // 加入 Dev Projects Modal DOM
         const devProjectModalHtml = `
             <div id="internal-ops-dev-project-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; justify-content: center; align-items: center;">
                 <div style="background: #fff; padding: 24px; border-radius: 8px; width: 600px; max-width: 90%;">
@@ -270,7 +247,6 @@ window.loadInternalOpsPage = async function(params) {
         pageContainer.insertAdjacentHTML('beforeend', devProjectModalHtml);
     }
 
-    // 2. 獲取系統設定 (System Config) 以供下拉選單使用
     if (!window.__systemConfig) {
         try {
             const configRes = await (typeof authedFetch === 'function' ? authedFetch('/api/config') : fetch('/api/config').then(r => r.json()));
@@ -281,7 +257,6 @@ window.loadInternalOpsPage = async function(params) {
         }
     }
 
-    // 3. 載入資料並渲染 (並行請求)
     await Promise.all([
         fetchAndRenderSection('/api/internal-ops/dev-projects', renderTeamWorkload, 'internal-ops-team-workload-content'),
         fetchAndRenderSection('/api/internal-ops/dev-projects', renderDevProjects, 'internal-ops-dev-projects-content'),
@@ -289,50 +264,39 @@ window.loadInternalOpsPage = async function(params) {
     ]);
 };
 
-/**
- * 負責單一區塊的資料獲取與狀態處理
- */
 async function fetchAndRenderSection(endpoint, renderFn, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
     
-    // Loading state
     container.innerHTML = '<div class="loading show" style="padding: 20px;"><div class="spinner"></div><p style="text-align: center; margin-top: 10px;">載入中...</p></div>';
     
     try {
         const res = await (typeof authedFetch === 'function' ? authedFetch(endpoint) : fetch(endpoint).then(r => r.json()));
-        
-        // 支援 plain array 或 { success: true, data: [...] } 兩種格式
         const dataArray = Array.isArray(res) ? res : (res && res.success ? res.data : null);
         
         if (dataArray) {
             if (dataArray.length > 0) {
-                // Success state
                 container.innerHTML = renderFn(dataArray);
             } else {
-                // Empty state
                 container.innerHTML = '<p style="padding: 30px; color: #888; text-align: center;">目前沒有資料</p>';
             }
         } else {
-            // API Error state
             container.innerHTML = '<p style="padding: 30px; color: #d32f2f; text-align: center;">載入失敗: ' + (res && res.error ? res.error : '無效的資料格式或未知的錯誤') + '</p>';
         }
     } catch (err) {
         console.error(`[Internal Ops] Fetch error for ${endpoint}:`, err);
-        // Network Error state
         container.innerHTML = '<p style="padding: 30px; color: #d32f2f; text-align: center;">發生錯誤：' + err.message + '</p>';
     }
 }
 
 /**
- * 渲染：團隊成員負荷 (成員參與視圖 - Read-Only Grouped View)
+ * 渲染：團隊成員負荷
  */
 function renderTeamWorkload(data) {
-    window.__internalOpsTeamWorkloadData = data; // 保存資料供內部存取
+    window.__internalOpsTeamWorkloadData = data; 
     
     if (!data || data.length === 0) return '';
 
-    // Helpers for config-driven styling
     function getConfigColor(type, text, fallbackHex) {
         if (!text || text === '-') return buildColorSet(fallbackHex);
         const list = window.__systemConfig[type] || [];
@@ -377,20 +341,8 @@ function renderTeamWorkload(data) {
         return getBadgeHtml(stage, colorSet);
     }
 
-    function getProgressBadge(progressText) {
-        if (!progressText) progressText = '0%';
-        const val = parseInt(progressText.replace('%', ''), 10) || 0;
-        let fallbackHex;
-        if (val < 30) { fallbackHex = '#616161'; }
-        else if (val > 70) { fallbackHex = '#2e7d32'; }
-        else { fallbackHex = '#1976d2'; }
-        const colorSet = buildColorSet(fallbackHex);
-        return `<span class="progress-badge" style="background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">${progressText}</span>`;
-    }
-
     const groups = {};
 
-    // 1. Gather all unique members and classify tasks
     data.forEach(item => {
         const main = (item.assigneeName || '未指派').trim();
         if (!groups[main]) groups[main] = { main: 0, collab: 0, tasks: [] };
@@ -411,19 +363,15 @@ function renderTeamWorkload(data) {
         }
     });
 
-    // 2. Sort members
     const memberNames = Object.keys(groups).sort();
     
     let html = '<div class="team-workload-groups" style="display: flex; flex-direction: column; gap: 24px;">';
-    
-    // SVG toggle icon
     const toggleIcon = `<svg class="toggle-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
 
     memberNames.forEach(member => {
         const groupData = groups[member];
         const tasks = groupData.tasks;
         
-        // Sort tasks: Main role first, then by estCompletionDate ascending
         tasks.sort((a, b) => {
             if (a._role !== b._role) {
                 return a._role === '主負責人' ? -1 : 1;
@@ -436,46 +384,43 @@ function renderTeamWorkload(data) {
         const rows = tasks.map((item, index) => `
             <tr>
                 <td>${index + 1}</td>
-                <td><strong>${item.featureName || item.projectName || '-'}</strong></td>
+                <td><strong>${item.productName || item.projectName || '-'}</strong></td>
                 <td>${getStageBadge(item.devStage || '-')}</td>
                 <td>${getRoleBadge(item._role)}</td>
                 <td>${getStatusBadge(item.status || '-')}</td>
-                <td>${getProgressBadge(item.progress)}</td>
-                <td>${item.startDate || '-'}</td>
-                <td>${item.estCompletionDate || '-'}</td>
             </tr>
         `).join('');
 
-        const totalCount = groupData.main + groupData.collab;
+        const totalTasks = groupData.main + groupData.collab;
+        const maxCapacity = 6;
+        const workloadPercent = Math.min(Math.max((totalTasks / maxCapacity) * 100, 0), 100).toFixed(0);
         
-        // Load indicator badge logic (based on main task count)
-        const mainCount = groupData.main;
-        let fallbackHex, loadText;
-        if (mainCount >= 6) {
-            fallbackHex = '#c62828'; loadText = '負荷高';
-        } else if (mainCount >= 3) {
-            fallbackHex = '#f9a825'; loadText = '負荷中';
+        let barHex;
+        if (totalTasks >= 6) {
+            barHex = '#c62828'; 
+        } else if (totalTasks >= 3) {
+            barHex = '#f9a825'; 
         } else {
-            fallbackHex = '#2e7d32'; loadText = '負荷低';
+            barHex = '#2e7d32'; 
         }
-        
-        const colorSet = getConfigColor('負荷量表', loadText, fallbackHex);
-        
-        let badgeText = loadText;
-        if (loadText === '負荷高') badgeText += '｜過載';
-        else if (loadText === '負荷中') badgeText += '｜注意';
-        else if (loadText === '負荷低') badgeText += '｜正常';
 
-        const loadBadge = `<span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; margin-left: 12px; background: ${colorSet.bgLight}; color: ${colorSet.text}; border: 1px solid ${colorSet.border};">${badgeText}</span>`;
+        const workloadBarHtml = `
+            <div style="display: flex; align-items: center; gap: 8px; margin-left: 8px; font-size: 0.85rem; font-weight: normal;">
+                <div style="width: 80px; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; display: flex;">
+                    <div style="width: ${workloadPercent}%; height: 100%; background: ${barHex}; transition: width 0.3s ease;"></div>
+                </div>
+                <span style="color: ${barHex}; font-weight: 600;">${workloadPercent}%</span>
+                <span style="color: #6b7280; margin-left: 4px; font-size: 0.8rem;">主 ${groupData.main} / 協 ${groupData.collab} / 共 ${totalTasks}</span>
+            </div>
+        `;
 
         html += `
             <div class="member-workload-card">
                 <div class="member-workload-header" onclick="window.toggleWorkload(this)">
-                    <h3>
+                    <h3 style="display: flex; align-items: center; margin: 0; font-size: 1.05rem; color: #111827; font-weight: 600; flex-wrap: wrap;">
                         ${toggleIcon}
-                        ${member} 
-                        <span style="font-size: 0.9rem; color: #6b7280; font-weight: normal; margin-left: 8px;">（主責 ${groupData.main}｜協作 ${groupData.collab}｜總 ${totalCount}）</span>
-                        ${loadBadge}
+                        <span>${member}</span>
+                        ${workloadBarHtml}
                     </h3>
                 </div>
                 <div class="member-workload-body" style="display: none;">
@@ -488,9 +433,6 @@ function renderTeamWorkload(data) {
                                     <th>開發階段</th>
                                     <th>擔當角色</th>
                                     <th>狀態</th>
-                                    <th>商品開發進度</th>
-                                    <th>開始日</th>
-                                    <th>預計完成日</th>
                                 </tr>
                             </thead>
                             <tbody>${rows}</tbody>
@@ -505,7 +447,6 @@ function renderTeamWorkload(data) {
     return html;
 }
 
-// [Task 5] 全域切換函數 (Minimal-diff toggle logic)
 window.toggleWorkload = function(headerElement) {
     const body = headerElement.nextElementSibling;
     const icon = headerElement.querySelector('.toggle-icon');
@@ -518,13 +459,25 @@ window.toggleWorkload = function(headerElement) {
     }
 };
 
+// [Task 3, 4] 展開操作選單的邏輯
+window.toggleDevActions = function(btnElement) {
+    const panel = btnElement.nextElementSibling;
+    const icon = btnElement.querySelector('.action-toggle-icon');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'flex';
+        if (icon) icon.style.transform = 'rotate(90deg)';
+    } else {
+        panel.style.display = 'none';
+        if (icon) icon.style.transform = 'rotate(0deg)';
+    }
+};
+
 /**
  * 渲染：開發案件追蹤
  */
 function renderDevProjects(data) {
-    window.__internalOpsDevProjectsData = data; // 保存資料供編輯 modal 讀取
+    window.__internalOpsDevProjectsData = data; 
 
-    // Helpers to utilize config colors for dev projects section as well
     function getConfigColor(type, text, fallbackHex) {
         if (!text || text === '-') return buildColorSet(fallbackHex);
         const list = window.__systemConfig[type] || [];
@@ -563,27 +516,70 @@ function renderDevProjects(data) {
         return getBadgeHtml(stage, colorSet);
     }
 
-    // Compact visual progress bar
-    function getProgressBadge(progressText) {
-        if (!progressText) progressText = '0%';
-        const val = parseInt(progressText.replace('%', ''), 10) || 0;
-        const clampedVal = Math.min(Math.max(val, 0), 100);
-        let fallbackHex;
-        if (val < 30) { fallbackHex = '#616161'; }
-        else if (val > 70) { fallbackHex = '#2e7d32'; }
-        else { fallbackHex = '#1976d2'; }
-        const colorSet = buildColorSet(fallbackHex);
-        
-        return `
-            <div style="display: flex; align-items: center; gap: 8px; min-width: 120px;">
-                <span class="progress-badge" style="background:${colorSet.bgLight}; color:${colorSet.text}; border: 1px solid ${colorSet.border}; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; min-width: 40px; text-align: center;">${progressText}</span>
+    // [Task 2] 將實際與理論進度整併為雙層緊湊佈局
+    function getCombinedProgressHtml(actualProgressText, startDate, estDate) {
+        // Actual Progress
+        if (!actualProgressText) actualProgressText = '0%';
+        const aVal = parseInt(actualProgressText.replace('%', ''), 10) || 0;
+        const clampedAVal = Math.min(Math.max(aVal, 0), 100);
+        let aHex;
+        if (aVal < 30) aHex = '#616161';
+        else if (aVal > 70) aHex = '#2e7d32';
+        else aHex = '#1976d2';
+        const aColor = buildColorSet(aHex);
+
+        const actualHtml = `
+            <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+                <span style="font-size: 0.75rem; color: #6b7280; min-width: 24px;">實際</span>
                 <div style="flex: 1; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden;">
-                    <div style="width: ${clampedVal}%; height: 100%; background: ${colorSet.text};"></div>
+                    <div style="width: ${clampedAVal}%; height: 100%; background: ${aColor.text};"></div>
                 </div>
+                <span style="background:${aColor.bgLight}; color:${aColor.text}; border: 1px solid ${aColor.border}; padding: 2px 6px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; min-width: 36px; text-align: center;">${actualProgressText}</span>
             </div>
         `;
+
+        // Theoretical Progress
+        let tHtml = '';
+        if (startDate && estDate) {
+            const start = new Date(startDate).setHours(0,0,0,0);
+            const end = new Date(estDate).setHours(23,59,59,999);
+            const now = new Date().setHours(0,0,0,0);
+
+            if (!isNaN(start) && !isNaN(end) && start < end) {
+                let tProg = 0;
+                if (now >= end) tProg = 100;
+                else if (now > start) tProg = Math.round(((now - start) / (end - start)) * 100);
+                
+                const clampedTVal = Math.min(Math.max(tProg, 0), 100);
+                
+                let cueHtml = '';
+                const diff = aVal - tProg;
+                if (diff <= -10) cueHtml = `<span style="color:#c62828; font-size:0.7rem; margin-left:4px; font-weight: bold; white-space: nowrap;">(落後)</span>`;
+                else if (diff >= 10) cueHtml = `<span style="color:#2e7d32; font-size:0.7rem; margin-left:4px; font-weight: bold; white-space: nowrap;">(超前)</span>`;
+
+                tHtml = `
+                    <div style="display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px;">
+                        <span style="font-size: 0.75rem; color: #6b7280; min-width: 24px;">理論</span>
+                        <div style="flex: 1; height: 6px; background: #f3f4f6; border: 1px dashed #d1d5db; border-radius: 3px; overflow: hidden;">
+                            <div style="width: ${clampedTVal}%; height: 100%; background: #9ca3af;"></div>
+                        </div>
+                        <div style="display: flex; align-items: center; min-width: 36px; justify-content: flex-end;">
+                            <span style="color: #6b7280; font-size: 0.7rem; font-weight: 600;">${tProg}%</span>
+                            ${cueHtml}
+                        </div>
+                    </div>
+                `;
+            } else {
+                tHtml = `<div style="display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px;"><span style="font-size: 0.75rem; color: #6b7280; min-width: 24px;">理論</span><span style="font-size: 0.75rem; color: #9ca3af;">-</span></div>`;
+            }
+        } else {
+             tHtml = `<div style="display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 6px;"><span style="font-size: 0.75rem; color: #6b7280; min-width: 24px;">理論</span><span style="font-size: 0.75rem; color: #9ca3af;">-</span></div>`;
+        }
+
+        return `<div style="display: flex; flex-direction: column; min-width: 160px; max-width: 250px;">${actualHtml}${tHtml}</div>`;
     }
 
+    // [Task 1, 3] 重排欄位，並將按鈕轉換為展開選單
     const rows = data.map((item, index) => `
         <tr>
             <td>${index + 1}</td>
@@ -594,13 +590,19 @@ function renderDevProjects(data) {
             <td>${item.collaborators || '-'}</td>
             <td>${getStageBadge(item.devStage || '-')}</td>
             <td>${getStatusBadge(item.status || '-')}</td>
-            <td>${getProgressBadge(item.progress)}</td>
+            <td>${item.startDate || '-'}</td>
             <td>${item.estCompletionDate || '-'}</td>
-            <td>${item.updateTime ? new Date(item.updateTime).toLocaleDateString() : '-'}</td>
-            <td>
-                <div class="internal-ops-actions">
-                    <button class="internal-ops-btn" onclick="openDevProjectModal('${item.devId}')">編輯</button>
-                    <button class="internal-ops-btn" onclick="deleteDevProject('${item.devId}')" style="color: #d32f2f;">刪除</button>
+            <td>${getCombinedProgressHtml(item.progress, item.startDate, item.estCompletionDate)}</td>
+            <td style="vertical-align: top;">
+                <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                    <button class="internal-ops-btn" style="padding: 2px 6px; display: flex; align-items: center; gap: 4px; border: none; background: transparent; color: #6b7280; box-shadow: none;" onclick="window.toggleDevActions(this)">
+                        <svg class="action-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        操作
+                    </button>
+                    <div class="dev-actions-panel" style="display: none; flex-direction: column; gap: 6px; margin-top: 8px; padding-left: 4px;">
+                        <button class="internal-ops-btn" style="display: flex; align-items: center; gap: 6px; width: 100%; justify-content: flex-start; padding: 4px 8px;" onclick="openDevProjectModal('${item.devId}')">✏️ 編輯</button>
+                        <button class="internal-ops-btn" style="display: flex; align-items: center; gap: 6px; width: 100%; justify-content: flex-start; color: #c62828; padding: 4px 8px;" onclick="deleteDevProject('${item.devId}')">🗑️ 刪除</button>
+                    </div>
                 </div>
             </td>
         </tr>
@@ -618,10 +620,10 @@ function renderDevProjects(data) {
                     <th>協作成員</th>
                     <th>開發階段</th>
                     <th>狀態</th>
-                    <th>進度</th>
+                    <th>開始日</th>
                     <th>預計完成日</th>
-                    <th>更新時間</th>
-                    <th>操作</th>
+                    <th>進度</th>
+                    <th style="min-width: 80px;">操作</th>
                 </tr>
             </thead>
             <tbody>${rows}</tbody>
