@@ -1,10 +1,11 @@
 // public/scripts/core/main.js
 // 職責：System initialization entry + parallelized resource loading
-// @version [Phase 2] Manual Refresh UX Removal
+// @version [Phase B] Stale Invalidation Mechanism Patch
 // @date 2026-04-23
 // @changelog
 // - Parallelized loadResources fetches using Promise.all
 // - Removal of unintended injected code
+// - [Patch Phase B] Added CRM_APP.markStale utility for router cache invalidation
 
 window.CRM_APP = window.CRM_APP || {};
 
@@ -49,7 +50,7 @@ CRM_APP.handleInitialRoute = async function() {
     const hash = window.location.hash.substring(1);
     if (hash) {
         const [pageName, paramsString] = hash.split('?');
-        if (this.pageConfig[pageName]) {
+        if (this.pageConfig && this.pageConfig[pageName]) {
             let params = {};
             if (paramsString) params = Object.fromEntries(new URLSearchParams(paramsString));
             await this.navigateTo(pageName, params, false);
@@ -89,6 +90,8 @@ CRM_APP.loadResources = async function() {
 
     const types = ['general', 'iot', 'dt', 'dx'];
     
+    this.formTemplates = this.formTemplates || {};
+    
     await Promise.all(types.map(async (t) => {
         try {
             const file = `/components/forms/event-form-${t === 'dx' ? 'general' : t}.html`;
@@ -104,6 +107,22 @@ CRM_APP.loadResources = async function() {
             console.error(`[Main] ❌ 載入表單發生錯誤: ${t}`, error);
         }
     }));
+};
+
+/**
+ * [Patch Phase B] 標記特定 SPA 頁面為 Stale (髒資料)，強制 Router 在下次進入時重新載入
+ * @param {string|string[]} pageNames - 要標記的頁面 ID
+ */
+CRM_APP.markStale = function(pageNames) {
+    if (!this.pageConfig) return;
+    if (!Array.isArray(pageNames)) pageNames = [pageNames];
+    
+    pageNames.forEach(page => {
+        if (this.pageConfig[page]) {
+            this.pageConfig[page].stale = true;
+            console.log(`🔄 [Cache] 標記 SPA 頁面需更新 (Stale): ${page}`);
+        }
+    });
 };
 
 // Global Helpers

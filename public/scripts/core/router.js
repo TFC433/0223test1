@@ -1,10 +1,11 @@
 /**
  * File: public/scripts/core/router.js
- * @version 1.0.4
+ * @version 1.0.5 (Phase B Patch)
  * @date 2026-04-23
- * @purpose Restore SPA cache flag for non-detail pages
+ * @purpose Restore SPA cache flag for non-detail pages & introduce Stale Invalidation
  * @changelog
- * - Restored SPA cache behavior for non-detail pages to prevent redundant API fetches (minimal diff performance patch).
+ * - Restored SPA cache behavior for non-detail pages to prevent redundant API fetches.
+ * - [Patch Phase B] Integrated config.stale flag into needsLoad logic to force reload dirtied pages.
  */
 
 // public/scripts/core/router.js
@@ -143,14 +144,18 @@ const Router = {
         // 4. 執行模組載入邏輯
         if (pageName === 'dashboard') {
             // [Hotfix] 遵循 SPA 載入旗標，避免路由切換時重複發送 /api/dashboard 請求
-            if (!config.loaded && window.dashboardManager?.refresh) {
+            // [Patch Phase B] Support config.stale to force reload dirty dashboard
+            if ((!config.loaded || config.stale) && window.dashboardManager?.refresh) {
                 await window.dashboardManager.refresh();
+                config.loaded = true;
+                config.stale = false;
             }
         } else {
             const loadFn = window.CRM_APP.pageModules[pageName];
 
             // [Hotfix-1] event-editor：豁免一次性載入鎖定，允許每次進入都跑 loadFn
-            const needsLoad = loadFn && (isDetailPage || pageName === 'event-editor' || !config.loaded);
+            // [Patch Phase B] Support config.stale to force reload dirty list pages
+            const needsLoad = loadFn && (isDetailPage || pageName === 'event-editor' || !config.loaded || config.stale);
 
             if (needsLoad) {
                 try {
@@ -169,7 +174,10 @@ const Router = {
                     }
 
                     // Restore SPA cache flag for non-detail pages to prevent redundant API fetches
-                    if (!isDetailPage && pageName !== 'event-editor') config.loaded = true;
+                    if (!isDetailPage && pageName !== 'event-editor') {
+                        config.loaded = true;
+                        config.stale = false; // [Patch Phase B] Clear stale flag after loading
+                    }
 
                 } catch (err) {
                     console.error(`[Router] 載入頁面失敗:`, err);

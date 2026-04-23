@@ -1,5 +1,11 @@
-// public/scripts/services/api.js
+// File: public/scripts/services/api.js
 // 職責：專門處理 API 請求、認證 Token、錯誤處理以及流量控制 (Traffic Control)
+// Version: 1.0.1 (Phase B - Cleanup)
+// Date: 2026-04-23
+// Purpose: API Request wrapper with centralized rate limiting, authentication, and error handling.
+// Changelog:
+// - [Patch Phase B] Wired successful write operations to CRM_APP.markStale to invalidate frontend SPA cache.
+// - [Patch Phase B - Cleanup] Removed legacy refreshCurrentView / location.reload behavior. Stale-based router refresh is now the intended mechanism.
 
 // --- Traffic Control Configuration ---
 const RATE_LIMIT_CONFIG = {
@@ -122,13 +128,28 @@ async function executeFetch(url, options, attempts) {
         // [Bugfix] Added `result?.success !== false` to prevent false positive success toasts 
         // and forced reloads when the backend gracefully blocks an action (e.g., relation validation)
         if (isWriteOperation && response.ok && result?.success !== false && !options.skipRefresh) {
+            
+            // [Patch Phase B] Intercept success and mark related SPA list pages as stale
+            if (window.CRM_APP && typeof window.CRM_APP.markStale === 'function') {
+                const affectedPages = ['dashboard'];
+                
+                if (url.includes('/api/companies')) {
+                    affectedPages.push('companies');
+                } else if (url.includes('/api/opportunities')) {
+                    affectedPages.push('opportunities', 'companies');
+                } else if (url.includes('/api/contacts')) {
+                    affectedPages.push('contacts', 'companies', 'opportunities');
+                } else if (url.includes('/api/events') || url.includes('/api/event-logs') || url.includes('/api/interactions')) {
+                    affectedPages.push('companies', 'opportunities');
+                } else if (url.includes('/api/weekly')) {
+                    affectedPages.push('weekly-business');
+                }
+                
+                window.CRM_APP.markStale(affectedPages);
+            }
+
             const successMsg = result?.message || (method === 'DELETE' ? '刪除成功！' : '操作成功！');
             showNotification(successMsg, 'success', 2000);
-            if (window.CRM_APP && typeof window.CRM_APP.refreshCurrentView === 'function') {
-                setTimeout(() => window.CRM_APP.refreshCurrentView(successMsg), 100);
-            } else {
-                setTimeout(() => location.reload(), 1500);
-            }
         }
 
         return result;
