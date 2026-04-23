@@ -1,10 +1,10 @@
-// public/scripts/core/main.js (重構版: 序列化資源載入)
-// 職責：系統初始化入口
+// public/scripts/core/main.js
+// 職責：System initialization entry + parallelized resource loading
 // @version [Phase 2] Manual Refresh UX Removal
-// @date 2026-04-15
+// @date 2026-04-23
 // @changelog
-// - Removed obsolete SmartPolling system.
-// - Kept refreshCurrentView exactly as it was for local save/delete flows.
+// - Parallelized loadResources fetches using Promise.all
+// - Removal of unintended injected code
 
 window.CRM_APP = window.CRM_APP || {};
 
@@ -70,28 +70,26 @@ CRM_APP.loadResources = async function() {
     
     const container = document.getElementById('modal-container');
     if (container) {
-        // 序列化請求 (Sequential Fetch) 以防止 429 錯誤
-        let htmls = [];
-        for (const c of components) {
+        const htmlResults = await Promise.all(components.map(async (c) => {
             try {
                 const res = await fetch(`/components/modals/${c}.html`);
                 if (res.ok) {
-                    const text = await res.text();
-                    htmls.push(text);
+                    return await res.text();
                 } else {
                     console.warn(`[Main] ⚠ 載入模組失敗: ${c} (Status: ${res.status})`);
+                    return '';
                 }
             } catch (error) {
                 console.error(`[Main] ❌ 載入模組發生錯誤: ${c}`, error);
+                return '';
             }
-        }
-        container.innerHTML = htmls.join('');
+        }));
+        container.innerHTML = htmlResults.join('');
     }
 
     const types = ['general', 'iot', 'dt', 'dx'];
     
-    // 序列化載入表單
-    for (const t of types) {
+    await Promise.all(types.map(async (t) => {
         try {
             const file = `/components/forms/event-form-${t === 'dx' ? 'general' : t}.html`;
             const res = await fetch(file);
@@ -105,64 +103,8 @@ CRM_APP.loadResources = async function() {
         } catch (error) {
             console.error(`[Main] ❌ 載入表單發生錯誤: ${t}`, error);
         }
-    }
+    }));
 };
-
-// [ADD-BEGIN] refreshCurrentView
-window.CRM_APP.refreshCurrentView = async function(successMsg) {
-    // 1. Debounce Guard (500ms)
-    const now = Date.now();
-    if (window.CRM_APP._lastRefresh && (now - window.CRM_APP._lastRefresh < 500)) {
-        return;
-    }
-    window.CRM_APP._lastRefresh = now;
-
-    // 2. Determine Page Name
-    let hash = window.location.hash.substring(1);
-    let [pageName, paramStr] = hash.split('?');
-    
-    if (!pageName) pageName = 'dashboard';
-
-    // 3. Special Handling: Event Editor -> Events List
-    // If we just saved inside the standalone editor, we want to go back to the list and refresh it.
-    if (pageName === 'event-editor' || hash.includes('event-editor')) {
-        window.location.hash = '#events';
-        pageName = 'events';
-        paramStr = ''; 
-    }
-
-    // 4. Execute Loader
-    const loader = window.CRM_APP.pageModules && window.CRM_APP.pageModules[pageName];
-    
-    if (loader) {
-        try {
-            // Parse params if any
-            let params = {};
-            if (paramStr) {
-                params = Object.fromEntries(new URLSearchParams(paramStr));
-            }
-
-            // Handle Detail Pages vs List Pages signature
-            // Detail pages usually expect an ID string or specific param
-            const isDetailPage = pageName.includes('-details') || pageName === 'weekly-detail';
-            
-            if (isDetailPage) {
-                // Try to guess the ID argument
-                const id = params.weekId || params.opportunityId || params.companyName || Object.values(params)[0];
-                if (id) await loader(id);
-                else await loader(params);
-            } else {
-                // List pages usually take no args or an object
-                await loader(params);
-            }
-        } catch (err) {
-            console.error(`[Main] Soft refresh failed for ${pageName}:`, err);
-        }
-    } else {
-        console.warn(`[Main] No loader found for page: ${pageName}. Soft refresh skipped.`);
-    }
-};
-// [ADD-END] refreshCurrentView
 
 // Global Helpers
 function getCurrentUser() {
