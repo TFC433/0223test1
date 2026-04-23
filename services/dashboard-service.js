@@ -4,16 +4,22 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.0.0 Phase 9-A SQL-First Dashboard Optimization
- * @date 2026-04-15
+ * @version 2.6.0 Phase C-2.1-E MTU KPI Fix
+ * @date 2026-04-23
  * @changelog
- * - [PHASE 9-A] Replaced full-table interactions hydration with targeted SQL queries (getInteractionActivities, getRecentInteractionsFeed).
- * - [PHASE 9-A] Eliminated redundant O(N*M) latestInteractionMap JS logic. Now relies purely on OpportunitySqlReader's native effectiveLastActivity.
- * - [PATCH] Fixed "潛在客戶數量" KPI to use RAW contacts (Google Sheets) via contactRawReader instead of CORE (SQL), maintaining minimal diff and performance.
- * - [PERF] Parallelized dashboard data fetch groups (Batch1, Batch2, Batch3, Weekly) to reduce first-load latency.
- * - [PERF] Eliminated full contacts table hydration from dashboard flow.
- * - [PERF] Introduced targeted MTU/SI event activity projection to avoid full event_logs hydration.
+ * - [PHASE C-2.1-E] MTU KPI switched to has_activity-based visited logic
+ * - [PHASE C-2.1-E] first_activity no longer used as the primary visited-MTU condition
+ * - [PHASE C-2.1-D] MTU / SI activity aggregation moved to one SQL-first flow
+ * - [PHASE C-2.1-D] Node-side dashboard aggregation further reduced
+ * - [PHASE C-2.1-C] MTU / SI activity aggregation moved to SQL
+ * - [PHASE C-2.1-C] Node-side dashboard aggregation reduced
+ * - [PHASE C-2.1-B] moved MTU / SI activity aggregation toward SQL
+ * - [PHASE C-2.1] Moved KPI aggregation (Won Counts) to direct SQL COUNT.
+ * - [PHASE C-2.1] Reduced full-table hydration for opportunities and companies using SQL projection.
+ * - [PHASE C-2.1] Pushed down Kanban/Follow-up filters to SQL to eliminate in-memory array bloat.
  */
+
+const { supabase } = require('../config/supabase');
 
 class DashboardService {
     constructor(
@@ -56,7 +62,7 @@ class DashboardService {
     }
 
     async getDashboardData() {
-        console.log('📊 [DashboardService] 執行主儀表板資料整合 (Phase 9-A SQL-First Mode)...');
+        console.log('📊 [DashboardService] 執行主儀表板資料整合 (Phase C-2.1 SQL-First Mode)...');
 
         const today = new Date();
         const thisWeekId = this._getWeekId(today);
@@ -70,7 +76,14 @@ class DashboardService {
 
         // --- Batch 1: Core Business Data ---
         const batch1Promise = (async () => {
-            const oppPromise = this.opportunitySqlReader.getOpportunities();
+            // [PHASE C-2.1] Pushdown filters to SQL: Fetch only active deals for UI
+            const activeOppsPromise = this.opportunitySqlReader.searchOpportunitiesTable
+                ? this.opportunitySqlReader.searchOpportunitiesTable({ filters: { status: '進行中' }, limit: 1000, offset: 0 }).then(res => res.data || [])
+                : this.opportunitySqlReader.getOpportunities().then(all => all.filter(o => o.currentStatus === '進行中'));
+
+            // [PHASE C-2.1] Lightweight cross-domain projection for stats and names
+            const lightweightOppsPromise = supabase.from('opportunities')
+                .select('opportunity_id, opportunity_name, customer_company, created_time');
             
             // [PHASE 9-A] Targeted SQL reads instead of full table hydration
             const intActivityPromise = typeof this.interactionSqlReader.getInteractionActivities === 'function'
@@ -81,7 +94,7 @@ class DashboardService {
                 ? this.interactionSqlReader.getRecentInteractionsFeed(5)
                 : Promise.resolve([]);
 
-            return await Promise.all([oppPromise, intActivityPromise, recentIntPromise]);
+            return await Promise.all([activeOppsPromise, lightweightOppsPromise, intActivityPromise, recentIntPromise]);
         })();
 
         // --- Batch 2: Secondary / Reference Data ---
@@ -125,11 +138,24 @@ class DashboardService {
                 ? this.companySqlReader.getTargetCompanyEventActivities(targetCompanyIds)
                 : Promise.resolve([]);
 
-            const [rawContacts, opportunityStats, eventStats, eventActivities] = await Promise.all([
+            // [PHASE C-2.1] SQL KPI Aggregation (Replacing in-memory fetch and filter)
+            const wonCountPromise = supabase.from('opportunities')
+                .select('opportunity_id', { count: 'exact', head: true })
+                .or('current_stage.in.(受注,已成交),current_status.eq.已完成');
+                
+            const startOfMonthIso = startOfMonth.toISOString();
+            const wonMonthPromise = supabase.from('opportunities')
+                .select('opportunity_id', { count: 'exact', head: true })
+                .or('current_stage.in.(受注,已成交),current_status.eq.已完成')
+                .gte('updated_time', startOfMonthIso);
+
+            const [rawContacts, opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes] = await Promise.all([
                 rawContactsPromise,
                 opportunityStatsPromise,
                 eventStatsPromise,
-                eventActivityPromise
+                eventActivityPromise,
+                wonCountPromise,
+                wonMonthPromise
             ]);
 
             let rawTotal = 0;
@@ -149,7 +175,9 @@ class DashboardService {
                 contactStats,
                 opportunityStats,
                 eventStats,
-                eventActivities
+                eventActivities,
+                wonCountRes,
+                wonMonthRes
             ];
         })();
 
@@ -193,100 +221,83 @@ class DashboardService {
         // 資料處理與統計邏輯 (Post-Fetch Aggregation)
         // =================================================================
         
-        // [PHASE 9-A] Extract targeted payloads instead of full tables
-        const [opportunitiesRaw, interactionActivities, recentInteractions] = batch1Result;
+        const [activeOpportunitiesRaw, lightweightOppsRes, interactionActivities, recentInteractions] = batch1Result;
         
         const [calendarData, systemConfig, companies, recentContactsRaw] = batch2Result;
-        const [contactStats, opportunityStats, eventStats, eventActivities] = batch3Result;
+        const [contactStats, opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes] = batch3Result;
         const { thisWeeksEntries, thisWeekDetails } = weeklyResult;
 
         const normalize = (name) => (name || '').trim().toLowerCase();
         const isStrictMTU = (type) => normalize(type) === 'mtu';
         const isSI = (type) => /SI|系統整合|System Integrator/i.test(type || '');
 
-        // [PHASE 9-A] ELIMINATED redundant O(N*M) JS loop.
-        // OpportunitySqlReader already natively embeds the exact effectiveLastActivity into the payload.
-        const opportunities = opportunitiesRaw.sort((a, b) => b.effectiveLastActivity - a.effectiveLastActivity);
+        const activeOpportunities = activeOpportunitiesRaw.sort((a, b) => b.effectiveLastActivity - a.effectiveLastActivity);
+        const lightweightOpps = lightweightOppsRes.data || [];
 
-        // MTU/SI 統計邏輯
-        const companyNameMap = new Map();
-        companies.forEach(c => {
-            if (c.companyName) {
-                companyNameMap.set(normalize(c.companyName), c.companyId);
-            }
-        });
-        
-        const staticMtuList = companies.filter(c => isStrictMTU(c.companyType));
-
-        const activeCompanyIds = new Set();
-        const earliestActivityMap = new Map();
-
-        const recordActivity = (cId, timeStr) => {
-            if (!cId) return;
-            activeCompanyIds.add(cId);
-            
-            const time = new Date(timeStr).getTime();
-            if (isNaN(time)) return;
-            
-            const currentEarliest = earliestActivityMap.get(cId);
-            if (!currentEarliest || time < currentEarliest) {
-                earliestActivityMap.set(cId, time);
-            }
-        };
-
-        // Pass lightweight activity arrays to standard tracking logic
-        interactionActivities.forEach(i => i.companyId && recordActivity(i.companyId, i.interactionTime || i.createdTime));
-        opportunities.forEach(opp => {
-            const cId = companyNameMap.get(normalize(opp.customerCompany));
-            if (cId) recordActivity(cId, opp.createdTime);
-        });
-        eventActivities.forEach(e => e.company_id && recordActivity(e.company_id, e.created_time));
-
+        // =================================================================
+        // PHASE C-2.1-D/E SQL-FIRST AGGREGATION: MTU / SI Activity
+        // =================================================================
         let mtuCount = 0;
         let mtuNewMonth = 0;
         let siCount = 0;
         let siNewMonth = 0;
-
         const activeMtuNames = [];
         const inactiveMtuNames = [];
+        let totalMtu = 0;
 
-        staticMtuList.forEach(comp => {
-            const cId = comp.companyId;
-            const name = comp.companyName;
+        try {
+            // 1. ONE SQL-First flow returning aggregated per-company activity.
+            // Assumes DB provides v_company_activity_summary with UNION ALL & MIN() logic.
+            const { data: targetCompanies, error } = await supabase
+                .from('v_company_activity_summary')
+                .select('company_id, company_name, company_type, first_activity, has_activity')
+                .or('company_type.ilike.%mtu%,company_type.ilike.%si%,company_type.ilike.%系統整合%,company_type.ilike.%system integrator%');
 
-            if (activeCompanyIds.has(cId)) {
-                mtuCount++;
-                activeMtuNames.push(name);
-                
-                const firstTime = earliestActivityMap.get(cId);
-                if (firstTime >= startOfMonth.getTime()) {
-                    mtuNewMonth++;
-                }
-            } else {
-                inactiveMtuNames.push(name);
+            if (error) {
+                console.error('[DashboardService] MTU/SI SQL View Error:', error);
             }
-        });
 
-        companies.forEach(comp => {
-             if (activeCompanyIds.has(comp.companyId) && isSI(comp.companyType)) {
-                 siCount++;
-                 const firstTime = earliestActivityMap.get(comp.companyId);
-                 if (firstTime >= startOfMonth.getTime()) siNewMonth++;
-             }
-        });
+            const safeTargets = targetCompanies || [];
 
-        const wonOpportunities = opportunities.filter(o => 
-            o.currentStage === '受注' || o.currentStage === '已成交' || o.currentStatus === '已完成'
-        );
-        const wonCount = wonOpportunities.length;
-        const wonCountMonth = wonOpportunities.filter(o => {
-            const dateStr = o.expectedCloseDate || o.lastUpdateTime;
-            if(!dateStr) return false;
-            return new Date(dateStr) >= startOfMonth;
-        }).length;
+            // 2. Node.js only formats the final stats from the aggregated company rows
+            safeTargets.forEach(comp => {
+                const name = comp.company_name;
+                const isMtu = isStrictMTU(comp.company_type);
+                const isSi = isSI(comp.company_type);
+                
+                // Visited logic is now driven by has_activity
+                const isActive = comp.has_activity === true;
+
+                // first_activity is provided directly by SQL aggregation for month tracking
+                const firstTime = comp.first_activity ? new Date(comp.first_activity).getTime() : Infinity;
+                const isNewThisMonth = isActive && firstTime !== Infinity && !isNaN(firstTime) && (firstTime >= startOfMonth.getTime());
+
+                if (isMtu) {
+                    totalMtu++;
+                    if (isActive) {
+                        mtuCount++;
+                        activeMtuNames.push(name);
+                        if (isNewThisMonth) mtuNewMonth++;
+                    } else {
+                        inactiveMtuNames.push(name);
+                    }
+                }
+
+                if (isSi && isActive) {
+                    siCount++;
+                    if (isNewThisMonth) siNewMonth++;
+                }
+            });
+        } catch (error) {
+            console.error('[DashboardService] SQL-First MTU/SI aggregation failed:', error);
+        }
+
+        // [PHASE C-2.1] SQL-based KPI aggregation replaces JS filtering
+        const wonCount = wonCountRes ? (wonCountRes.count || 0) : 0;
+        const wonCountMonth = wonMonthRes ? (wonMonthRes.count || 0) : 0;
 
         // Passed directly to rely on SQL-computed metric
-        const followUps = this._getFollowUpOpportunities(opportunities);
+        const followUps = this._getFollowUpOpportunities(activeOpportunities);
 
         const stats = {
             contactsCount: contactStats.total,
@@ -299,7 +310,7 @@ class DashboardService {
             siCount: siCount,
             siCountMonth: siNewMonth,
             mtuDetails: {
-                totalMtu: staticMtuList.length,
+                totalMtu: totalMtu,
                 activeCount: mtuCount,
                 inactiveCount: inactiveMtuNames.length,
                 activeNames: activeMtuNames,     
@@ -313,10 +324,10 @@ class DashboardService {
             eventLogsCountMonth: eventStats.month,
         };
 
-        const kanbanData = this._prepareKanbanData(opportunities, systemConfig);
+        const kanbanData = this._prepareKanbanData(activeOpportunities, systemConfig);
         
         // Relies on surgical recent SQL fetch
-        const recentActivity = this._prepareRecentActivity(recentInteractions, recentContactsRaw, opportunities, companies, 5);
+        const recentActivity = this._prepareRecentActivity(recentInteractions, recentContactsRaw, lightweightOpps, companies, 5);
         
         const thisWeekInfoForDashboard = {
             weekId: thisWeekId,
@@ -336,7 +347,15 @@ class DashboardService {
     }
 
     async getCompaniesDashboardData() {
-        const companies = await this.companySqlReader.getCompanies();
+        // [PHASE C-2.1] SQL-First: Fetch only required columns for chart aggregation
+        const { data } = await supabase.from('companies').select('created_time, company_type, customer_stage, interaction_rating');
+        const companies = (data || []).map(row => ({
+            createdTime: row.created_time,
+            companyType: row.company_type,
+            customerStage: row.customer_stage,
+            engagementRating: row.interaction_rating
+        }));
+
         return {
             chartData: {
                 trend: this._prepareTrendData(companies),
@@ -349,13 +368,15 @@ class DashboardService {
 
     async getEventsDashboardData() {
         const eventLogs = await this.eventLogSqlReader.getEventLogs();
-        const [opportunities, companies] = await Promise.all([
-            this.opportunitySqlReader.getOpportunities(),
-            this.companySqlReader.getCompanies(),
+        
+        // [PHASE C-2.1] SQL-First: Avoid full table hydration for cross-domain naming
+        const [oppsRes, compsRes] = await Promise.all([
+            supabase.from('opportunities').select('opportunity_id, opportunity_name, opportunity_type'),
+            supabase.from('companies').select('company_id, company_name')
         ]);
 
-        const opportunityMap = new Map(opportunities.map(opp => [opp.opportunityId, opp]));
-        const companyMap = new Map(companies.map(comp => [comp.companyId, comp]));
+        const opportunityMap = new Map((oppsRes.data || []).map(opp => [opp.opportunity_id, { opportunityName: opp.opportunity_name, opportunityType: opp.opportunity_type }]));
+        const companyMap = new Map((compsRes.data || []).map(comp => [comp.company_id, { companyName: comp.company_name }]));
 
         const eventList = eventLogs.map(log => {
             const relatedOpp = opportunityMap.get(log.opportunityId);
@@ -388,10 +409,22 @@ class DashboardService {
     }
 
     async getOpportunitiesDashboardData() {
-        const [opportunities, systemConfig] = await Promise.all([
-            this.opportunitySqlReader.getOpportunities(),
+        // [PHASE C-2.1] SQL-First: Projection to avoid full JSON body hydration
+        const [opportunitiesRes, systemConfig] = await Promise.all([
+            supabase.from('opportunities').select('source, opportunity_type, current_stage, win_probability, product_details, sales_channel, equipment_scale, created_time'),
             this.systemService.getSystemConfig(),
         ]);
+        
+        const opportunities = (opportunitiesRes.data || []).map(row => ({
+            opportunitySource: row.source,
+            opportunityType: row.opportunity_type,
+            currentStage: row.current_stage,
+            orderProbability: row.win_probability,
+            potentialSpecification: row.product_details,
+            salesChannel: row.sales_channel,
+            deviceScale: row.equipment_scale,
+            createdTime: row.created_time
+        }));
 
         return {
             chartData: {
@@ -476,8 +509,9 @@ class DashboardService {
             .sort((a, b) => b.timestamp - a.timestamp)
             .slice(0, limit);
 
-        const opportunityMap = new Map(opportunities.map(opp => [opp.opportunityId, opp.opportunityName]));
-        const companyMap = new Map(companies.map(comp => [comp.companyId, comp.companyName]));
+        // Account for both camelCase and snake_case based on caller hydration
+        const opportunityMap = new Map(opportunities.map(opp => [opp.opportunityId || opp.opportunity_id, opp.opportunityName || opp.opportunity_name]));
+        const companyMap = new Map(companies.map(comp => [comp.companyId || comp.company_id, comp.companyName || comp.company_name]));
 
         return combinedFeed.map(item => {
             if (item.type === 'interaction') {
