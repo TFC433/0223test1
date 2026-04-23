@@ -1,11 +1,14 @@
 /**
- * data/base-reader.js
+ * File: data/base-reader.js
  * 資料讀取基底類別
- * * @version 5.0.0 (Phase 5 Refactoring)
- * @date 2026-01-09
+ * @version 5.0.1
+ * @date 2026-04-23
+ * @purpose Increase cache TTL from 30s to 300s
  * @description 所有資料 Reader 的父類別。
  * 實作了依賴注入 (DI) 機制，強制要求子類別傳入明確的 Spreadsheet ID。
  * 包含快取機制與自動重試邏輯。
+ * @changelog
+ * - Increased cache TTL from 30s to 300s (minimal diff performance patch).
  */
 
 const config = require('../config');
@@ -29,7 +32,7 @@ const cache = {
     _globalLastWrite: { data: Date.now(), timestamp: 0 }
 };
 
-const CACHE_DURATION = 30 * 1000; 
+const CACHE_DURATION = 300 * 1000; 
 
 /**
  * 所有 Reader 的基礎類別

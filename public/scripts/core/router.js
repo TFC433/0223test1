@@ -1,8 +1,10 @@
 /**
- * @version 1.0.3
- * @date 2026-04-15
- * @purpose Hotfix：event-editor 最小改動 (參數傳遞 + 解除一次性載入鎖定) 
- * * [Phase 1] Relax SPA Cache: 移除 Router 強加的列表頁鎖定，消除對手動重整 (Manual Refresh) 的依賴
+ * File: public/scripts/core/router.js
+ * @version 1.0.4
+ * @date 2026-04-23
+ * @purpose Restore SPA cache flag for non-detail pages
+ * @changelog
+ * - Restored SPA cache behavior for non-detail pages to prevent redundant API fetches (minimal diff performance patch).
  */
 
 // public/scripts/core/router.js
@@ -166,9 +168,8 @@ const Router = {
                         }
                     }
 
-                    // [Phase 1] 移除 router 強加的列表頁 config.loaded = true 快取鎖定
-                    // 讓列表頁下次點擊時能自動 fetch 最新 SQL 資料
-                    // if (!isDetailPage && pageName !== 'event-editor') config.loaded = true;
+                    // Restore SPA cache flag for non-detail pages to prevent redundant API fetches
+                    if (!isDetailPage && pageName !== 'event-editor') config.loaded = true;
 
                 } catch (err) {
                     console.error(`[Router] 載入頁面失敗:`, err);
