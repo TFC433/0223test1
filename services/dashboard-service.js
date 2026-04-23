@@ -4,9 +4,11 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.6.3 Phase C-2.4 Non-blocking RAW Contacts
+ * @version 2.8.0 Phase D-2
  * @date 2026-04-23
  * @changelog
+ * - [PHASE D-2] backend dashboard range support added for safe analytical sections
+ * - [PHASE D-2] operational dashboard sections intentionally left unfiltered
  * - [PHASE C-2.4] RAW contacts dashboard stats made non-blocking
  * - [PHASE C-2.4] dashboard initial render no longer waits for Google Sheet contact stats
  * - [PHASE C-2.3] followUpCount moved toward SQL-first counting
@@ -67,8 +69,45 @@ class DashboardService {
         return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
     }
 
-    async getDashboardData() {
+    // [PHASE D-2] Helper to resolve global date range
+    _resolveDateRange(options) {
+        let start = null;
+        let end = null;
+        const now = new Date();
+
+        if (options.start) {
+            start = new Date(options.start);
+        }
+        if (options.end) {
+            end = new Date(options.end);
+            end.setHours(23, 59, 59, 999);
+        }
+
+        if (options.range) {
+            switch (options.range) {
+                case 'ytd':
+                    start = new Date(now.getFullYear(), 0, 1);
+                    end = null; // up to now
+                    break;
+                case '30d':
+                    start = new Date(now);
+                    start.setDate(start.getDate() - 30);
+                    end = null;
+                    break;
+                case 'all':
+                    start = null;
+                    end = null;
+                    break;
+            }
+        }
+        return { start, end };
+    }
+
+    async getDashboardData(options = {}) {
         console.log('📊 [DashboardService] 執行主儀表板資料整合 (Phase C-2.1 SQL-First Mode)...');
+
+        // [PHASE D-2] Resolve global range filters for SAFE analytical metrics
+        const { start: rangeStart, end: rangeEnd } = this._resolveDateRange(options);
 
         const today = new Date();
         const thisWeekId = this._getWeekId(today);
@@ -164,13 +203,47 @@ class DashboardService {
                 .in('current_stage', activeStages)
                 .or(`effective_last_activity.lt.${thresholdIso},and(effective_last_activity.is.null,created_time.lt.${thresholdIso})`);
 
-            const [opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes, followUpCountRes] = await Promise.all([
+            // [PHASE D-2] Safe Analytical Metrics Explicit Range Overrides
+            let rangeOppsPromise = Promise.resolve(null);
+            let rangeEventsPromise = Promise.resolve(null);
+
+            if (rangeStart || rangeEnd) {
+                let oppsQuery = supabase.from('opportunities').select('*', { count: 'exact', head: true });
+                let eventsQuery = supabase.from('event_logs').select('*', { count: 'exact', head: true });
+
+                if (rangeStart) {
+                    const startIso = rangeStart.toISOString();
+                    oppsQuery = oppsQuery.gte('created_time', startIso);
+                    eventsQuery = eventsQuery.gte('created_time', startIso);
+                }
+                if (rangeEnd) {
+                    const endIso = rangeEnd.toISOString();
+                    oppsQuery = oppsQuery.lte('created_time', endIso);
+                    eventsQuery = eventsQuery.lte('created_time', endIso);
+                }
+                
+                rangeOppsPromise = oppsQuery;
+                rangeEventsPromise = eventsQuery;
+            }
+
+            const [
+                opportunityStats, 
+                eventStats, 
+                eventActivities, 
+                wonCountRes, 
+                wonMonthRes, 
+                followUpCountRes, 
+                rangeOppsRes, 
+                rangeEventsRes
+            ] = await Promise.all([
                 opportunityStatsPromise,
                 eventStatsPromise,
                 eventActivityPromise,
                 wonCountPromise,
                 wonMonthPromise,
-                followUpCountPromise
+                followUpCountPromise,
+                rangeOppsPromise,
+                rangeEventsPromise
             ]);
 
             // [PHASE C-2.4] RAW Contacts moved to non-blocking endpoint
@@ -183,7 +256,9 @@ class DashboardService {
                 eventActivities,
                 wonCountRes,
                 wonMonthRes,
-                followUpCountRes
+                followUpCountRes,
+                rangeOppsRes,
+                rangeEventsRes
             ];
         })();
 
@@ -230,7 +305,17 @@ class DashboardService {
         const [activeOpportunitiesRaw, lightweightOppsRes, interactionActivities, recentInteractions] = batch1Result;
         
         const [calendarData, systemConfig, companies, recentContactsRaw] = batch2Result;
-        const [contactStats, opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes, followUpCountRes] = batch3Result;
+        const [
+            contactStats, 
+            opportunityStats, 
+            eventStats, 
+            eventActivities, 
+            wonCountRes, 
+            wonMonthRes, 
+            followUpCountRes,
+            rangeOppsRes,
+            rangeEventsRes
+        ] = batch3Result;
         const { thisWeeksEntries, thisWeekDetails } = weeklyResult;
 
         const normalize = (name) => (name || '').trim().toLowerCase();
@@ -324,10 +409,21 @@ class DashboardService {
             followUpCount = followUpCountRes.count || 0;
         }
 
+        // [PHASE D-2] Resolve final count metrics
+        let finalOppsCount = opportunityStats.total;
+        if (rangeOppsRes && !rangeOppsRes.error) {
+            finalOppsCount = rangeOppsRes.count;
+        }
+
+        let finalEventsCount = eventStats.total;
+        if (rangeEventsRes && !rangeEventsRes.error) {
+            finalEventsCount = rangeEventsRes.count;
+        }
+
         const stats = {
             contactsCount: contactStats.total,
-            opportunitiesCount: opportunityStats.total,
-            eventLogsCount: eventStats.total,
+            opportunitiesCount: finalOppsCount,
+            eventLogsCount: finalEventsCount,
             wonCount: wonCount,
             wonCountMonth: wonCountMonth,
             mtuCount: mtuCount,
@@ -358,8 +454,16 @@ class DashboardService {
 
         const kanbanData = this._prepareKanbanData(activeOpportunities, systemConfig);
         
-        // Relies on surgical recent SQL fetch
-        const recentActivity = this._prepareRecentActivity(recentInteractions, recentContactsRaw, lightweightOpps, companies, 5);
+        // Relies on surgical recent SQL fetch + [PHASE D-2] chronological JS boundary
+        const recentActivity = this._prepareRecentActivity(
+            recentInteractions, 
+            recentContactsRaw, 
+            lightweightOpps, 
+            companies, 
+            5,
+            rangeStart,
+            rangeEnd
+        );
         
         const thisWeekInfoForDashboard = {
             weekId: thisWeekId,
@@ -550,7 +654,7 @@ class DashboardService {
         return stageGroups;
     }
 
-    _prepareRecentActivity(recentInteractions, contactsLimitArray, opportunities, companies, limit) {
+    _prepareRecentActivity(recentInteractions, contactsLimitArray, opportunities, companies, limit, rangeStart, rangeEnd) {
         const contactFeed = contactsLimitArray.map(item => {
             const ts = new Date(item.createdTime);
             return { type: 'new_contact', timestamp: isNaN(ts.getTime()) ? 0 : ts.getTime(), data: item };
@@ -561,9 +665,17 @@ class DashboardService {
             return { type: 'interaction', timestamp: isNaN(ts.getTime()) ? 0 : ts.getTime(), data: item };
         });
 
-        const combinedFeed = [...interactionFeed, ...contactFeed]
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, limit);
+        let combinedFeed = [...interactionFeed, ...contactFeed];
+
+        // [PHASE D-2] Apply chronological boundary if explicit range exists
+        if (rangeStart) {
+            combinedFeed = combinedFeed.filter(item => item.timestamp >= rangeStart.getTime());
+        }
+        if (rangeEnd) {
+            combinedFeed = combinedFeed.filter(item => item.timestamp <= rangeEnd.getTime());
+        }
+
+        combinedFeed = combinedFeed.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
 
         // Account for both camelCase and snake_case based on caller hydration
         const opportunityMap = new Map(opportunities.map(opp => [opp.opportunityId || opp.opportunity_id, opp.opportunityName || opp.opportunity_name]));

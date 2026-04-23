@@ -1,8 +1,17 @@
+// ============================================================================
+// File: public/scripts/dashboard/dashboard.js
+// ============================================================================
 /**
  * public/scripts/dashboard/dashboard.js
- * @version 3.3.1 (Phase C-2.4)
+ * @version 3.4.1
  * @date 2026-04-23
  * @changelog
+ * - removed unfinished dashboard analytical range UI from production
+ * - preserved backend range capability for future use
+ * - stabilized dashboard for archive/release
+ * - [PHASE D-2] analytical dashboard range filter UI added (Rolled back)
+ * - [PHASE D-2] UI wired to backend safe-range API (Rolled back)
+ * - [PHASE D-2] operational widgets intentionally left unaffected
  * - RAW contacts dashboard stats made non-blocking
  * - dashboard initial render no longer waits for Google Sheet contact stats
  * - Phase 8.10 - Mutation-Driven Stale Refresh Strategy
@@ -41,6 +50,8 @@ const dashboardManager = {
         // 呼叫 UI 管家顯示全域 Loading
         if (window.DashboardUI) DashboardUI.showGlobalLoading('正在同步儀表板資料...');
 
+        // Note: Backend range filtering is supported via ?range=, ?start=, ?end=
+        // but UI controls have been removed for stabilization.
         const dashboardApiUrl = force ? `/api/dashboard?t=${Date.now()}` : '/api/dashboard';
 
         try {
@@ -115,7 +126,7 @@ const dashboardManager = {
                 window.CRM_APP.pageConfig['dashboard'].loaded = true;
             }
 
-            // [PHASE C-2.4] Non-blocking fetch for slow RAW contacts stats
+            // [PHASE C-2.4] Non-blocking fetch for slow RAW contacts stats (不受範圍過濾影響)
             authedFetch('/api/dashboard/contacts-stats').then(res => {
                 if (res.success && res.data) {
                     const elCount = document.getElementById('contacts-count');

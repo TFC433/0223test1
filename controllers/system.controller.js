@@ -3,11 +3,13 @@
 // ============================================================================
 /**
  * controllers/system.controller.js
- * @version 2.7.0 Phase C-2.4
+ * @version 2.8.0 Phase D-2
  * @date 2026-04-23
  * @changelog
- * - RAW contacts dashboard stats made non-blocking
- * - dashboard initial render no longer waits for Google Sheet contact stats
+ * - [PHASE D-2] backend dashboard range support added for safe analytical sections
+ * - [PHASE D-2] operational dashboard sections intentionally left unfiltered
+ * - [PHASE C-2.4] RAW contacts dashboard stats made non-blocking
+ * - [PHASE C-2.4] dashboard initial render no longer waits for Google Sheet contact stats
  * - Removed SystemController dashboard debug logs
  * * [Forensics Fix / Phase 8.3 Task] Added temporary debug logs for /api/dashboard handler.
  */
@@ -72,7 +74,14 @@ class SystemController {
     // 處理 GET /api/dashboard
     getDashboardData = async (req, res) => {
         try {
-            const data = await this.dashboardService.getDashboardData();
+            // [PHASE D-2] Extract range parameters for safe analytical sections
+            const options = {
+                range: req.query.range,
+                start: req.query.start,
+                end: req.query.end
+            };
+
+            const data = await this.dashboardService.getDashboardData(options);
             
             res.json({ success: true, data });
         } catch (error) {
