@@ -1,8 +1,12 @@
 // routes/system.routes.js
 /**
  * System Routes
- * * @version 5.1.0 (Phase 5 - Service Locator Pattern)
- * @date 2026-01-13
+ * * @version 5.2.0 (Phase C-2.4)
+ * @date 2026-04-23
+ * @changelog
+ * - RAW contacts dashboard stats made non-blocking
+ * - dashboard initial render no longer waits for Google Sheet contact stats
+ * - Phase 5 - Service Locator Pattern
  * @description 使用 req.app.get('services') 動態獲取 Controller 實例
  */
 
@@ -41,6 +45,11 @@ router.get('/system/status', (req, res, next) => {
 // GET /api/dashboard
 router.get('/dashboard', (req, res, next) => {
     getController(req).getDashboardData(req, res, next);
+});
+
+// [PHASE C-2.4] GET /api/dashboard/contacts-stats
+router.get('/dashboard/contacts-stats', (req, res, next) => {
+    getController(req).getDashboardContactStats(req, res, next);
 });
 
 // GET /api/contacts/dashboard

@@ -4,9 +4,15 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.6.0 Phase C-2.1-E MTU KPI Fix
+ * @version 2.6.3 Phase C-2.4 Non-blocking RAW Contacts
  * @date 2026-04-23
  * @changelog
+ * - [PHASE C-2.4] RAW contacts dashboard stats made non-blocking
+ * - [PHASE C-2.4] dashboard initial render no longer waits for Google Sheet contact stats
+ * - [PHASE C-2.3] followUpCount moved toward SQL-first counting
+ * - [PHASE C-2.3] reduced in-memory follow-up aggregation load with JS fallback
+ * - [PHASE C-2.2] Align SI KPI with has_activity-based logic
+ * - [PHASE C-2.2] Remove first_activity as primary SI activity condition
  * - [PHASE C-2.1-E] MTU KPI switched to has_activity-based visited logic
  * - [PHASE C-2.1-E] first_activity no longer used as the primary visited-MTU condition
  * - [PHASE C-2.1-D] MTU / SI activity aggregation moved to one SQL-first flow
@@ -116,10 +122,6 @@ class DashboardService {
 
         // --- Batch 3: SQL Aggregation Stats & RAW Contacts ---
         const batch3Promise = (async () => {
-            const rawContactsPromise = (this.contactService && this.contactService.contactRawReader)
-                ? this.contactService.contactRawReader.getContacts()
-                : Promise.resolve([]);
-                
             const opportunityStatsPromise = this.opportunitySqlReader.getOpportunityStats(startOfMonth);
             const eventStatsPromise = this.eventLogSqlReader.getEventLogStats(startOfMonth);
 
@@ -149,27 +151,30 @@ class DashboardService {
                 .or('current_stage.in.(受注,已成交),current_status.eq.已完成')
                 .gte('updated_time', startOfMonthIso);
 
-            const [rawContacts, opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes] = await Promise.all([
-                rawContactsPromise,
+            // [PHASE C-2.3] SQL-first Follow-up Count
+            const daysThreshold = (this.config.FOLLOW_UP && this.config.FOLLOW_UP.DAYS_THRESHOLD) || 7;
+            const activeStages = (this.config.FOLLOW_UP && this.config.FOLLOW_UP.ACTIVE_STAGES) || ['01_初步接觸', '02_需求確認', '03_提案報價', '04_談判修正'];
+            const sevenDaysAgo = new Date();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - daysThreshold);
+            const thresholdIso = sevenDaysAgo.toISOString();
+
+            const followUpCountPromise = supabase.from('opportunities')
+                .select('opportunity_id', { count: 'exact', head: true })
+                .eq('current_status', '進行中')
+                .in('current_stage', activeStages)
+                .or(`effective_last_activity.lt.${thresholdIso},and(effective_last_activity.is.null,created_time.lt.${thresholdIso})`);
+
+            const [opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes, followUpCountRes] = await Promise.all([
                 opportunityStatsPromise,
                 eventStatsPromise,
                 eventActivityPromise,
                 wonCountPromise,
-                wonMonthPromise
+                wonMonthPromise,
+                followUpCountPromise
             ]);
 
-            let rawTotal = 0;
-            let rawMonth = 0;
-            rawContacts.forEach(c => {
-                if (c.name || c.company) {
-                    rawTotal++;
-                    const ts = new Date(c.createdTime).getTime();
-                    if (!isNaN(ts) && ts >= startOfMonth.getTime()) {
-                        rawMonth++;
-                    }
-                }
-            });
-            const contactStats = { total: rawTotal, month: rawMonth };
+            // [PHASE C-2.4] RAW Contacts moved to non-blocking endpoint
+            const contactStats = { total: '...', month: 0 };
 
             return [
                 contactStats,
@@ -177,7 +182,8 @@ class DashboardService {
                 eventStats,
                 eventActivities,
                 wonCountRes,
-                wonMonthRes
+                wonMonthRes,
+                followUpCountRes
             ];
         })();
 
@@ -224,7 +230,7 @@ class DashboardService {
         const [activeOpportunitiesRaw, lightweightOppsRes, interactionActivities, recentInteractions] = batch1Result;
         
         const [calendarData, systemConfig, companies, recentContactsRaw] = batch2Result;
-        const [contactStats, opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes] = batch3Result;
+        const [contactStats, opportunityStats, eventStats, eventActivities, wonCountRes, wonMonthRes, followUpCountRes] = batch3Result;
         const { thisWeeksEntries, thisWeekDetails } = weeklyResult;
 
         const normalize = (name) => (name || '').trim().toLowerCase();
@@ -239,11 +245,15 @@ class DashboardService {
         // =================================================================
         let mtuCount = 0;
         let mtuNewMonth = 0;
-        let siCount = 0;
-        let siNewMonth = 0;
         const activeMtuNames = [];
         const inactiveMtuNames = [];
         let totalMtu = 0;
+
+        let siCount = 0;
+        let siNewMonth = 0;
+        const activeSiNames = [];
+        const inactiveSiNames = [];
+        let totalSi = 0;
 
         try {
             // 1. ONE SQL-First flow returning aggregated per-company activity.
@@ -283,9 +293,15 @@ class DashboardService {
                     }
                 }
 
-                if (isSi && isActive) {
-                    siCount++;
-                    if (isNewThisMonth) siNewMonth++;
+                if (isSi) {
+                    totalSi++;
+                    if (isActive) {
+                        siCount++;
+                        activeSiNames.push(name);
+                        if (isNewThisMonth) siNewMonth++;
+                    } else {
+                        inactiveSiNames.push(name);
+                    }
                 }
             });
         } catch (error) {
@@ -296,8 +312,17 @@ class DashboardService {
         const wonCount = wonCountRes ? (wonCountRes.count || 0) : 0;
         const wonCountMonth = wonMonthRes ? (wonMonthRes.count || 0) : 0;
 
-        // Passed directly to rely on SQL-computed metric
+        // Passed directly to rely on SQL-computed metric fallback
         const followUps = this._getFollowUpOpportunities(activeOpportunities);
+
+        // [PHASE C-2.3] SQL-first Follow-Up Count with JS Fallback
+        let followUpCount = 0;
+        if (followUpCountRes && followUpCountRes.error) {
+            console.warn('[DashboardService] SQL FollowUp count failed, falling back to JS:', followUpCountRes.error.message);
+            followUpCount = followUps.length;
+        } else if (followUpCountRes) {
+            followUpCount = followUpCountRes.count || 0;
+        }
 
         const stats = {
             contactsCount: contactStats.total,
@@ -316,9 +341,16 @@ class DashboardService {
                 activeNames: activeMtuNames,     
                 inactiveNames: inactiveMtuNames
             },
+            siDetails: {
+                totalSi: totalSi,
+                activeCount: siCount,
+                inactiveCount: inactiveSiNames.length,
+                activeNames: activeSiNames,
+                inactiveNames: inactiveSiNames
+            },
             todayEventsCount: calendarData.todayCount || 0,
             weekEventsCount: calendarData.weekCount || 0,
-            followUpCount: followUps.length,
+            followUpCount: followUpCount,
             contactsCountMonth: contactStats.month,
             opportunitiesCountMonth: opportunityStats.month,
             eventLogsCountMonth: eventStats.month,
@@ -344,6 +376,30 @@ class DashboardService {
             weeklyBusiness: thisWeeksEntries,
             thisWeekInfo: thisWeekInfoForDashboard
         };
+    }
+
+    // [PHASE C-2.4] Non-blocking raw contact stats fetch
+    async getRawContactStats() {
+        const today = new Date();
+        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        
+        const rawContacts = (this.contactService && this.contactService.contactRawReader)
+            ? await this.contactService.contactRawReader.getContacts()
+            : [];
+            
+        let rawTotal = 0;
+        let rawMonth = 0;
+        rawContacts.forEach(c => {
+            if (c.name || c.company) {
+                rawTotal++;
+                const ts = new Date(c.createdTime).getTime();
+                if (!isNaN(ts) && ts >= startOfMonth.getTime()) {
+                    rawMonth++;
+                }
+            }
+        });
+        
+        return { total: rawTotal, month: rawMonth };
     }
 
     async getCompaniesDashboardData() {

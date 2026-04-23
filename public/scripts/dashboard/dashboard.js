@@ -1,7 +1,11 @@
 /**
  * public/scripts/dashboard/dashboard.js
- * @version 3.3.0 (Phase 8.10 - Mutation-Driven Stale Refresh Strategy)
- * @date 2026-03-12
+ * @version 3.3.1 (Phase C-2.4)
+ * @date 2026-04-23
+ * @changelog
+ * - RAW contacts dashboard stats made non-blocking
+ * - dashboard initial render no longer waits for Google Sheet contact stats
+ * - Phase 8.10 - Mutation-Driven Stale Refresh Strategy
  * @description Dashboard UI Controller. 
  * * [Performance Fix] Removed redundant client-side fetch of /api/interactions/all. 
  * * effectiveLastActivity is now strictly sourced from backend SQL aggregation with strict null/NaN guarding.
@@ -110,6 +114,17 @@ const dashboardManager = {
             if (window.CRM_APP && window.CRM_APP.pageConfig && window.CRM_APP.pageConfig['dashboard']) {
                 window.CRM_APP.pageConfig['dashboard'].loaded = true;
             }
+
+            // [PHASE C-2.4] Non-blocking fetch for slow RAW contacts stats
+            authedFetch('/api/dashboard/contacts-stats').then(res => {
+                if (res.success && res.data) {
+                    const elCount = document.getElementById('contacts-count');
+                    if (elCount) elCount.textContent = res.data.total;
+                    if (window.DashboardWidgets && typeof window.DashboardWidgets._updateTrend === 'function') {
+                        window.DashboardWidgets._updateTrend('contacts-trend', res.data.month);
+                    }
+                }
+            }).catch(err => console.error('[Dashboard] 載入潛在客戶統計失敗:', err));
 
         } catch (error) {
             if (error.message !== 'Unauthorized') {

@@ -3,9 +3,11 @@
 // ============================================================================
 /**
  * controllers/system.controller.js
- * @version [Patch] Dashboard DEBUG cleanup
- * @date 2026-03-12
+ * @version 2.7.0 Phase C-2.4
+ * @date 2026-04-23
  * @changelog
+ * - RAW contacts dashboard stats made non-blocking
+ * - dashboard initial render no longer waits for Google Sheet contact stats
  * - Removed SystemController dashboard debug logs
  * * [Forensics Fix / Phase 8.3 Task] Added temporary debug logs for /api/dashboard handler.
  */
@@ -75,6 +77,16 @@ class SystemController {
             res.json({ success: true, data });
         } catch (error) {
             handleApiError(res, error, 'Get Dashboard');
+        }
+    };
+
+    // [PHASE C-2.4] 處理 GET /api/dashboard/contacts-stats
+    getDashboardContactStats = async (req, res) => {
+        try {
+            const data = await this.dashboardService.getRawContactStats();
+            res.json({ success: true, data });
+        } catch (error) {
+            handleApiError(res, error, 'Get Dashboard Contact Stats');
         }
     };
 
