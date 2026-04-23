@@ -1,4 +1,8 @@
-// public/scripts/internal-ops/internal-ops-dev-projects.js
+// File: public/scripts/internal-ops/internal-ops-dev-projects.js
+// Version: 1.0.11
+// Date: 2026-04-23
+// Changelog:
+// - [1.0.11] Removed safe debug console logs from getConfigColor function.
 /**
  * @version 1.0.10
  * @date 2026-04-22
@@ -30,45 +34,19 @@ window.renderDevProjects = function(data) {
 
     // [Logic Preserved] Config mapping and trace logs
     function getConfigColor(type, text, fallbackHex) {
-        console.group('[DevProjects][getConfigColor]');
-        console.log('type:', type);
-        console.log('text (status):', text);
-
         if (!text || text === '-') {
-            console.warn('Text is empty or "-", using FALLBACK color:', fallbackHex);
-            console.groupEnd();
             return window.buildColorSet(fallbackHex);
         }
         
         const list = window.__systemConfig[type] || [];
         
-        console.log('config list:', list);
         list.forEach(i => {
-            console.log('checking item:', {
-                note: i.note,
-                value: i.value,
-                style: i.style
-            });
         });
 
         const item = list.find(i => {
             const match = (i.note === text || i.value === text);
-            if (match) {
-                console.log('MATCH FOUND:', i);
-            }
             return match;
         });
-
-        if (!item) {
-            console.warn('NO MATCH FOUND for status:', text);
-        }
-
-        if (item && item.style) {
-            console.log('Using CONFIG color:', item.style);
-        } else {
-            console.warn('Using FALLBACK color:', fallbackHex);
-        }
-        console.groupEnd();
 
         if (item && item.style) {
             return window.buildColorSet(item.style);

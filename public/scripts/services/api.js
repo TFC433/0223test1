@@ -1,3 +1,8 @@
+// File: public/scripts/services/api.js
+// Version: 1.0.1
+// Date: 2026-04-23
+// Changelog:
+// - [1.0.1] Removed request tracing console log.
 // public/scripts/services/api.js
 // 職責：專門處理 API 請求、認證 Token、錯誤處理以及流量控制 (Traffic Control)
 
@@ -72,7 +77,6 @@ async function executeFetch(url, options, attempts) {
     const isWriteOperation = ['POST', 'PUT', 'DELETE'].includes(method);
 
     try {
-        console.log(`[authedFetch] Requesting: ${method} ${url}`);
         const response = await fetch(url, { ...options, headers });
 
         // --- Handle 429 Too Many Requests (Exponential Backoff) ---
