@@ -1,8 +1,12 @@
 // public/scripts/internal-ops/internal-ops-dev-projects.js
 /**
- * @version 1.0.12
+ * @version 1.0.16
  * @date 2026-04-24
  * @changelog
+ * - [1.0.16] UI Layout Tuning Patch: column width tuning (fixed devStage/status), limit collaborators display (<=2 +N), font-size reduction for text heavy cols, strictly no layout logic changes.
+ * - [1.0.15] UI Polish Patch: implemented conditional operation column. column appears in operation mode only. toggle moved to top control. strictly no data changes, sorting logic preserved.
+ * - [1.0.14] UI Polish Patch: merge assignee and collaborators into a single "人員" column with a schedule-like label/value layout. Implemented conditional collaborators row so it hides when empty. strictly no data changes.
+ * - [1.0.13] UI polish patch: Renamed header to "案件名稱", add sort affordance (↕), enforce nowrap + ellipsis for case name and opportunity cells. strictly no logic changes.
  * - [1.0.12] Feature Patch: Implemented clickable header sorting from scratch for Dev Projects. Uses System Config 'order' field for accurate sorting. Removed Notes column to optimize layout. No backend changes.
  * - [1.0.11] Removed safe debug console logs from getConfigColor function.
  * - [1.0.10] UI Revert Patch: Reverted Dev Projects list display to the simpler baseline reference style.
@@ -266,57 +270,79 @@ window.renderDevProjects = function(data) {
 
         let oppHtml = '-';
         if (item.assigneeCode && item.projectName) {
-            oppHtml = `<a href="#" style="color: #1976d2; text-decoration: none; font-weight: 600;" onclick="event.preventDefault(); window.CRM_APP.navigateTo('opportunity-details', {opportunityId: '${item.assigneeCode}'})">${item.projectName}</a>`;
+            oppHtml = `<a href="#" title="${item.projectName || ''}" style="color: #1976d2; text-decoration: none; font-weight: 600;" onclick="event.preventDefault(); window.CRM_APP.navigateTo('opportunity-details', {opportunityId: '${item.assigneeCode}'})">${item.projectName}</a>`;
         } else if (item.projectName) {
-            oppHtml = `<strong>${item.projectName}</strong>`;
+            oppHtml = `<strong title="${item.projectName || ''}">${item.projectName}</strong>`;
         }
 
-        let collabsHtml = '-';
+        let personnelHtml = `<div style="display:flex; flex-direction:column; gap:4px; min-width:120px;">`;
+        const assigneeText = item.assigneeName || '-';
+        personnelHtml += `
+            <div style="display:grid; grid-template-columns:64px 1fr; column-gap:8px; font-size:0.8rem;">
+                <span style="color:#9ca3af; white-space:nowrap;">負責人</span>
+                <span style="color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${assigneeText}">${assigneeText}</span>
+            </div>
+        `;
+
         if (item.collaborators) {
             const names = item.collaborators.split('｜').map(s => s.trim()).filter(Boolean);
             if (names.length > 0) {
-                collabsHtml = `<div style="font-size: 0.85rem; max-width: 150px; overflow-wrap: break-word; line-height: 1.4;">${names.join('、')}</div>`;
+                const fullJoinedNames = names.join('、');
+                let displayNames = fullJoinedNames;
+                if (names.length > 2) {
+                    displayNames = names.slice(0, 2).join('、') + ` +${names.length - 2}`;
+                }
+                personnelHtml += `
+                    <div style="display:grid; grid-template-columns:64px 1fr; column-gap:8px; font-size:0.8rem;">
+                        <span style="color:#9ca3af; white-space:nowrap;">協作成員</span>
+                        <span style="color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${fullJoinedNames}">${displayNames}</span>
+                    </div>
+                `;
             }
         }
+        personnelHtml += `</div>`;
 
         // remove notes column visually
         return `
         <tr>
             <td>${index + 1}</td>
-            <td>${item.productName || '-'}</td>
-            <td>${oppHtml}</td>
-            <td>${item.featureName || '-'}</td>
-            <td style="white-space: nowrap;">${item.assigneeName || '-'}</td>
-            <td>${collabsHtml}</td>
-            <td>${getStageBadge(item.devStage || '-')}</td>
-            <td>${getStatusBadge(item.status || '-')}</td>
+            <td style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; font-size: 0.85rem;" title="${item.productName || ''}">${item.productName || '-'}</td>
+            <td style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; font-size: 0.85rem;">${oppHtml}</td>
+            <td style="font-size: 0.85rem;">${item.featureName || '-'}</td>
+            <td>${personnelHtml}</td>
+            <td style="width: 100px;">${getStageBadge(item.devStage || '-')}</td>
+            <td style="width: 90px;">${getStatusBadge(item.status || '-')}</td>
             <td>${scheduleHtml}</td>
             <td>${getCombinedProgressHtml(item.progress, item.startDate, item.estCompletionDate)}</td>
-            <td style="vertical-align: middle; text-align: center;">${actionHtml}</td>
+            ${window.__isDevActionMode ? `<td style="vertical-align: middle; text-align: center;">${actionHtml}</td>` : ''}
         </tr>
     `}).join('');
 
     const getSortIcon = (field) => {
-        if (window.__devProjectsSortState.field !== field) return '';
+        if (window.__devProjectsSortState.field !== field) return ' ↕';
         return window.__devProjectsSortState.direction === 'asc' ? ' ↑' : ' ↓';
     };
 
     return `
-        <div style="font-size: 0.9rem; color: #6b7280; margin-bottom: 12px; font-weight: 500; padding: 0 4px;">共 ${data.length} 筆</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px;">
+            <div style="font-size: 0.9rem; color: #6b7280; font-weight: 500;">共 ${data.length} 筆</div>
+            <button onclick="window.toggleDevTableActions()" class="internal-ops-btn" style="padding: 4px 10px; font-size: 0.8rem; cursor: pointer; border: 1px solid #d1d5db; background: #fff; color: #374151; font-weight: 500; border-radius: 4px;">
+                ${window.__isDevActionMode ? '結束操作' : '操作模式'}
+            </button>
+        </div>
         <table class="internal-ops-table">
             <thead>
                 <tr>
                     <th style="width: 50px;">#</th>
-                    <th>開發案件名稱</th>
+                    <th>案件名稱</th>
                     <th>關聯機會</th>
                     <th>關聯功能</th>
-                    <th>負責人</th>
-                    <th>協作成員</th>
-                    <th onclick="window.handleDevProjectSort('devStage', event)" style="cursor:pointer; user-select:none;" title="點擊依開發階段排序">開發階段<span style="color:#1976d2;">${getSortIcon('devStage')}</span></th>
-                    <th onclick="window.handleDevProjectSort('status', event)" style="cursor:pointer; user-select:none;" title="點擊依狀態排序">狀態<span style="color:#1976d2;">${getSortIcon('status')}</span></th>
+                    <th>人員</th>
+                    <th onclick="window.handleDevProjectSort('devStage', event)" style="width: 100px; cursor:pointer; user-select:none;" title="點擊依開發階段排序">開發階段<span style="color:#1976d2;">${getSortIcon('devStage')}</span></th>
+                    <th onclick="window.handleDevProjectSort('status', event)" style="width: 90px; cursor:pointer; user-select:none;" title="點擊依狀態排序">狀態<span style="color:#1976d2;">${getSortIcon('status')}</span></th>
                     <th>開發時程</th>
                     <th>進度</th>
-                    <th onclick="window.toggleDevTableActions()" style="cursor: pointer; user-select: none; width: 70px; text-align: center; color: #1976d2; white-space: nowrap;" title="點擊切換編輯模式">操作 ${window.__isDevActionMode ? '−' : '+'}</th>
+                    ${window.__isDevActionMode ? '<th style="width: 70px; text-align: center;">操作</th>' : ''}
                 </tr>
             </thead>
             <tbody>${rows}</tbody>
