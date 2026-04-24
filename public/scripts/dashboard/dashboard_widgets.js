@@ -1,4 +1,10 @@
-// public/scripts/dashboard/dashboard_widgets.js
+/**
+ * public/scripts/dashboard/dashboard_widgets.js
+ * @version 1.1.0 Phase C-2.5 (Patch: Tooltip Lazy Load)
+ * @date 2026-04-24
+ * @changelog
+ * - Implemented client-side memory cache and lazy fetching for MTU and SI tooltip hover states.
+ */
 
 const DashboardWidgets = {
     /**
@@ -30,11 +36,15 @@ const DashboardWidgets = {
         
         // 若有 MTU 詳細資料，則渲染浮動視窗
         if (stats.mtuDetails) {
-            this._renderMtuTooltip(stats.mtuDetails);
+            this._setupLazyTooltip('mtu', 'mtu-count', stats.mtuDetails);
         }
 
         updateText('si-count', stats.siCount || 0);
         this._updateTrend('si-trend', stats.siCountMonth);
+        
+        if (stats.siDetails) {
+            this._setupLazyTooltip('si', 'si-count', stats.siDetails);
+        }
         
         // 確保樣式存在
         this._ensureStyles();
@@ -45,35 +55,30 @@ const DashboardWidgets = {
         if (el) el.textContent = value > 0 ? `+ ${value} 本月` : '';
     },
 
-    /**
-     * 渲染 MTU 的浮動資訊視窗
-     */
-    _renderMtuTooltip(details) {
-        const mtuCountEl = document.getElementById('mtu-count');
-        if (!mtuCountEl) return;
+    _companyActivityDetailsCache: { mtu: null, si: null },
+
+    _setupLazyTooltip(type, elementId, details) {
+        const countEl = document.getElementById(elementId);
+        if (!countEl) return;
 
         // 找到卡片容器 (.stat-card)
-        const card = mtuCountEl.closest('.stat-card');
+        const card = countEl.closest('.stat-card');
         if (!card) return;
 
         // 清除舊的 Tooltip
         const oldTooltip = card.querySelector('.custom-tooltip');
         if (oldTooltip) oldTooltip.remove();
 
-        // 準備未互動名單 (只顯示前 5 筆，避免太長)
-        const maxDisplay = 5;
-        const inactiveListHtml = details.inactiveNames.slice(0, maxDisplay)
-            .map(name => `<li>❌ ${name}</li>`).join('');
-        const remainingCount = details.inactiveNames.length - maxDisplay;
-        const moreHtml = remainingCount > 0 ? `<li class="more">...還有 ${remainingCount} 家</li>` : '';
+        const title = type === 'mtu' ? 'MTU 拜訪概況' : 'SI 拜訪概況';
+        const totalTarget = details.totalMtu !== undefined ? details.totalMtu : details.totalSi;
 
         // 建立 Tooltip HTML
         const tooltip = document.createElement('div');
         tooltip.className = 'custom-tooltip';
         tooltip.innerHTML = `
-            <div class="tooltip-header">MTU 拜訪概況</div>
+            <div class="tooltip-header">${title}</div>
             <div class="tooltip-row">
-                <span>總目標家數:</span> <strong>${details.totalMtu}</strong>
+                <span>總目標家數:</span> <strong>${totalTarget}</strong>
             </div>
             <div class="tooltip-row">
                 <span>已互動:</span> <span class="text-success">${details.activeCount}</span>
@@ -81,21 +86,56 @@ const DashboardWidgets = {
             <div class="tooltip-row">
                 <span>未互動:</span> <span class="text-danger">${details.inactiveCount}</span>
             </div>
-            ${details.inactiveCount > 0 ? `
-                <div class="tooltip-divider"></div>
-                <div class="tooltip-subtitle">未互動名單 (前 ${maxDisplay} 筆):</div>
-                <ul class="tooltip-list">
-                    ${inactiveListHtml}
-                    ${moreHtml}
-                </ul>
-            ` : '<div class="tooltip-divider"></div><div class="tooltip-subtitle text-success">🎉 全部皆已互動！</div>'}
+            <div class="tooltip-divider"></div>
+            <div class="tooltip-subtitle">${details.inactiveCount > 0 ? '未互動名單 (載入中...)' : '<span class="text-success">🎉 全部皆已互動！</span>'}</div>
+            <ul class="tooltip-list" id="lazy-list-${type}"></ul>
         `;
 
         // 將卡片設為 relative 以便定位
         card.style.position = 'relative';
-        // 【修改】將 cursor: help 改為 pointer，移除問號樣式
         card.style.cursor = 'pointer'; 
         card.appendChild(tooltip);
+
+        if (details.inactiveCount > 0) {
+            let hasHovered = false;
+            card.addEventListener('mouseenter', async () => {
+                if (hasHovered) return;
+                hasHovered = true;
+                
+                const listEl = tooltip.querySelector(`#lazy-list-${type}`);
+                const subtitleEl = tooltip.querySelector('.tooltip-subtitle');
+                
+                if (this._companyActivityDetailsCache[type]) {
+                    this._renderTooltipList(listEl, subtitleEl, this._companyActivityDetailsCache[type]);
+                    return;
+                }
+                
+                try {
+                    const res = await authedFetch(`/api/dashboard/company-activity-details?type=${type}`);
+                    if (res.success && res.data) {
+                        this._companyActivityDetailsCache[type] = res.data;
+                        this._renderTooltipList(listEl, subtitleEl, res.data);
+                    } else {
+                        throw new Error('Fetch failed');
+                    }
+                } catch (e) {
+                    subtitleEl.textContent = '未互動名單 (載入失敗)';
+                    listEl.innerHTML = '<li class="text-danger">名單載入失敗</li>';
+                    hasHovered = false; // Allow retry on next hover
+                }
+            });
+        }
+    },
+
+    _renderTooltipList(listEl, subtitleEl, data) {
+        const maxDisplay = 5;
+        const inactiveListHtml = data.inactiveNames.slice(0, maxDisplay)
+            .map(name => `<li>❌ ${name}</li>`).join('');
+        const remainingCount = data.inactiveNames.length - maxDisplay;
+        const moreHtml = remainingCount > 0 ? `<li class="more">...還有 ${remainingCount} 家</li>` : '';
+        
+        subtitleEl.textContent = `未互動名單 (前 ${maxDisplay} 筆):`;
+        listEl.innerHTML = inactiveListHtml + moreHtml;
     },
 
     /**

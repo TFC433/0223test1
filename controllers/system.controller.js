@@ -3,9 +3,11 @@
 // ============================================================================
 /**
  * controllers/system.controller.js
- * @version 2.8.0 Phase D-2
- * @date 2026-04-23
+ * @version 2.8.2 Phase C-2.5 (Patch: Tooltip Lazy Load)
+ * @date 2026-04-24
  * @changelog
+ * - Added getDashboardCompanyActivityDetails for lazy fetching MTU/SI activity details.
+ * - Added hook to invalidate DashboardService RAW contact cache on force refresh.
  * - [PHASE D-2] backend dashboard range support added for safe analytical sections
  * - [PHASE D-2] operational dashboard sections intentionally left unfiltered
  * - [PHASE C-2.4] RAW contacts dashboard stats made non-blocking
@@ -53,6 +55,12 @@ class SystemController {
     invalidateCache = async (req, res) => {
         try {
             const result = await this.systemService.invalidateCache();
+            
+            // [PHASE C-2.4 PATCH] Invalidate Dashboard RAW cache on global force refresh
+            if (this.dashboardService && typeof this.dashboardService.invalidateRawContactStatsCache === 'function') {
+                this.dashboardService.invalidateRawContactStatsCache();
+            }
+
             res.json(result);
         } catch (error) {
             handleApiError(res, error, 'Invalidate Cache');
@@ -96,6 +104,20 @@ class SystemController {
             res.json({ success: true, data });
         } catch (error) {
             handleApiError(res, error, 'Get Dashboard Contact Stats');
+        }
+    };
+
+    // 處理 GET /api/dashboard/company-activity-details
+    getDashboardCompanyActivityDetails = async (req, res) => {
+        try {
+            const { type } = req.query;
+            if (type !== 'mtu' && type !== 'si') {
+                return res.status(400).json({ success: false, message: 'Invalid type' });
+            }
+            const data = await this.dashboardService.getCompanyActivityDetails(type);
+            res.json({ success: true, data });
+        } catch (error) {
+            handleApiError(res, error, 'Get Company Activity Details');
         }
     };
 

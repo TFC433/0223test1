@@ -4,9 +4,13 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.8.0 Phase D-2
- * @date 2026-04-23
+ * @version 2.8.2 Phase C-2.5 (Patch: Tooltip Lazy Load)
+ * @date 2026-04-24
  * @changelog
+ * - Implemented MTU/SI details lazy loading logic (getCompanyActivityDetails).
+ * - Removed activeNames/inactiveNames array construction from main dashboard payload to reduce bloat.
+ * - Added in-memory TTL cache for RAW contact stats to prevent O(N) hydration loop on every load.
+ * - Added invalidateRawContactStatsCache() hook for global cache invalidation.
  * - [PHASE D-2] backend dashboard range support added for safe analytical sections
  * - [PHASE D-2] operational dashboard sections intentionally left unfiltered
  * - [PHASE C-2.4] RAW contacts dashboard stats made non-blocking
@@ -58,6 +62,16 @@ class DashboardService {
         this.companySqlReader = companySqlReader;
         this.opportunitySqlReader = opportunitySqlReader;
         this.systemService = systemService;
+
+        // [PHASE C-2.4 PATCH] In-memory TTL Cache for RAW Contact Stats
+        this._rawContactStatsCache = null;
+        this._rawContactStatsCacheTime = 0;
+        this._RAW_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+    }
+
+    invalidateRawContactStatsCache() {
+        this._rawContactStatsCache = null;
+        this._rawContactStatsCacheTime = 0;
     }
 
     _getWeekId(date) {
@@ -330,14 +344,12 @@ class DashboardService {
         // =================================================================
         let mtuCount = 0;
         let mtuNewMonth = 0;
-        const activeMtuNames = [];
-        const inactiveMtuNames = [];
+        let inactiveMtuCount = 0;
         let totalMtu = 0;
 
         let siCount = 0;
         let siNewMonth = 0;
-        const activeSiNames = [];
-        const inactiveSiNames = [];
+        let inactiveSiCount = 0;
         let totalSi = 0;
 
         try {
@@ -356,7 +368,6 @@ class DashboardService {
 
             // 2. Node.js only formats the final stats from the aggregated company rows
             safeTargets.forEach(comp => {
-                const name = comp.company_name;
                 const isMtu = isStrictMTU(comp.company_type);
                 const isSi = isSI(comp.company_type);
                 
@@ -371,10 +382,9 @@ class DashboardService {
                     totalMtu++;
                     if (isActive) {
                         mtuCount++;
-                        activeMtuNames.push(name);
                         if (isNewThisMonth) mtuNewMonth++;
                     } else {
-                        inactiveMtuNames.push(name);
+                        inactiveMtuCount++;
                     }
                 }
 
@@ -382,10 +392,9 @@ class DashboardService {
                     totalSi++;
                     if (isActive) {
                         siCount++;
-                        activeSiNames.push(name);
                         if (isNewThisMonth) siNewMonth++;
                     } else {
-                        inactiveSiNames.push(name);
+                        inactiveSiCount++;
                     }
                 }
             });
@@ -433,16 +442,12 @@ class DashboardService {
             mtuDetails: {
                 totalMtu: totalMtu,
                 activeCount: mtuCount,
-                inactiveCount: inactiveMtuNames.length,
-                activeNames: activeMtuNames,     
-                inactiveNames: inactiveMtuNames
+                inactiveCount: inactiveMtuCount
             },
             siDetails: {
                 totalSi: totalSi,
                 activeCount: siCount,
-                inactiveCount: inactiveSiNames.length,
-                activeNames: activeSiNames,
-                inactiveNames: inactiveSiNames
+                inactiveCount: inactiveSiCount
             },
             todayEventsCount: calendarData.todayCount || 0,
             weekEventsCount: calendarData.weekCount || 0,
@@ -484,6 +489,11 @@ class DashboardService {
 
     // [PHASE C-2.4] Non-blocking raw contact stats fetch
     async getRawContactStats() {
+        const now = Date.now();
+        if (this._rawContactStatsCache && (now - this._rawContactStatsCacheTime) < this._RAW_CACHE_TTL) {
+            return this._rawContactStatsCache;
+        }
+
         const today = new Date();
         const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
         
@@ -503,7 +513,10 @@ class DashboardService {
             }
         });
         
-        return { total: rawTotal, month: rawMonth };
+        this._rawContactStatsCache = { total: rawTotal, month: rawMonth };
+        this._rawContactStatsCacheTime = now;
+        
+        return this._rawContactStatsCache;
     }
 
     async getCompaniesDashboardData() {
@@ -607,6 +620,42 @@ class DashboardService {
                 trend: this._prepareTrendData(contacts),
             }
         };
+    }
+
+    // [PHASE C-2.5 PATCH] Lazy load endpoint for MTU/SI tooltips
+    async getCompanyActivityDetails(type) {
+        if (type !== 'mtu' && type !== 'si') {
+            throw new Error('Invalid company activity type');
+        }
+
+        const { data: targetCompanies, error } = await supabase
+            .from('v_company_activity_summary')
+            .select('company_name, company_type, has_activity')
+            .or('company_type.ilike.%mtu%,company_type.ilike.%si%,company_type.ilike.%系統整合%,company_type.ilike.%system integrator%');
+
+        if (error) throw new Error('[DashboardService] MTU/SI details fetch error: ' + error.message);
+
+        const normalize = (name) => (name || '').trim().toLowerCase();
+        const isStrictMTU = (t) => normalize(t) === 'mtu';
+        const isSI = (t) => /SI|系統整合|System Integrator/i.test(t || '');
+
+        let totalCount = 0, activeCount = 0, inactiveCount = 0;
+        const activeNames = [], inactiveNames = [];
+
+        (targetCompanies || []).forEach(comp => {
+            const isMtu = isStrictMTU(comp.company_type);
+            const isSi = isSI(comp.company_type);
+            if ((type === 'mtu' && isMtu) || (type === 'si' && isSi)) {
+                totalCount++;
+                if (comp.has_activity === true) {
+                    activeCount++; activeNames.push(comp.company_name);
+                } else {
+                    inactiveCount++; inactiveNames.push(comp.company_name);
+                }
+            }
+        });
+
+        return { totalCount, activeCount, inactiveCount, activeNames, inactiveNames };
     }
 
     // --- 內部資料處理函式 ---

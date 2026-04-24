@@ -1,9 +1,10 @@
 // routes/system.routes.js
 /**
  * System Routes
- * * @version 5.2.0 (Phase C-2.4)
- * @date 2026-04-23
+ * @version 5.2.1 (Phase C-2.5)
+ * @date 2026-04-24
  * @changelog
+ * - Added lazy load endpoint for company activity details.
  * - RAW contacts dashboard stats made non-blocking
  * - dashboard initial render no longer waits for Google Sheet contact stats
  * - Phase 5 - Service Locator Pattern
@@ -50,6 +51,11 @@ router.get('/dashboard', (req, res, next) => {
 // [PHASE C-2.4] GET /api/dashboard/contacts-stats
 router.get('/dashboard/contacts-stats', (req, res, next) => {
     getController(req).getDashboardContactStats(req, res, next);
+});
+
+// GET /api/dashboard/company-activity-details
+router.get('/dashboard/company-activity-details', (req, res, next) => {
+    getController(req).getDashboardCompanyActivityDetails(req, res, next);
 });
 
 // GET /api/contacts/dashboard
