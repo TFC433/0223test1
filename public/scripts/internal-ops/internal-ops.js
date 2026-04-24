@@ -2,9 +2,11 @@
 /**
  * public/scripts/internal-ops/internal-ops.js
  * 內部運營與進度追蹤 前端模組 - 頁面核心與模態框外殼 (Phase 4.8)
- * @version 1.8.7
- * @date 2026-04-22
+ * @version 1.8.9
+ * @date 2026-04-24
  * @changelog
+ * - [1.8.9] UI Fix Patch: Removed extra inline padding from internal-ops-container to fix double padding issue and align page width with other modules.
+ * - [1.8.8] UI Polish Patch: Renamed Dev Projects section title to "開發 / 支援案件追蹤".
  * - [1.8.7] Debug Patch: Injected focused trace logs for dp-status to monitor data flow consistency from config to submit payload.
  * - [1.8.6] Debug Patch: Hardened dp-status restore logic with string trimming.
  * - [1.8.5] Logic Patch: Aligned dp-status modal population strictly with dp-devStage, removing all fallback and legacy "(保留)" logic.
@@ -54,11 +56,11 @@ window.loadInternalOpsPage = async function(params) {
 
     if (!pageContainer.querySelector('.internal-ops-container')) {
         pageContainer.innerHTML = `
-            <div class="internal-ops-container dashboard-grid-flexible" style="display: flex; flex-direction: column; gap: 24px; padding: 24px;">
+            <div class="internal-ops-container dashboard-grid-flexible" style="display: flex; flex-direction: column; gap: 24px;">
                 
                 <div class="dashboard-widget internal-ops-widget" style="width: 100%;">
                     <div class="widget-header internal-ops-header">
-                        <h2 class="widget-title">開發案件追蹤</h2>
+                        <h2 class="widget-title">開發 / 支援案件追蹤</h2>
                         <button class="action-btn primary btn-sm" onclick="openDevProjectModal()">
                             <span class="btn-text">新增</span>
                         </button>
