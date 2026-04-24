@@ -1,13 +1,11 @@
-// File: public/scripts/internal-ops/internal-ops-dev-projects.js
-// Version: 1.0.11
-// Date: 2026-04-23
-// Changelog:
-// - [1.0.11] Removed safe debug console logs from getConfigColor function.
+// public/scripts/internal-ops/internal-ops-dev-projects.js
 /**
- * @version 1.0.10
- * @date 2026-04-22
+ * @version 1.0.12
+ * @date 2026-04-24
  * @changelog
- * - [1.0.10] UI Revert Patch: Reverted Dev Projects list display to the simpler baseline reference style. Removed scoped CSS wrappers, fixed table layouts, and strict text truncations, while fully preserving all current logic (working-days calculation, config mapping, opportunity linking, and action toggles).
+ * - [1.0.12] Feature Patch: Implemented clickable header sorting from scratch for Dev Projects. Uses System Config 'order' field for accurate sorting. Removed Notes column to optimize layout. No backend changes.
+ * - [1.0.11] Removed safe debug console logs from getConfigColor function.
+ * - [1.0.10] UI Revert Patch: Reverted Dev Projects list display to the simpler baseline reference style.
  * - [1.0.9] UI Polish Patch: Moved record count to the right, fixed schedule column truncation.
  * - [1.0.8] UI Stabilization Patch: Applied table-layout fixed, defined key column widths, enforced ellipsis.
  * - [1.0.7] UI Stabilization Patch: Isolated CSS scope, enforced nowrap table layout.
@@ -21,6 +19,33 @@
  * @description 負責「開發案件追蹤」區塊的資料渲染與局部互動邏輯
  */
 
+// frontend sort state
+if (typeof window.__devProjectsSortState === 'undefined') {
+    window.__devProjectsSortState = {
+        field: null,
+        direction: 'asc'
+    };
+}
+
+window.handleDevProjectSort = function(field, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    if (window.__devProjectsSortState.field === field) {
+        window.__devProjectsSortState.direction = window.__devProjectsSortState.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        window.__devProjectsSortState.field = field;
+        window.__devProjectsSortState.direction = 'asc';
+    }
+
+    const container = document.getElementById('internal-ops-dev-projects-content');
+    if (container && window.__internalOpsDevProjectsData) {
+        container.innerHTML = window.renderDevProjects(window.__internalOpsDevProjectsData);
+    }
+};
+
 window.toggleDevTableActions = function() {
     window.__isDevActionMode = !window.__isDevActionMode;
     const container = document.getElementById('internal-ops-dev-projects-content');
@@ -31,6 +56,41 @@ window.toggleDevTableActions = function() {
 
 window.renderDevProjects = function(data) {
     window.__internalOpsDevProjectsData = data; 
+
+    // config-driven sort order helper
+    const sysConfig = window.__systemConfig || {};
+    function getSortOrder(type, val) {
+        if (!val) return 9999;
+        const list = sysConfig[type] || [];
+        const match = list.find(i => i.value === val || i.note === val);
+        // legacy fallback = 9999
+        return match?.order ?? 9999;
+    }
+
+    // single active sort mode, no backend changes
+    const sortedData = [...data];
+
+    if (window.__devProjectsSortState.field) {
+        sortedData.sort((a, b) => {
+            let orderA = 9999;
+            let orderB = 9999;
+
+            if (window.__devProjectsSortState.field === 'devStage') {
+                orderA = getSortOrder('開發階段', a.devStage);
+                orderB = getSortOrder('開發階段', b.devStage);
+            }
+
+            if (window.__devProjectsSortState.field === 'status') {
+                orderA = getSortOrder('開發狀態', a.status);
+                orderB = getSortOrder('開發狀態', b.status);
+            }
+
+            if (orderA === orderB) return 0;
+            
+            const diff = orderA - orderB;
+            return window.__devProjectsSortState.direction === 'asc' ? diff : -diff;
+        });
+    }
 
     // [Logic Preserved] Config mapping and trace logs
     function getConfigColor(type, text, fallbackHex) {
@@ -183,8 +243,7 @@ window.renderDevProjects = function(data) {
         `;
     }
 
-    const rows = data.map((item, index) => {
-        // [Display Reverted] Schedule block simplified, removed wrapper classes
+    const rows = sortedData.map((item, index) => {
         const scheduleHtml = `
             <div style="display: flex; flex-direction: column; gap: 4px; min-width: 110px;">
                 <div style="display: flex; justify-content: space-between; font-size: 0.8rem; gap: 8px;">
@@ -198,7 +257,6 @@ window.renderDevProjects = function(data) {
             </div>
         `;
 
-        // [Logic Preserved] Action toggle
         const actionHtml = window.__isDevActionMode ? `
             <div style="display: flex; gap: 12px; justify-content: center;">
                 <span style="cursor:pointer;" onclick="window.openDevProjectModal('${item.devId}')" title="編輯">✏️</span>
@@ -206,7 +264,6 @@ window.renderDevProjects = function(data) {
             </div>
         ` : '';
 
-        // [Display Reverted] Opp linking simplified, removed strict ellipsis styling, preserved routing logic
         let oppHtml = '-';
         if (item.assigneeCode && item.projectName) {
             oppHtml = `<a href="#" style="color: #1976d2; text-decoration: none; font-weight: 600;" onclick="event.preventDefault(); window.CRM_APP.navigateTo('opportunity-details', {opportunityId: '${item.assigneeCode}'})">${item.projectName}</a>`;
@@ -214,7 +271,6 @@ window.renderDevProjects = function(data) {
             oppHtml = `<strong>${item.projectName}</strong>`;
         }
 
-        // [Display Reverted] Collaborators simplified, allowed natural break word
         let collabsHtml = '-';
         if (item.collaborators) {
             const names = item.collaborators.split('｜').map(s => s.trim()).filter(Boolean);
@@ -223,12 +279,7 @@ window.renderDevProjects = function(data) {
             }
         }
 
-        // [Display Reverted] Notes simplified, returned to pre-wrap and auto scroll
-        let notesHtml = '-';
-        if (item.notes && item.notes.trim() !== '') {
-            notesHtml = `<div style="font-size: 0.8rem; color: #6b7280; max-width: 180px; max-height: 60px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; padding-right: 4px;">${item.notes}</div>`;
-        }
-
+        // remove notes column visually
         return `
         <tr>
             <td>${index + 1}</td>
@@ -241,12 +292,15 @@ window.renderDevProjects = function(data) {
             <td>${getStatusBadge(item.status || '-')}</td>
             <td>${scheduleHtml}</td>
             <td>${getCombinedProgressHtml(item.progress, item.startDate, item.estCompletionDate)}</td>
-            <td>${notesHtml}</td>
             <td style="vertical-align: middle; text-align: center;">${actionHtml}</td>
         </tr>
     `}).join('');
 
-    // [Display Reverted] Removed scoped wrappers, injected styles, fixed layouts. Reverted count display.
+    const getSortIcon = (field) => {
+        if (window.__devProjectsSortState.field !== field) return '';
+        return window.__devProjectsSortState.direction === 'asc' ? ' ↑' : ' ↓';
+    };
+
     return `
         <div style="font-size: 0.9rem; color: #6b7280; margin-bottom: 12px; font-weight: 500; padding: 0 4px;">共 ${data.length} 筆</div>
         <table class="internal-ops-table">
@@ -258,11 +312,10 @@ window.renderDevProjects = function(data) {
                     <th>關聯功能</th>
                     <th>負責人</th>
                     <th>協作成員</th>
-                    <th>開發階段</th>
-                    <th>狀態</th>
+                    <th onclick="window.handleDevProjectSort('devStage', event)" style="cursor:pointer; user-select:none;" title="點擊依開發階段排序">開發階段<span style="color:#1976d2;">${getSortIcon('devStage')}</span></th>
+                    <th onclick="window.handleDevProjectSort('status', event)" style="cursor:pointer; user-select:none;" title="點擊依狀態排序">狀態<span style="color:#1976d2;">${getSortIcon('status')}</span></th>
                     <th>開發時程</th>
                     <th>進度</th>
-                    <th>備註</th>
                     <th onclick="window.toggleDevTableActions()" style="cursor: pointer; user-select: none; width: 70px; text-align: center; color: #1976d2; white-space: nowrap;" title="點擊切換編輯模式">操作 ${window.__isDevActionMode ? '−' : '+'}</th>
                 </tr>
             </thead>
