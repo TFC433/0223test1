@@ -1,8 +1,11 @@
 /*
  * File Path: public/styles/modules/navigation.css
- * Version: 1.1.6
+ * Version: 1.1.9
  * Date: 2026-04-28
  * Changelog: 
+ * - (v1.1.9) Sidebar UX S-2.1: Force display of group-hidden items in collapsed state.
+ * - (v1.1.8) Sidebar UX S-2: Clean icon rail in collapsed state with CSS tooltips.
+ * - (v1.1.7) Centralized sidebar width variables.
  * - (v1.1.6) Sidebar Final Polish: fixed internal order, enhanced active state, adjusted vertical spacing, and improved alignment.
  * - (v1.1.5) Sidebar Phase B-2: added collapsible Main group, adjusted default expansion states, reordered internal items, and removed admin separator line.
  * - (v1.1.4) Sidebar Phase B-1: fixed group state semantics, cleaned collapsible header pointer behavior, and normalized admin active styling.
@@ -18,7 +21,7 @@
 
 /* 側邊欄 */
 .sidebar {
-    width: 200px;
+    width: var(--sidebar-width);
     background: var(--secondary-bg);
     border-right: none;
     transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -194,7 +197,7 @@ svg.nav-icon {
 
 /* ==================== 收合狀態下的核心樣式 ==================== */
 .app-layout.sidebar-collapsed .sidebar {
-    width: 80px;
+    width: var(--sidebar-collapsed-width);
 }
 
 .app-layout.sidebar-collapsed .sidebar-header {
@@ -212,16 +215,22 @@ svg.nav-icon {
 }
 
 .app-layout.sidebar-collapsed .sidebar .nav-text {
-    opacity: 0;
-    width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    transition: opacity 0.1s ease, width 0.2s ease;
+    display: none;
 }
 
 /* 確保全側邊欄收合時隱藏 chevron 標示 */
 .app-layout.sidebar-collapsed .nav-collapsible svg {
     display: none;
+}
+
+/* 確保全側邊欄收合時完全隱藏群組標題 (Icon Rail 模式) */
+.app-layout.sidebar-collapsed .nav-header {
+    display: none !important;
+}
+
+/* 強制在 Icon Rail 模式下顯示所有項目，忽略群組收合狀態 */
+.app-layout.sidebar-collapsed .nav-item.group-hidden {
+    display: block !important;
 }
 
 /* 收合時的連結樣式修正 */
@@ -259,6 +268,31 @@ svg.nav-icon {
 
 .app-layout.sidebar-collapsed .nav-link:hover svg.nav-icon {
     background: var(--glass-bg);
+}
+
+/* --- Icon Rail Tooltips --- */
+.app-layout.sidebar-collapsed #sidebar-pin-toggle {
+    position: relative;
+}
+
+.app-layout.sidebar-collapsed .nav-link:hover .nav-text,
+.app-layout.sidebar-collapsed #sidebar-pin-toggle:hover .nav-text {
+    display: block;
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 12px;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    padding: 6px 12px;
+    border-radius: var(--rounded-md);
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-color);
+    font-size: 13px;
+    white-space: nowrap;
+    z-index: 2000;
+    pointer-events: none;
 }
 
 /* 主題切換按鈕 */

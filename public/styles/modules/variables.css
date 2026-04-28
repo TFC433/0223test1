@@ -1,4 +1,10 @@
-/* views/styles/modules/variables.css */
+/*
+ * File Path: public/styles/modules/variables.css
+ * Version: 1.0.1
+ * Date: 2026-04-28
+ * Changelog: 
+ * - (v1.0.1) Centralized sidebar width variables.
+ */
 :root {
     /* 色彩 - 暗色主題 (優化後) */
     --primary-bg: #0f172a; /* Slate 900 - 更深的背景 */
@@ -16,6 +22,10 @@
     --accent-red: #f87171; /* 亮紅 */
     --border-color: #334155; /* Slate 700 - 邊框，與卡片背景有區別 */
     --gradient-bg: linear-gradient(135deg, var(--primary-bg) 0%, var(--secondary-bg) 100%);
+
+    /* Sidebar Dimensions */
+    --sidebar-width: 200px;
+    --sidebar-collapsed-width: 80px;
 
     /* 字體大小 (保持不變) */
     --font-size-xs: 0.75rem;
