@@ -156,7 +156,25 @@ function initSessionUserAvatar() {
         '/assets/avatars/avatar-2.png',
         '/assets/avatars/avatar-3.png',
         '/assets/avatars/avatar-4.png',
-        '/assets/avatars/avatar-5.png'
+        '/assets/avatars/avatar-5.png',
+        '/assets/avatars/avatar-6.png',
+        '/assets/avatars/avatar-7.png',
+        '/assets/avatars/avatar-8.png',
+        '/assets/avatars/avatar-9.png',
+        '/assets/avatars/avatar-10.png',
+        '/assets/avatars/avatar-11.png',
+        '/assets/avatars/avatar-12.png',
+        '/assets/avatars/avatar-13.png',
+        '/assets/avatars/avatar-14.png',
+        '/assets/avatars/avatar-15.png',
+        '/assets/avatars/avatar-16.png',
+        '/assets/avatars/avatar-17.png',
+        '/assets/avatars/avatar-18.png',
+        '/assets/avatars/avatar-19.png',
+        '/assets/avatars/avatar-20.png',
+        '/assets/avatars/avatar-21.png',
+        '/assets/avatars/avatar-22.png',
+        '/assets/avatars/avatar-23.png',
     ];
     const colors = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
 
