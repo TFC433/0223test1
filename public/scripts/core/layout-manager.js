@@ -1,8 +1,13 @@
 // public/scripts/core/layout-manager.js
 // 職責：管理側邊欄 (Sidebar)、使用者資訊顯示、以及「角色定義」的單一真理來源
-// @version 1.1.1
+// @version 1.1.6
 // @date 2026-04-28
 // @changelog
+// - (v1.1.6) Sidebar Final Polish: fixed internal order, enhanced active state, adjusted vertical spacing, and improved alignment.
+// - (v1.1.5) Sidebar Final Fix: corrected admin insertion anchor and cleaned nav-header class usage.
+// - (v1.1.4) Sidebar Phase B-2: added collapsible Main group, adjusted default expansion states, reordered internal items, and removed admin separator line.
+// - (v1.1.3) Sidebar Phase B-1: fixed group state semantics, cleaned collapsible header pointer behavior, and normalized admin active styling.
+// - (v1.1.2) Sidebar Phase B: implemented collapsible grouped navigation
 // - (v1.1.1) Updated displayUser() to populate #user-display-account with username or role fallback.
 
 window.CRM_APP = window.CRM_APP || {};
@@ -10,6 +15,7 @@ window.CRM_APP = window.CRM_APP || {};
 const LayoutManager = {
     isPinned: true,
     currentUserRole: 'sales', // 預設
+    groupState: { main: true, analytics: true, internal: false }, // 預設狀態
 
     // 1. 定義預設的角色設定 (預設為中文，確保斷線時也顯示正常)
     defaultRoleDefs: {
@@ -24,9 +30,50 @@ const LayoutManager = {
         // 嘗試建立角色定義 (如果 Config 已經在記憶體中)
         this.buildRoleDefinitions();
         
+        this.setupSidebarGroups(); // Phase B: 初始化側邊欄群組收合邏輯
         this.setupSidebar();
         this.displayUser();
         this.injectAdminFeatures();
+    },
+
+    setupSidebarGroups() {
+        const stored = localStorage.getItem('sidebar-group-state');
+        if (stored) {
+            try {
+                this.groupState = JSON.parse(stored);
+            } catch (e) {
+                console.warn('Failed to parse sidebar-group-state', e);
+            }
+        }
+
+        document.querySelectorAll('.nav-collapsible').forEach(header => {
+            header.addEventListener('click', () => {
+                const group = header.getAttribute('data-group');
+                if (group) {
+                    this.groupState[group] = !this.groupState[group];
+                    localStorage.setItem('sidebar-group-state', JSON.stringify(this.groupState));
+                    this.applySidebarGroupState();
+                }
+            });
+        });
+
+        this.applySidebarGroupState();
+    },
+
+    applySidebarGroupState() {
+        Object.entries(this.groupState).forEach(([group, isExpanded]) => {
+            const header = document.querySelector(`.nav-collapsible[data-group="${group}"]`);
+            if (header) {
+                if (isExpanded) header.classList.remove('collapsed');
+                else header.classList.add('collapsed');
+            }
+
+            const items = document.querySelectorAll(`.nav-item[data-group="${group}"]:not(.nav-collapsible)`);
+            items.forEach(item => {
+                if (isExpanded) item.classList.remove('group-hidden');
+                else item.classList.add('group-hidden');
+            });
+        });
     },
 
     /**
@@ -149,6 +196,7 @@ const LayoutManager = {
         
         // ★★★ 套用 Admin 專屬樣式 Class ★★★
         adminItem.className = 'nav-item admin-restricted';
+        adminItem.setAttribute('data-group', 'internal'); // 確保加入內部工具群組
         
         // ★★★ 修正：指向 'products' 頁面，且 SVG 結構正確 ★★★
         adminItem.innerHTML = `
@@ -162,17 +210,18 @@ const LayoutManager = {
         `;
 
         const internalOpsLink = document.querySelector('.sidebar-nav .nav-link[data-page="internal-ops"]');
+
         if (internalOpsLink && internalOpsLink.closest('.nav-item')) {
             const internalOpsItem = internalOpsLink.closest('.nav-item');
             internalOpsItem.insertAdjacentElement('afterend', adminItem);
         } else {
-            const systemConfigItem = Array.from(sidebarNav.children).find(li => li.textContent.includes('系統設定'));
-            if (systemConfigItem) {
-                sidebarNav.insertBefore(adminItem, systemConfigItem);
-            } else {
-                sidebarNav.appendChild(adminItem);
-            }
+            // fallback (keep existing safe behavior)
+            const sidebarNav = document.querySelector('.sidebar-nav ul') || document.querySelector('.sidebar-menu');
+            sidebarNav.appendChild(adminItem);
         }
+        
+        // 套用群組狀態以處理動態注入的選項
+        this.applySidebarGroupState();
     },
 
     refreshRoleDisplay() {
