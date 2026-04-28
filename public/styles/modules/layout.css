@@ -1,8 +1,9 @@
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.21
+ * Version: 1.1.22
  * Date: 2026-04-28
  * Changelog: 
+ * - (v1.1.22) Dashboard Layout Debug Grid overlay.
  * - (v1.1.21) Centralized sidebar width variables.
  * - (v1.1.20) Header Icon Final Polish: removed remaining button feel and standardized icon control behavior.
  * - (v1.1.19) Header Polish V2 final format regeneration
@@ -204,6 +205,29 @@
 .widget-content { 
     flex-grow: 1;
     min-height: 1px;
+}
+
+/* ==================== Dashboard Layout Debug Grid ==================== */
+.dashboard-grid-flexible.debug-grid {
+    position: relative;
+}
+
+.dashboard-grid-flexible.debug-grid::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    z-index: 999;
+    background-image: repeating-linear-gradient(
+        to right,
+        transparent 0%,
+        transparent calc(100% / 12 - 1px),
+        rgba(148, 163, 184, 0.15) calc(100% / 12 - 1px),
+        rgba(148, 163, 184, 0.15) calc(100% / 12)
+    );
 }
 
 /* ==================== Header User Area Consolidation ==================== */

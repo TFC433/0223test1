@@ -1,3 +1,4 @@
+// File: public/scripts/dashboard/dashboard.js
 // ============================================================================
 // File: public/scripts/dashboard/dashboard.js
 // ============================================================================
@@ -199,6 +200,16 @@ const dashboardManager = {
         } finally {
             if (window.DashboardUI) DashboardUI.hideGlobalLoading();
         }
+    },
+
+    /**
+     * 觸發本地開發用的佈局網格輔助線
+     */
+    toggleLayoutGrid() {
+        const grid = document.querySelector('.dashboard-grid-flexible');
+        if (grid) {
+            grid.classList.toggle('debug-grid');
+        }
     }
 };
 
@@ -207,3 +218,14 @@ window.dashboardManager = dashboardManager;
 if (typeof CRM_APP === 'undefined') {
     window.CRM_APP = { systemConfig: {} };
 }
+
+// ============================================================================
+// Environment-Specific Initialization
+// ============================================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const devToggleBtn = document.getElementById('dev-layout-toggle-btn');
+    const isLocalDev = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    if (devToggleBtn && isLocalDev) {
+        devToggleBtn.style.display = '';
+    }
+});
