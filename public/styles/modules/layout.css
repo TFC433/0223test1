@@ -1,18 +1,20 @@
 /* File: public/styles/modules/layout.css */
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.32
+ * Version: 1.1.34
  * Date: 2026-04-28
  * Changelog: 
- * - (v1.1.32) Dashboard Phase 1.9-E - Balance 6/6 layout and compact announcement widget. (cite: 24)
- * - (v1.1.31) Dashboard Phase 1.9-D - Restore fixed 3x2 KPI grid with no-overflow guard. (cite: 24)
- * - (v1.1.30) Dashboard Phase 1.9-C - Fix stats-grid grid span conflict for KPI announcement two-column layout. (cite: 24)
- * - (v1.1.29) Dashboard Phase 1.9-B - Adaptive KPI grid to preserve 3-column layout without breaking container width. (cite: 24)
- * - (v1.1.28) Dashboard Phase 1.9 - KPI and announcement two-column top layout. (cite: 24)
- * - (v1.1.27) Dashboard Phase 1.8 - Sharp dashboard blocks and half-width KPI cards. (cite: 24)
- * - (v1.1.26) Dashboard Phase 1.7 - Sharp compact KPI cards and temporary announcement removal. (cite: 24)
- * - (v1.1.25) Dashboard Phase 1.6 - Restore KPI grid and slim stat cards. (cite: 24)
- * - (v1.1.24) Dashboard Phase 1.5 - Density & Alignment Polish. (cite: 24)
+ * - (v1.1.34) Dashboard Phase 2-B - Tune dashboard tokens for business KPI and information-feed balance.
+ * - (v1.1.33) Dashboard Phase 2-A - Introduce local dashboard design tokens.
+ * - (v1.1.32) Dashboard Phase 1.9-E - Balance 6/6 layout and compact announcement widget.
+ * - (v1.1.31) Dashboard Phase 1.9-D - Restore fixed 3x2 KPI grid with no-overflow guard.
+ * - (v1.1.30) Dashboard Phase 1.9-C - Fix stats-grid grid span conflict for KPI announcement two-column layout.
+ * - (v1.1.29) Dashboard Phase 1.9-B - Adaptive KPI grid to preserve 3-column layout without breaking container width.
+ * - (v1.1.28) Dashboard Phase 1.9 - KPI and announcement two-column top layout.
+ * - (v1.1.27) Dashboard Phase 1.8 - Sharp dashboard blocks and half-width KPI cards.
+ * - (v1.1.26) Dashboard Phase 1.7 - Sharp compact KPI cards and temporary announcement removal.
+ * - (v1.1.25) Dashboard Phase 1.6 - Restore KPI grid and slim stat cards.
+ * - (v1.1.24) Dashboard Phase 1.5 - Density & Alignment Polish.
  * - (v1.1.23) Dashboard Phase 1 - Industry Layout Structure (Section headers & KPI row).
  * - (v1.1.22) Dashboard Layout Debug Grid overlay.
  * - (v1.1.21) Centralized sidebar width variables.
@@ -359,11 +361,25 @@
     color: var(--accent-red);
 }
 
-/* ==================== Dashboard Sharp & Dual-Column Layout (Phase 1.9-E) ==================== */
+/* ==================== Dashboard Sharp & Dual-Column Layout (Phase 2-B) ==================== */
+
+#page-dashboard {
+    --dashboard-card-radius: 0;
+    --dashboard-kpi-card-padding: 16px 18px;
+    --dashboard-kpi-icon-size: 30px;
+    --dashboard-kpi-number-size: 30px;
+    --dashboard-kpi-number-line-height: 1.08;
+    --dashboard-kpi-label-size: 14px;
+    --dashboard-kpi-trend-size: 13px;
+    --dashboard-announcement-title-size: 14px;
+    --dashboard-announcement-body-size: 12px;
+    --dashboard-announcement-item-padding: 7px 10px;
+    --dashboard-announcement-max-height: 250px;
+}
 
 /* Sharp edges for all dashboard blocks */
 #page-dashboard .dashboard-widget {
-    border-radius: 0;
+    border-radius: var(--dashboard-card-radius);
 }
 
 /* Fix stats-grid grid span conflict (cite: Phase 1.9-C) */
@@ -381,7 +397,7 @@
 
 /* Compact Announcement Widget (cite: Phase 1.9-E) */
 #page-dashboard #announcement-widget {
-    max-height: 220px;
+    max-height: var(--dashboard-announcement-max-height);
     overflow: hidden;
 }
 
@@ -390,32 +406,32 @@
 }
 
 #page-dashboard #announcement-widget .widget-title {
-    font-size: 14px;
+    font-size: var(--dashboard-announcement-title-size);
 }
 
 #page-dashboard #announcement-widget .widget-content {
     overflow-y: auto;
     min-height: 0;
-    font-size: 12px;
+    font-size: var(--dashboard-announcement-body-size);
 }
 
 #page-dashboard #announcement-widget button,
 #page-dashboard #announcement-widget .action-btn,
 #page-dashboard #announcement-widget a {
-    font-size: 12px;
+    font-size: var(--dashboard-announcement-body-size);
 }
 
 #page-dashboard #announcement-widget .announcement-item,
 #page-dashboard #announcement-widget .announcement-card,
 #page-dashboard #announcement-widget .announcement-content {
-    padding: 8px 10px;
+    padding: var(--dashboard-announcement-item-padding);
 }
 
 /* Compact KPI Card Styles & Overflow Guard (cite: Phase 1.9-E) */
 #page-dashboard .stat-card {
-    padding: 14px 16px;
+    padding: var(--dashboard-kpi-card-padding);
     min-height: auto;
-    border-radius: 0;
+    border-radius: var(--dashboard-card-radius);
     box-shadow: var(--shadow-md);
     width: 100%;
     min-width: 0;
@@ -434,20 +450,20 @@
 }
 
 #page-dashboard .stat-icon {
-    width: 32px;
-    height: 32px;
+    width: var(--dashboard-kpi-icon-size);
+    height: var(--dashboard-kpi-icon-size);
 }
 
 #page-dashboard .stat-label {
-    font-size: inherit;
+    font-size: var(--dashboard-kpi-label-size);
 }
 
 #page-dashboard .stat-number {
-    font-size: 24px;
-    line-height: 1.1;
+    font-size: var(--dashboard-kpi-number-size);
+    line-height: var(--dashboard-kpi-number-line-height);
 }
 
 #page-dashboard .stat-trend {
     margin-top: 4px;
-    font-size: inherit;
+    font-size: var(--dashboard-kpi-trend-size);
 }
