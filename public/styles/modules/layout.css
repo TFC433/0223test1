@@ -1,8 +1,17 @@
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.14
+ * Version: 1.1.20
  * Date: 2026-04-28
  * Changelog: 
+ * - (v1.1.20) Header Icon Final Polish: removed remaining button feel and standardized icon control behavior.
+ * - (v1.1.19) Header Polish V2 final format regeneration
+ * - (v1.1.19) Removed system icon button feel
+ * - (v1.1.19) Refined header typography
+ * - (v1.1.19) Scoped compact primary header actions
+ * - (v1.1.18) Header Polish V2: removed system icon button feel and refined header typography.
+ * - (v1.1.17) Header Polish V2: refined ghost icon controls and scoped compact header primary actions.
+ * - (v1.1.16) Header Refinement Patch: Added .header-ghost-btn for system controls and adjusted .header-action-group-user margin-left to spacing-4.
+ * - (v1.1.15) Header Hierarchy Patch: Implemented product-grade header grouping with distinct user identity zone using margin-left separation.
  * - (v1.1.14) Header User Identity Patch: Implemented strict two-line flex layout with 2px gap, removed margin hacks, and normalized text line styles.
  * - (v1.1.13) Header User Identity Spacing Patch: Increased gap to 12px and refined 2-line identity text styles.
  * - (v1.1.5) Restored subtle border-bottom to .page-header to provide separation during scrolling.
@@ -74,7 +83,7 @@
 }
 
 .header-content h1 {
-    font-size: var(--font-size-xl); 
+    font-size: calc(var(--font-size-xl) + 1px); 
     font-weight: 700; 
     margin-bottom: 0;
     color: var(--text-primary);
@@ -82,17 +91,68 @@
 
 .page-subtitle { 
     color: var(--text-secondary); 
-    font-size: 13px; 
+    font-size: 14px; 
     margin: 0;
     white-space: nowrap;
 }
 
 .header-actions {
     display: flex;
-    gap: var(--spacing-3);
+    gap: var(--spacing-5);
     flex-wrap: wrap;
     align-items: center;
     margin-left: auto;
+}
+
+.header-action-group {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-3);
+    flex-wrap: nowrap;
+}
+
+/* Scoped styles for primary action buttons in the header to ensure compact refinement */
+.header-action-group-primary .action-btn {
+    height: 32px;
+    padding: var(--spacing-2) var(--spacing-3);
+    font-size: 14px;
+}
+
+.header-action-group-primary .action-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.header-action-group-user {
+    margin-left: var(--spacing-4);
+}
+
+.header-ghost-btn {
+    padding: 6px;
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: transparent;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none;
+    transform: none;
+}
+
+.header-ghost-btn:hover {
+    background: rgba(148, 163, 184, 0.08);
+    transform: none;
+    opacity: 1;
+}
+
+.header-ghost-btn svg {
+    width: 16px;
+    height: 16px;
+    display: block;
 }
 
 #page-content-container {
@@ -205,7 +265,7 @@
 }
 
 .user-identity-name {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
