@@ -1,3 +1,18 @@
+/*
+ * File Path: public/styles/modules/layout.css
+ * Version: 1.1.5
+ * Date: 2026-04-24
+ * Changelog: 
+ * - (v1.1.5) Restored subtle border-bottom to .page-header to provide separation during scrolling.
+ * - (v1.1.5) Removed border-top from #page-content-container. Ensured border-left defines the left boundary.
+ * - (v1.1.4) Added border-left to #page-content-container to complete the content boundary.
+ * - (v1.1.3) Removed border-bottom from .page-header to seamlessly unify it with the app shell.
+ * - (v1.1.3) Added a very subtle border-top to #page-content-container.
+ * - (v1.1.2) Added flex layout to .header-content > div to place title and subtitle inline.
+ * - (v1.1.1) Modified .page-header padding to reduce height and align left edge with sidebar.
+ * - (v1.1.0) Modified .main-content to set padding: 0. Modified .page-header to sticky app bar.
+ */
+
 /* ==================== modules/layout.css ==================== */
 /* 應用程式佈局 - 第3個模組 */
 
@@ -16,7 +31,7 @@
     background: var(--primary-bg); 
     min-height: 100vh;
     transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    padding: var(--spacing-8);
+    padding: 0;
 }
 
 /* ========== 收合狀態下主內容區的樣式 ========== */
@@ -27,15 +42,18 @@
 
 .page-header {
     background: var(--secondary-bg);
-    border-bottom: 1px solid var(--border-color);
-    padding: var(--spacing-6) var(--spacing-8);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    padding: var(--spacing-2) var(--spacing-6) var(--spacing-2) var(--spacing-3);
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: var(--spacing-5);
-    border-radius: var(--rounded-2xl);
-    box-shadow: var(--shadow-md);
-    margin-bottom: var(--spacing-8);
+    border-radius: 0;
+    box-shadow: none;
+    margin: 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
 }
 
 .header-content { 
@@ -45,16 +63,26 @@
     gap: var(--spacing-4);
 }
 
+/* Title & Subtitle Wrapper Flexbox */
+.header-content > div {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
 .header-content h1 {
-    font-size: var(--font-size-3xl); 
+    font-size: var(--font-size-xl); 
     font-weight: 700; 
-    margin-bottom: var(--spacing-1);
+    margin-bottom: 0;
     color: var(--text-primary);
 }
 
 .page-subtitle { 
     color: var(--text-secondary); 
-    font-size: var(--font-size-base); 
+    font-size: 13px; 
+    margin: 0;
+    white-space: nowrap;
 }
 
 .header-actions {
@@ -63,6 +91,11 @@
     flex-wrap: wrap;
     align-items: center;
     margin-left: auto;
+}
+
+#page-content-container {
+    padding: var(--spacing-8);
+    border-left: 1px solid rgba(148, 163, 184, 0.25);
 }
 
 /* 儀表板網格 */
