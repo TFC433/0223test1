@@ -1,9 +1,10 @@
 /*
  * File Path: public/styles/modules/navigation.css
- * Version: 1.1.0
- * Date: 2026-04-24
+ * Version: 1.1.1
+ * Date: 2026-04-28
  * Changelog: 
- * - Modified .sidebar to remove border-right for visual fusion with header.
+ * - (v1.1.1) Applied Header Consolidation D1 Patch: Visually hide .theme-toggle.
+ * - (v1.1.0) Modified .sidebar to remove border-right for visual fusion with header.
  * - Modified .sidebar-header to remove border-bottom to unify the logo area.
  */
 
@@ -209,12 +210,14 @@ svg.nav-icon {
 
 /* 主題切換按鈕 */
 .theme-toggle {
+    /* [D1 Patch] Visually hide the dynamic theme toggle during consolidation */
+    display: none !important;
+    
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: var(--rounded-lg);
     width: 44px;
     height: 44px;
-    display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;

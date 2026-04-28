@@ -1,8 +1,10 @@
 // public/scripts/core/main.js
 // 職責：System initialization entry + parallelized resource loading
-// @version [Phase B] Stale Invalidation Mechanism Patch
-// @date 2026-04-23
+// @version [Phase B] Stale Invalidation Mechanism Patch + Session Avatar
+// @date 2026-04-28
 // @changelog
+// - Modified logout() to clear 'crmSessionAvatar' from sessionStorage
+// - Added initSessionUserAvatar() for dynamic session-stable avatar injection
 // - Parallelized loadResources fetches using Promise.all
 // - Removal of unintended injected code
 // - [Patch Phase B] Added CRM_APP.markStale utility for router cache invalidation
@@ -135,7 +137,53 @@ function logout() {
     localStorage.removeItem('crmToken');
     localStorage.removeItem('crmCurrentUserName');
     localStorage.removeItem('crmUserRole');
+    
+    try {
+        sessionStorage.removeItem('crmSessionAvatar');
+    } catch (e) {
+        console.warn('[Avatar] Failed to clear session avatar on logout', e);
+    }
+    
     window.location.href = '/';
+}
+
+function initSessionUserAvatar() {
+    const avatarEl = document.getElementById('user-avatar');
+    if (!avatarEl) return;
+
+    const images = [
+        '/assets/avatars/avatar-1.png',
+        '/assets/avatars/avatar-2.png',
+        '/assets/avatars/avatar-3.png',
+        '/assets/avatars/avatar-4.png',
+        '/assets/avatars/avatar-5.png'
+    ];
+    const colors = ['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
+
+    let sessionData;
+    try {
+        const stored = sessionStorage.getItem('crmSessionAvatar');
+        if (stored) {
+            sessionData = JSON.parse(stored);
+        }
+    } catch (e) {
+        console.warn('[Avatar] Failed to parse session avatar data', e);
+    }
+
+    if (!sessionData || !sessionData.image || !sessionData.color) {
+        sessionData = {
+            image: images[Math.floor(Math.random() * images.length)],
+            color: colors[Math.floor(Math.random() * colors.length)]
+        };
+        try {
+            sessionStorage.setItem('crmSessionAvatar', JSON.stringify(sessionData));
+        } catch (e) {
+            console.warn('[Avatar] Failed to set session avatar data', e);
+        }
+    }
+
+    avatarEl.style.backgroundColor = sessionData.color;
+    avatarEl.style.backgroundImage = `url("${sessionData.image}")`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -148,6 +196,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // 註冊內部運營頁面模組
         if (typeof loadInternalOpsPage === 'function') window.CRM_APP.pageModules['internal-ops'] = loadInternalOpsPage;
 
+        initSessionUserAvatar();
+        
         CRM_APP.init();
     }
 });

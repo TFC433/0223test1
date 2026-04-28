@@ -1,5 +1,9 @@
 // public/scripts/core/layout-manager.js
 // 職責：管理側邊欄 (Sidebar)、使用者資訊顯示、以及「角色定義」的單一真理來源
+// @version 1.1.1
+// @date 2026-04-28
+// @changelog
+// - (v1.1.1) Updated displayUser() to populate #user-display-account with username or role fallback.
 
 window.CRM_APP = window.CRM_APP || {};
 
@@ -118,10 +122,17 @@ const LayoutManager = {
         this.buildRoleDefinitions(); 
 
         const el = document.getElementById('user-display-name');
+        const accountEl = document.getElementById('user-display-account');
         const name = localStorage.getItem('crmCurrentUserName') || '使用者';
+        
+        const username = 
+            localStorage.getItem('crmUsername') || 
+            localStorage.getItem('crmUserRole') || 
+            '帳號資訊';
         
         // 這裡依照您的需求：只顯示名字，不顯示任何職稱
         if (el) el.textContent = `${name}`; 
+        if (accountEl) accountEl.textContent = username;
         
         window.CRM_APP.currentUser = name;
     },

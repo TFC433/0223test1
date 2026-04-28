@@ -1,8 +1,9 @@
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.5
- * Date: 2026-04-24
+ * Version: 1.1.13
+ * Date: 2026-04-28
  * Changelog: 
+ * - (v1.1.13) Header User Identity Spacing Patch: Increased gap to 12px and refined 2-line identity text styles.
  * - (v1.1.5) Restored subtle border-bottom to .page-header to provide separation during scrolling.
  * - (v1.1.5) Removed border-top from #page-content-container. Ensured border-left defines the left boundary.
  * - (v1.1.4) Added border-left to #page-content-container to complete the content boundary.
@@ -141,4 +142,129 @@
 .widget-content { 
     flex-grow: 1;
     min-height: 1px;
+}
+
+/* ==================== Header User Area Consolidation ==================== */
+
+/* 1. Visually hide the logout button */
+.header-actions .action-btn.danger {
+    display: none !important;
+}
+
+/* 2. Style the user display as a compact, de-decorated tool control */
+.header-actions .user-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px; /* Set to exactly 12px for correct spacing */
+    padding: 4px 6px;
+    border-radius: 0; 
+    cursor: pointer;
+    background: transparent;
+    transition: opacity 0.2s ease;
+}
+
+/* Subtle hover behavior without heavy background block */
+.header-actions .user-info:hover {
+    opacity: 0.8;
+    background: transparent;
+}
+
+/* Ensure chevron remains visually clean and lightweight */
+.header-actions .user-info svg {
+    flex-shrink: 0;
+    margin-left: 4px;
+    opacity: 0.6; /* Lower visual weight */
+}
+
+/* ==================== Session User Avatar Styles ==================== */
+
+.user-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+    background-color: var(--glass-bg);
+    background-size: 70%;
+    background-repeat: no-repeat;
+    background-position: center;
+    border: 1px solid rgba(148, 163, 184, 0.15); 
+}
+
+/* ==================== Header User Identity Block Styles ==================== */
+
+.user-identity-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.15;
+    min-width: 0;
+}
+
+.user-identity-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.user-identity-account {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.65;
+    white-space: nowrap;
+    margin-top: 1px;
+}
+
+/* ==================== Header User Dropdown ==================== */
+
+.user-dropdown-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.user-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 160px;
+    background: var(--secondary-bg);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    padding: 6px;
+    z-index: 200; /* Above header, below sidebar and modals */
+    display: none;
+}
+
+.user-dropdown-container.open .user-dropdown-menu {
+    display: block;
+}
+
+/* Dropdown Flattening Rules Applied */
+.user-dropdown-menu .user-dropdown-item {
+    width: 100%;
+    display: flex !important;
+    align-items: center;
+    justify-content: flex-start;
+    margin: 0;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    text-align: left;
+    height: auto;
+    backdrop-filter: none;
+}
+
+.user-dropdown-menu .user-dropdown-item:hover {
+    background: var(--glass-bg);
+}
+
+.user-dropdown-menu .user-dropdown-item.danger {
+    color: var(--accent-red);
 }

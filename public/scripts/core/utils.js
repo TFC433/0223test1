@@ -1,4 +1,8 @@
-// public/scripts/utils.js (已淨化，只包含通用工具函式)
+// public/scripts/core/utils.js
+// @version 1.0.1
+// @date 2026-04-28
+// @changelog 
+// - Added User Dropdown D2 logic (toggle User Dropdown, close on outside click, safely close on Escape).
 
 // ==================== 全域變數與設定 ====================
 let searchDebounceTimer;
@@ -74,7 +78,11 @@ window.addEventListener('keydown', function(event) {
             console.log(`[UI] Escape key pressed, closing panel.`);
             closePanel(); // closePanel is now in ui.js, but loaded globally
         }
-
+        
+        // [D2 Patch] Safely close User Dropdown menu
+        if (typeof window.closeUserDropdown === 'function') {
+            window.closeUserDropdown();
+        }
     }
 });
 
@@ -200,3 +208,43 @@ if (!document.getElementById(notificationAnimationStyleId)) {
     `;
     document.head.appendChild(style);
 }
+
+
+// ==================== Header User Dropdown (D2 Patch) ====================
+
+// Toggle dropdown visibility and block event bubbling to avoid instant closure
+window.toggleUserDropdown = function(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const container = document.getElementById('user-dropdown-container');
+    if (container) {
+        container.classList.toggle('open');
+        const menu = document.getElementById('user-dropdown-menu');
+        if (menu) {
+            menu.setAttribute('aria-hidden', !container.classList.contains('open'));
+        }
+    }
+};
+
+// Close dropdown if it is currently open
+window.closeUserDropdown = function() {
+    const container = document.getElementById('user-dropdown-container');
+    if (container && container.classList.contains('open')) {
+        container.classList.remove('open');
+        const menu = document.getElementById('user-dropdown-menu');
+        if (menu) {
+            menu.setAttribute('aria-hidden', 'true');
+        }
+    }
+};
+
+// Global click-outside listener
+document.addEventListener('click', function(event) {
+    if (!event.target.closest('.user-dropdown-container')) {
+        if (typeof window.closeUserDropdown === 'function') {
+            window.closeUserDropdown();
+        }
+    }
+});
