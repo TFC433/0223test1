@@ -83,7 +83,7 @@
 }
 
 .header-content h1 {
-    font-size: calc(var(--font-size-xl) + 1px); 
+    font-size: calc(var(--font-size-xl) + 2px);
     font-weight: 700; 
     margin-bottom: 0;
     color: var(--text-primary);
@@ -91,7 +91,7 @@
 
 .page-subtitle { 
     color: var(--text-secondary); 
-    font-size: 14px; 
+    font-size: 13px; 
     margin: 0;
     white-space: nowrap;
 }
@@ -266,7 +266,7 @@
 
 .user-identity-name {
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-primary);
     white-space: nowrap;
     margin: 0;
