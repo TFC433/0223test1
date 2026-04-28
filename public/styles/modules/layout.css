@@ -1,8 +1,9 @@
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.13
+ * Version: 1.1.14
  * Date: 2026-04-28
  * Changelog: 
+ * - (v1.1.14) Header User Identity Patch: Implemented strict two-line flex layout with 2px gap, removed margin hacks, and normalized text line styles.
  * - (v1.1.13) Header User Identity Spacing Patch: Increased gap to 12px and refined 2-line identity text styles.
  * - (v1.1.5) Restored subtle border-bottom to .page-header to provide separation during scrolling.
  * - (v1.1.5) Removed border-top from #page-content-container. Ensured border-left defines the left boundary.
@@ -179,8 +180,9 @@
 /* ==================== Session User Avatar Styles ==================== */
 
 .user-avatar {
-    width: 24px;
-    height: 24px;
+    width: 30px;
+    height: 30px;
+    margin-right: 10px;  /* 或 8px */
     border-radius: 50%;
     flex-shrink: 0;
     display: inline-block;
@@ -199,21 +201,23 @@
     justify-content: center;
     line-height: 1.15;
     min-width: 0;
+    gap: 2px;
 }
 
 .user-identity-name {
-    font-size: 12px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
+    margin: 0;
 }
 
 .user-identity-account {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
     opacity: 0.65;
     white-space: nowrap;
-    margin-top: 1px;
+    margin: 0;
 }
 
 /* ==================== Header User Dropdown ==================== */
