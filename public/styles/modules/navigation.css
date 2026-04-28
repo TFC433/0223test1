@@ -1,8 +1,9 @@
 /*
  * File Path: public/styles/modules/navigation.css
- * Version: 1.1.9
+ * Version: 1.1.10
  * Date: 2026-04-28
  * Changelog: 
+ * - (v1.1.10) Sidebar Logo Dual Mode (Expanded vs Collapsed).
  * - (v1.1.9) Sidebar UX S-2.1: Force display of group-hidden items in collapsed state.
  * - (v1.1.8) Sidebar UX S-2: Clean icon rail in collapsed state with CSS tooltips.
  * - (v1.1.7) Centralized sidebar width variables.
@@ -54,6 +55,10 @@
     height: auto;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: block;
+}
+
+.sidebar-logo-icon {
+    display: none;
 }
 
 .sidebar-nav { 
@@ -208,6 +213,14 @@ svg.nav-icon {
 
 .app-layout.sidebar-collapsed .sidebar-logo {
     max-width: 40px; 
+}
+
+.app-layout.sidebar-collapsed .sidebar-logo-full {
+    display: none;
+}
+
+.app-layout.sidebar-collapsed .sidebar-logo-icon {
+    display: block;
 }
 
 .app-layout.sidebar-collapsed #sidebar-pin-toggle {
