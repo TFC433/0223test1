@@ -1,8 +1,19 @@
+/* File: public/styles/modules/layout.css */
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.22
+ * Version: 1.1.32
  * Date: 2026-04-28
  * Changelog: 
+ * - (v1.1.32) Dashboard Phase 1.9-E - Balance 6/6 layout and compact announcement widget. (cite: 24)
+ * - (v1.1.31) Dashboard Phase 1.9-D - Restore fixed 3x2 KPI grid with no-overflow guard. (cite: 24)
+ * - (v1.1.30) Dashboard Phase 1.9-C - Fix stats-grid grid span conflict for KPI announcement two-column layout. (cite: 24)
+ * - (v1.1.29) Dashboard Phase 1.9-B - Adaptive KPI grid to preserve 3-column layout without breaking container width. (cite: 24)
+ * - (v1.1.28) Dashboard Phase 1.9 - KPI and announcement two-column top layout. (cite: 24)
+ * - (v1.1.27) Dashboard Phase 1.8 - Sharp dashboard blocks and half-width KPI cards. (cite: 24)
+ * - (v1.1.26) Dashboard Phase 1.7 - Sharp compact KPI cards and temporary announcement removal. (cite: 24)
+ * - (v1.1.25) Dashboard Phase 1.6 - Restore KPI grid and slim stat cards. (cite: 24)
+ * - (v1.1.24) Dashboard Phase 1.5 - Density & Alignment Polish. (cite: 24)
+ * - (v1.1.23) Dashboard Phase 1 - Industry Layout Structure (Section headers & KPI row).
  * - (v1.1.22) Dashboard Layout Debug Grid overlay.
  * - (v1.1.21) Centralized sidebar width variables.
  * - (v1.1.20) Header Icon Final Polish: removed remaining button feel and standardized icon control behavior.
@@ -27,7 +38,6 @@
  */
 
 /* ==================== modules/layout.css ==================== */
-/* 應用程式佈局 - 第3個模組 */
 
 /* 應用程式佈局 */
 .app-layout {
@@ -39,7 +49,6 @@
 /* 主要內容區域 */
 .main-content {
     flex: 1; 
-    /* 【修改】套用全域變數 */
     margin-left: var(--sidebar-width);
     background: var(--primary-bg); 
     min-height: 100vh;
@@ -49,7 +58,6 @@
 
 /* ========== 收合狀態下主內容區的樣式 ========== */
 .app-layout.sidebar-collapsed .main-content {
-    /* 【修改】套用全域變數 */
     margin-left: var(--sidebar-collapsed-width);
 }
 
@@ -76,7 +84,6 @@
     gap: var(--spacing-4);
 }
 
-/* Title & Subtitle Wrapper Flexbox */
 .header-content > div {
     display: flex;
     align-items: baseline;
@@ -113,7 +120,6 @@
     flex-wrap: nowrap;
 }
 
-/* Scoped styles for primary action buttons in the header to ensure compact refinement */
 .header-action-group-primary .action-btn {
     height: 32px;
     padding: var(--spacing-2) var(--spacing-3);
@@ -158,7 +164,7 @@
 }
 
 #page-content-container {
-    padding: var(--spacing-8);
+    padding: var(--spacing-7, 28px);
     border-left: 1px solid rgba(148, 163, 184, 0.25);
 }
 
@@ -166,7 +172,7 @@
 .dashboard-grid-flexible {
     display: grid;
     grid-template-columns: repeat(12, 1fr);
-    gap: var(--spacing-6);
+    gap: var(--spacing-5);
 }
 
 .grid-col-3 { grid-column: span 3; }
@@ -232,16 +238,14 @@
 
 /* ==================== Header User Area Consolidation ==================== */
 
-/* 1. Visually hide the logout button */
 .header-actions .action-btn.danger {
     display: none !important;
 }
 
-/* 2. Style the user display as a compact, de-decorated tool control */
 .header-actions .user-info {
     display: inline-flex;
     align-items: center;
-    gap: 12px; /* Set to exactly 12px for correct spacing */
+    gap: 12px;
     padding: 4px 6px;
     border-radius: 0; 
     cursor: pointer;
@@ -249,17 +253,15 @@
     transition: opacity 0.2s ease;
 }
 
-/* Subtle hover behavior without heavy background block */
 .header-actions .user-info:hover {
     opacity: 0.8;
     background: transparent;
 }
 
-/* Ensure chevron remains visually clean and lightweight */
 .header-actions .user-info svg {
     flex-shrink: 0;
     margin-left: 4px;
-    opacity: 0.6; /* Lower visual weight */
+    opacity: 0.6;
 }
 
 /* ==================== Session User Avatar Styles ==================== */
@@ -267,7 +269,7 @@
 .user-avatar {
     width: 38px;
     height: 38px;
-    margin-right: 12px;  /* 或 8px */
+    margin-right: 12px; 
     border-radius: 50%;
     flex-shrink: 0;
     display: inline-block;
@@ -323,7 +325,7 @@
     border-radius: 12px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     padding: 6px;
-    z-index: 200; /* Above header, below sidebar and modals */
+    z-index: 200;
     display: none;
 }
 
@@ -331,7 +333,6 @@
     display: block;
 }
 
-/* Dropdown Flattening Rules Applied */
 .user-dropdown-menu .user-dropdown-item {
     width: 100%;
     display: flex !important;
@@ -356,4 +357,97 @@
 
 .user-dropdown-menu .user-dropdown-item.danger {
     color: var(--accent-red);
+}
+
+/* ==================== Dashboard Sharp & Dual-Column Layout (Phase 1.9-E) ==================== */
+
+/* Sharp edges for all dashboard blocks */
+#page-dashboard .dashboard-widget {
+    border-radius: 0;
+}
+
+/* Fix stats-grid grid span conflict (cite: Phase 1.9-C) */
+#page-dashboard .dashboard-grid-flexible > .stats-grid.grid-col-6 {
+    grid-column: span 6;
+}
+
+/* Fixed 3x2 KPI Grid with Balance (cite: Phase 1.9-E) */
+#page-dashboard .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--spacing-5);
+    min-width: 0;
+}
+
+/* Compact Announcement Widget (cite: Phase 1.9-E) */
+#page-dashboard #announcement-widget {
+    max-height: 220px;
+    overflow: hidden;
+}
+
+#page-dashboard #announcement-widget .widget-header {
+    margin-bottom: 8px;
+}
+
+#page-dashboard #announcement-widget .widget-title {
+    font-size: 14px;
+}
+
+#page-dashboard #announcement-widget .widget-content {
+    overflow-y: auto;
+    min-height: 0;
+    font-size: 12px;
+}
+
+#page-dashboard #announcement-widget button,
+#page-dashboard #announcement-widget .action-btn,
+#page-dashboard #announcement-widget a {
+    font-size: 12px;
+}
+
+#page-dashboard #announcement-widget .announcement-item,
+#page-dashboard #announcement-widget .announcement-card,
+#page-dashboard #announcement-widget .announcement-content {
+    padding: 8px 10px;
+}
+
+/* Compact KPI Card Styles & Overflow Guard (cite: Phase 1.9-E) */
+#page-dashboard .stat-card {
+    padding: 14px 16px;
+    min-height: auto;
+    border-radius: 0;
+    box-shadow: var(--shadow-md);
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+#page-dashboard .stat-label,
+#page-dashboard .stat-number,
+#page-dashboard .stat-trend {
+    min-width: 0;
+    white-space: nowrap;
+}
+
+#page-dashboard .stat-header {
+    margin-bottom: 8px;
+}
+
+#page-dashboard .stat-icon {
+    width: 32px;
+    height: 32px;
+}
+
+#page-dashboard .stat-label {
+    font-size: inherit;
+}
+
+#page-dashboard .stat-number {
+    font-size: 24px;
+    line-height: 1.1;
+}
+
+#page-dashboard .stat-trend {
+    margin-top: 4px;
+    font-size: inherit;
 }
