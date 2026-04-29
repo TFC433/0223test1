@@ -1,13 +1,16 @@
 /**
  * public/scripts/dashboard/dashboard_widgets.js
- * @version 1.4.1
+ * @version 1.4.6
  * @date 2026-04-29
  * @changelog
- * - [PHASE T2.1] Dashboard Phase T2.1 Trend Widget final semantics alignment.
- * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
- * - [PHASE T1/T1.1] Added renderTrendWidget and removed dashboard announcements.
- * - Refactored _updateTrend semantic rendering for business-grade KPI logic (directional symbols, positive/negative/neutral classes).
- * - Implemented client-side memory cache and lazy fetching for MTU and SI tooltip hover states.
+ * - Dashboard Phase T3-Revenue Visual Final Polish
+ * - Restore legend to top-center position
+ * - Move "成交金額" legend item to the end (legendIndex: 99)
+ * - Hide revenue column by default (visible: false)
+ * - Demote revenue column to background (opacity, padding, zIndex)
+ * - Elevate line series priority and adjust styling (lineWidth, fillOpacity)
+ * - Add formatted revenue tooltip (thousands separator)
+ * - Reorder series for correct visual layering
  */
 
 const DashboardWidgets = {
@@ -181,9 +184,13 @@ const DashboardWidgets = {
         let categories = [];
         let oppData = [];
         let eventData = [];
+        let wonData = [];
+        let revenueData = [];
 
         let oppAcc = 0;
         let eventAcc = 0;
+        let wonAcc = 0;
+        let revenueAcc = 0;
 
         if (currentMode === 'ytd') {
             // YTD 模式：固定 1 到 12 月
@@ -197,24 +204,39 @@ const DashboardWidgets = {
                 
                 const oppVal = trendData.opportunities[key] || 0;
                 const eventVal = trendData.events[key] || 0;
+                const wonVal = (trendData.won && trendData.won[key]) || 0;
+                const revenueVal = (trendData.revenue && trendData.revenue[key]) || 0;
 
                 // 未來的月份維持 null (無論是每月新增或累積總量)，確保線條不會掉到 0 或延伸至未來
                 if (i > currentMonth) {
                     oppData.push(null);
                     eventData.push(null);
+                    wonData.push(null);
+                    revenueData.push(null);
                 } else if (currentView === 'cumulative') {
                     oppAcc += oppVal;
                     eventAcc += eventVal;
+                    wonAcc += wonVal;
+                    revenueAcc += revenueVal;
                     oppData.push(oppAcc);
                     eventData.push(eventAcc);
+                    wonData.push(wonAcc);
+                    revenueData.push(revenueAcc);
                 } else {
                     oppData.push(oppVal);
                     eventData.push(eventVal);
+                    wonData.push(wonVal);
+                    revenueData.push(revenueVal);
                 }
             }
         } else {
             // 全資料模式：從最早資料的月份延伸至當前月份
-            let allKeys = new Set([...Object.keys(trendData.opportunities), ...Object.keys(trendData.events)]);
+            let allKeys = new Set([
+                ...Object.keys(trendData.opportunities), 
+                ...Object.keys(trendData.events),
+                ...Object.keys(trendData.won || {}),
+                ...Object.keys(trendData.revenue || {})
+            ]);
             
             // 修復排序：依據數值比較年份與月份，確保時間軸先後正確
             let sortedKeys = Array.from(allKeys).sort((a, b) => {
@@ -241,15 +263,23 @@ const DashboardWidgets = {
                 
                 const oppVal = trendData.opportunities[key] || 0;
                 const eventVal = trendData.events[key] || 0;
+                const wonVal = (trendData.won && trendData.won[key]) || 0;
+                const revenueVal = (trendData.revenue && trendData.revenue[key]) || 0;
 
                 if (currentView === 'cumulative') {
                     oppAcc += oppVal;
                     eventAcc += eventVal;
+                    wonAcc += wonVal;
+                    revenueAcc += revenueVal;
                     oppData.push(oppAcc);
                     eventData.push(eventAcc);
+                    wonData.push(wonAcc);
+                    revenueData.push(revenueAcc);
                 } else {
                     oppData.push(oppVal);
                     eventData.push(eventVal);
+                    wonData.push(wonVal);
+                    revenueData.push(revenueVal);
                 }
 
                 currM++;
@@ -259,13 +289,16 @@ const DashboardWidgets = {
 
         if (typeof Highcharts === 'undefined') return;
 
-        const viewLabel = currentView === 'cumulative' ? '（累積）' : '（月新增）';
+        const viewLabel = currentView === 'cumulative' ? '（累積）' : '（月增）';
 
         Highcharts.chart('trend-chart-container', {
             chart: { type: 'areaspline', backgroundColor: 'transparent', style: { fontFamily: 'inherit' } },
             title: { text: null },
             xAxis: { categories: categories, crosshair: true },
-            yAxis: { title: { text: null }, min: 0, labels: { enabled: false } },
+            yAxis: [
+                { title: { text: null }, min: 0, labels: { enabled: false } },
+                { title: { text: null }, min: 0, labels: { enabled: false }, opposite: true }
+            ],
             tooltip: { shared: true },
             plotOptions: {
                 areaspline: { 
@@ -274,8 +307,31 @@ const DashboardWidgets = {
                 }
             },
             series: [
-                { name: `機會案件${viewLabel}`, data: oppData, color: '#10b981' },
-                { name: `事件紀錄${viewLabel}`, data: eventData, color: '#f59e0b' }
+                { 
+                    name: `成交金額${viewLabel}`, 
+                    type: 'column', 
+                    data: revenueData, 
+                    color: '#3b82f6', 
+                    yAxis: 1,
+                    zIndex: 0,
+                    opacity: 0.35,
+                    pointPadding: 0.2,
+                    groupPadding: 0.3,
+                    borderWidth: 0,
+                    visible: false,
+                    legendIndex: 99,
+                    tooltip: {
+                        pointFormatter: function () {
+                            return '<span style="color:' + this.series.color + '">●</span> ' +
+                                   this.series.name + ': <b>' +
+                                   (this.y ? this.y.toLocaleString() : '0') +
+                                   '</b><br/>';
+                        }
+                    }
+                },
+                { name: `機會案件${viewLabel}`, data: oppData, color: '#10b981', yAxis: 0, zIndex: 3 },
+                { name: `事件紀錄${viewLabel}`, data: eventData, color: '#f59e0b', yAxis: 0, zIndex: 3, fillOpacity: 0.1 },
+                { name: `成交案件${viewLabel}`, data: wonData, color: '#8b5cf6', yAxis: 0, zIndex: 3, lineWidth: 3 }
             ],
             credits: { enabled: false },
             legend: { align: 'center', verticalAlign: 'top', borderWidth: 0 }

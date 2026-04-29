@@ -4,9 +4,12 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.8.5
+ * @version 2.8.8
  * @date 2026-04-29
  * @changelog
+ * - [PHASE T3-Revenue] Dashboard Phase T3-Revenue - Add 成交金額 column series aligned with KPI won cohort.
+ * - [HOTFIX] Fixed ReferenceError: Cannot access 'wonCountRes' before initialization in batch3 Promise.all.
+ * - [PHASE T3-Won] Dashboard Phase T3-Won - Add 成交案件 trend series aligned with KPI won logic.
  * - [PHASE T2.1] Dashboard Phase T2.1 Trend Widget final semantics alignment.
  * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
  * - [PHASE T1/T1.1] Added trendData (opportunities and event logs) to getDashboardData payload.
@@ -152,6 +155,10 @@ class DashboardService {
                 ['event_logs_general', 'event_logs_iot', 'event_logs_dt', 'event_logs_dx', 'event_logs_summary']
                 .map(t => supabase.from(t).select('created_time').then(res => res.data || []).catch(() => []))
             ).then(results => ({ data: results.flat() }));
+
+            const lightweightWonPromise = supabase.from('opportunities')
+                .select('updated_time, opportunity_value')
+                .or('current_stage.in.(受注,已成交),current_status.eq.已完成');
             
             // [PHASE 9-A] Targeted SQL reads instead of full table hydration
             const intActivityPromise = typeof this.interactionSqlReader.getInteractionActivities === 'function'
@@ -162,7 +169,7 @@ class DashboardService {
                 ? this.interactionSqlReader.getRecentInteractionsFeed(5)
                 : Promise.resolve([]);
 
-            return await Promise.all([activeOppsPromise, lightweightOppsPromise, intActivityPromise, recentIntPromise, lightweightEventsPromise]);
+            return await Promise.all([activeOppsPromise, lightweightOppsPromise, intActivityPromise, recentIntPromise, lightweightEventsPromise, lightweightWonPromise]);
         })();
 
         // --- Batch 2: Secondary / Reference Data ---
@@ -325,7 +332,7 @@ class DashboardService {
         // 資料處理與統計邏輯 (Post-Fetch Aggregation)
         // =================================================================
         
-        const [activeOpportunitiesRaw, lightweightOppsRes, interactionActivities, recentInteractions, lightweightEventsRes] = batch1Result;
+        const [activeOpportunitiesRaw, lightweightOppsRes, interactionActivities, recentInteractions, lightweightEventsRes, lightweightWonRes] = batch1Result;
         
         const [calendarData, systemConfig, companies, recentContactsRaw] = batch2Result;
         const [
@@ -489,6 +496,8 @@ class DashboardService {
         const trendData = {
             opportunities: {},
             events: {},
+            won: {},
+            revenue: {},
             currentYear: today.getFullYear(),
             currentMonth: today.getMonth() + 1
         };
@@ -509,6 +518,20 @@ class DashboardService {
                 if (!isNaN(d.getTime())) {
                     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                     trendData.events[key] = (trendData.events[key] || 0) + 1;
+                }
+            }
+        });
+
+        (lightweightWonRes.data || []).forEach(opp => {
+            if (opp.updated_time) {
+                const d = new Date(opp.updated_time);
+                if (!isNaN(d.getTime())) {
+                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    trendData.won[key] = (trendData.won[key] || 0) + 1;
+
+                    const raw = opp.opportunity_value;
+                    const amount = raw ? parseFloat(String(raw).replace(/,/g, '')) || 0 : 0;
+                    trendData.revenue[key] = (trendData.revenue[key] || 0) + amount;
                 }
             }
         });
