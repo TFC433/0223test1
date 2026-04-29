@@ -1,9 +1,10 @@
 /* File: public/styles/modules/layout.css */
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.37
+ * Version: 1.1.38
  * Date: 2026-04-29
  * Changelog: 
+ * - (v1.1.38) Dashboard Phase T2.1 - Trend Widget final semantics alignment.
  * - (v1.1.37) Dashboard Phase T2 - Official release of Dashboard Trend Widget with Cumulative view.
  * - (v1.1.36) Dashboard Phase T1/T1.1 - Added KPI Trend Widget styles.
  * - (v1.1.35) Dashboard Phase 3 - Upgrade KPI cards with visual accents, subtle hover interaction, spacing hierarchy, and trend typography.
@@ -520,7 +521,7 @@
 #page-dashboard .stat-card.teal { border-top: 2px solid #14b8a6; }
 #page-dashboard .stat-card.teal .stat-icon { background: rgba(20, 184, 166, 0.7); color: #14b8a6; }
 
-/* ==================== KPI Trend Widget (Phase T1/T1.1/T2) ==================== */
+/* ==================== KPI Trend Widget (Phase T1/T1.1/T2/T2.1) ==================== */
 #kpi-trend-widget {
     display: flex;
     flex-direction: column;

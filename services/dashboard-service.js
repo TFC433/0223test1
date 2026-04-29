@@ -4,9 +4,10 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.8.4
+ * @version 2.8.5
  * @date 2026-04-29
  * @changelog
+ * - [PHASE T2.1] Dashboard Phase T2.1 Trend Widget final semantics alignment.
  * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
  * - [PHASE T1/T1.1] Added trendData (opportunities and event logs) to getDashboardData payload.
  * - Implemented MTU/SI details lazy loading logic (getCompanyActivityDetails).

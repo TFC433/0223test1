@@ -1,8 +1,9 @@
 /**
  * public/scripts/dashboard/dashboard_widgets.js
- * @version 1.4.0
+ * @version 1.4.1
  * @date 2026-04-29
  * @changelog
+ * - [PHASE T2.1] Dashboard Phase T2.1 Trend Widget final semantics alignment.
  * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
  * - [PHASE T1/T1.1] Added renderTrendWidget and removed dashboard announcements.
  * - Refactored _updateTrend semantic rendering for business-grade KPI logic (directional symbols, positive/negative/neutral classes).
@@ -197,17 +198,15 @@ const DashboardWidgets = {
                 const oppVal = trendData.opportunities[key] || 0;
                 const eventVal = trendData.events[key] || 0;
 
-                if (currentView === 'cumulative') {
-                    if (i > currentMonth) {
-                        // 未來的月份維持 null
-                        oppData.push(null);
-                        eventData.push(null);
-                    } else {
-                        oppAcc += oppVal;
-                        eventAcc += eventVal;
-                        oppData.push(oppAcc);
-                        eventData.push(eventAcc);
-                    }
+                // 未來的月份維持 null (無論是每月新增或累積總量)，確保線條不會掉到 0 或延伸至未來
+                if (i > currentMonth) {
+                    oppData.push(null);
+                    eventData.push(null);
+                } else if (currentView === 'cumulative') {
+                    oppAcc += oppVal;
+                    eventAcc += eventVal;
+                    oppData.push(oppAcc);
+                    eventData.push(eventAcc);
                 } else {
                     oppData.push(oppVal);
                     eventData.push(eventVal);

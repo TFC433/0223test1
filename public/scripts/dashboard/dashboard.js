@@ -4,9 +4,10 @@
 // ============================================================================
 /**
  * public/scripts/dashboard/dashboard.js
- * @version 3.4.3
+ * @version 3.4.4
  * @date 2026-04-29
  * @changelog
+ * - [PHASE T2.1] Dashboard Phase T2.1 Trend Widget final semantics alignment.
  * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
  * - [PHASE T1/T1.1] Replaced announcement widget with KPI Trend Widget.
  * - removed unfinished dashboard analytical range UI from production
