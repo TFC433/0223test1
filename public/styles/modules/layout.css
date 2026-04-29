@@ -1,9 +1,10 @@
 /* File: public/styles/modules/layout.css */
 /*
  * File Path: public/styles/modules/layout.css
- * Version: 1.1.34
- * Date: 2026-04-28
+ * Version: 1.1.35
+ * Date: 2026-04-29
  * Changelog: 
+ * - (v1.1.35) Dashboard Phase 3 - Upgrade KPI cards with visual accents, subtle hover interaction, spacing hierarchy, and trend typography.
  * - (v1.1.34) Dashboard Phase 2-B - Tune dashboard tokens for business KPI and information-feed balance.
  * - (v1.1.33) Dashboard Phase 2-A - Introduce local dashboard design tokens.
  * - (v1.1.32) Dashboard Phase 1.9-E - Balance 6/6 layout and compact announcement widget.
@@ -367,8 +368,8 @@
     --dashboard-card-radius: 0;
     --dashboard-kpi-card-padding: 16px 18px;
     --dashboard-kpi-icon-size: 30px;
-    --dashboard-kpi-number-size: 30px;
-    --dashboard-kpi-number-line-height: 1.08;
+    --dashboard-kpi-number-size: 36px;
+    --dashboard-kpi-number-line-height: 1.05;
     --dashboard-kpi-label-size: 14px;
     --dashboard-kpi-trend-size: 13px;
     --dashboard-announcement-title-size: 14px;
@@ -436,6 +437,12 @@
     width: 100%;
     min-width: 0;
     overflow: hidden;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+#page-dashboard .stat-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
 }
 
 #page-dashboard .stat-label,
@@ -446,24 +453,67 @@
 }
 
 #page-dashboard .stat-header {
-    margin-bottom: 8px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 #page-dashboard .stat-icon {
     width: var(--dashboard-kpi-icon-size);
     height: var(--dashboard-kpi-icon-size);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+}
+
+#page-dashboard .stat-icon svg {
+    width: 18px;
+    height: 18px;
 }
 
 #page-dashboard .stat-label {
     font-size: var(--dashboard-kpi-label-size);
+    font-weight: 500;
+    opacity: 0.85;
+    color: var(--text-secondary);
 }
 
 #page-dashboard .stat-number {
     font-size: var(--dashboard-kpi-number-size);
     line-height: var(--dashboard-kpi-number-line-height);
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: var(--text-primary);
 }
 
 #page-dashboard .stat-trend {
     margin-top: 4px;
     font-size: var(--dashboard-kpi-trend-size);
+    font-weight: 500;
+    opacity: 0.9;
 }
+
+#page-dashboard .stat-trend.trend-positive { color: #10b981; }
+#page-dashboard .stat-trend.trend-negative { color: #ef4444; }
+#page-dashboard .stat-trend.trend-neutral { color: #94a3b8; }
+
+/* KPI Card Colors & Accents */
+#page-dashboard .stat-card.blue { border-top: 2px solid #3b82f6; }
+#page-dashboard .stat-card.blue .stat-icon { background: rgba(59, 130, 246, 0.7); color: #3b82f6; }
+
+#page-dashboard .stat-card.green { border-top: 2px solid #10b981; }
+#page-dashboard .stat-card.green .stat-icon { background: rgba(16, 185, 129, 0.7); color: #10b981; }
+
+#page-dashboard .stat-card.orange { border-top: 2px solid #f97316; }
+#page-dashboard .stat-card.orange .stat-icon { background: rgba(249, 115, 22, 0.7); color: #f97316; }
+
+#page-dashboard .stat-card.purple { border-top: 2px solid #8b5cf6; }
+#page-dashboard .stat-card.purple .stat-icon { background: rgba(139, 92, 246, 0.7); color: #8b5cf6; }
+
+#page-dashboard .stat-card.cyan { border-top: 2px solid #06b6d4; }
+#page-dashboard .stat-card.cyan .stat-icon { background: rgba(6, 182, 212, 0.7); color: #06b6d4; }
+
+#page-dashboard .stat-card.teal { border-top: 2px solid #14b8a6; }
+#page-dashboard .stat-card.teal .stat-icon { background: rgba(20, 184, 166, 0.7); color: #14b8a6; }

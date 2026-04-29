@@ -1,8 +1,9 @@
 /**
  * public/scripts/dashboard/dashboard_widgets.js
- * @version 1.1.0 Phase C-2.5 (Patch: Tooltip Lazy Load)
- * @date 2026-04-24
+ * @version 1.2.0
+ * @date 2026-04-29
  * @changelog
+ * - Refactored _updateTrend semantic rendering for business-grade KPI logic (directional symbols, positive/negative/neutral classes).
  * - Implemented client-side memory cache and lazy fetching for MTU and SI tooltip hover states.
  */
 
@@ -52,7 +53,25 @@ const DashboardWidgets = {
 
     _updateTrend(id, value) {
         const el = document.getElementById(id);
-        if (el) el.textContent = value > 0 ? `+ ${value} 本月` : '';
+        if (!el) return;
+
+        const num = Number(value);
+        if (Number.isNaN(num) || value === null || value === undefined) {
+            el.textContent = '';
+            el.className = 'stat-trend';
+            return;
+        }
+
+        if (num > 0) {
+            el.textContent = `▲ 本月 +${num}`;
+            el.className = 'stat-trend trend-positive';
+        } else if (num < 0) {
+            el.textContent = `▼ 本月 ${num}`;
+            el.className = 'stat-trend trend-negative';
+        } else {
+            el.textContent = `本月 0`;
+            el.className = 'stat-trend trend-neutral';
+        }
     },
 
     _companyActivityDetailsCache: { mtu: null, si: null },
