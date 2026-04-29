@@ -4,9 +4,11 @@
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.8.2 Phase C-2.5 (Patch: Tooltip Lazy Load)
- * @date 2026-04-24
+ * @version 2.8.4
+ * @date 2026-04-29
  * @changelog
+ * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
+ * - [PHASE T1/T1.1] Added trendData (opportunities and event logs) to getDashboardData payload.
  * - Implemented MTU/SI details lazy loading logic (getCompanyActivityDetails).
  * - Removed activeNames/inactiveNames array construction from main dashboard payload to reduce bloat.
  * - Added in-memory TTL cache for RAW contact stats to prevent O(N) hydration loop on every load.
@@ -144,6 +146,12 @@ class DashboardService {
             const lightweightOppsPromise = supabase.from('opportunities')
                 .select('opportunity_id, opportunity_name, customer_company, created_time');
             
+            // Lightweight fetch for event dates for trend widget across 5 partitioned tables
+            const lightweightEventsPromise = Promise.all(
+                ['event_logs_general', 'event_logs_iot', 'event_logs_dt', 'event_logs_dx', 'event_logs_summary']
+                .map(t => supabase.from(t).select('created_time').then(res => res.data || []).catch(() => []))
+            ).then(results => ({ data: results.flat() }));
+            
             // [PHASE 9-A] Targeted SQL reads instead of full table hydration
             const intActivityPromise = typeof this.interactionSqlReader.getInteractionActivities === 'function'
                 ? this.interactionSqlReader.getInteractionActivities()
@@ -153,7 +161,7 @@ class DashboardService {
                 ? this.interactionSqlReader.getRecentInteractionsFeed(5)
                 : Promise.resolve([]);
 
-            return await Promise.all([activeOppsPromise, lightweightOppsPromise, intActivityPromise, recentIntPromise]);
+            return await Promise.all([activeOppsPromise, lightweightOppsPromise, intActivityPromise, recentIntPromise, lightweightEventsPromise]);
         })();
 
         // --- Batch 2: Secondary / Reference Data ---
@@ -316,7 +324,7 @@ class DashboardService {
         // 資料處理與統計邏輯 (Post-Fetch Aggregation)
         // =================================================================
         
-        const [activeOpportunitiesRaw, lightweightOppsRes, interactionActivities, recentInteractions] = batch1Result;
+        const [activeOpportunitiesRaw, lightweightOppsRes, interactionActivities, recentInteractions, lightweightEventsRes] = batch1Result;
         
         const [calendarData, systemConfig, companies, recentContactsRaw] = batch2Result;
         const [
@@ -476,6 +484,34 @@ class DashboardService {
             days: thisWeekDetails.days || [] 
         };
 
+        // KPI Trend Data Aggregation
+        const trendData = {
+            opportunities: {},
+            events: {},
+            currentYear: today.getFullYear(),
+            currentMonth: today.getMonth() + 1
+        };
+
+        (lightweightOppsRes.data || []).forEach(opp => {
+            if (opp.created_time) {
+                const d = new Date(opp.created_time);
+                if (!isNaN(d.getTime())) {
+                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    trendData.opportunities[key] = (trendData.opportunities[key] || 0) + 1;
+                }
+            }
+        });
+
+        (lightweightEventsRes.data || []).forEach(ev => {
+            if (ev.created_time) {
+                const d = new Date(ev.created_time);
+                if (!isNaN(d.getTime())) {
+                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    trendData.events[key] = (trendData.events[key] || 0) + 1;
+                }
+            }
+        });
+
         return {
             stats,
             kanbanData,
@@ -483,7 +519,8 @@ class DashboardService {
             todaysAgenda: calendarData.todayEvents || [],
             recentActivity,
             weeklyBusiness: thisWeeksEntries,
-            thisWeekInfo: thisWeekInfoForDashboard
+            thisWeekInfo: thisWeekInfoForDashboard,
+            trendData
         };
     }
 

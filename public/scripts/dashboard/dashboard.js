@@ -4,9 +4,11 @@
 // ============================================================================
 /**
  * public/scripts/dashboard/dashboard.js
- * @version 3.4.1
- * @date 2026-04-23
+ * @version 3.4.3
+ * @date 2026-04-29
  * @changelog
+ * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
+ * - [PHASE T1/T1.1] Replaced announcement widget with KPI Trend Widget.
  * - removed unfinished dashboard analytical range UI from production
  * - preserved backend range capability for future use
  * - stabilized dashboard for archive/release
@@ -57,9 +59,8 @@ const dashboardManager = {
 
         try {
             // 1. 併發請求資料 (已移除贅餘的 interactions/all 請求)
-            const [dashboardResult, announcementResult] = await Promise.all([
-                authedFetch(dashboardApiUrl),
-                authedFetch('/api/announcements')
+            const [dashboardResult] = await Promise.all([
+                authedFetch(dashboardApiUrl)
             ]);
 
             if (!dashboardResult.success) throw new Error(dashboardResult.details || '獲取儀表板資料失敗');
@@ -90,9 +91,12 @@ const dashboardManager = {
             // A. 基礎 Widgets
             if (window.DashboardWidgets) {
                 DashboardWidgets.renderStats(data.stats);
-                if (announcementResult.success) {
-                    DashboardWidgets.renderAnnouncements(announcementResult.data);
+                
+                // 渲染業務趨勢分析圖表
+                if (data.trendData) {
+                    DashboardWidgets.renderTrendWidget(data.trendData, 'ytd', 'monthly');
                 }
+                
                 const activityWidget = document.querySelector('#activity-feed-widget .widget-content');
                 if (activityWidget) {
                     activityWidget.innerHTML = DashboardWidgets.renderActivityFeed(data.recentActivity || []);

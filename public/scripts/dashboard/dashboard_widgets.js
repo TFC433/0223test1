@@ -1,8 +1,10 @@
 /**
  * public/scripts/dashboard/dashboard_widgets.js
- * @version 1.2.0
+ * @version 1.4.0
  * @date 2026-04-29
  * @changelog
+ * - [PHASE T2] Official release of Dashboard Trend Widget with Cumulative view.
+ * - [PHASE T1/T1.1] Added renderTrendWidget and removed dashboard announcements.
  * - Refactored _updateTrend semantic rendering for business-grade KPI logic (directional symbols, positive/negative/neutral classes).
  * - Implemented client-side memory cache and lazy fetching for MTU and SI tooltip hover states.
  */
@@ -157,67 +159,128 @@ const DashboardWidgets = {
         listEl.innerHTML = inactiveListHtml + moreHtml;
     },
 
+    _currentTrendData: null,
+
     /**
-     * 渲染公告區塊
-     * @param {Array} announcements - 公告列表
+     * 渲染 KPI 趨勢分析 Widget
      */
-    renderAnnouncements(announcements) {
-        const container = document.querySelector('#announcement-widget .widget-content');
-        const header = document.querySelector('#announcement-widget .widget-header');
-        if (!container || !header) return;
-
-        // 清除舊按鈕避免重複
-        const oldBtn = header.querySelector('.action-btn');
-        if(oldBtn) oldBtn.remove();
-
-        const viewAllBtn = document.createElement('button');
-        viewAllBtn.className = 'action-btn secondary';
-        viewAllBtn.textContent = '查看更多公告';
-        viewAllBtn.onclick = () => CRM_APP.navigateTo('announcements');
-        header.appendChild(viewAllBtn);
-
-        if (!announcements || announcements.length === 0) {
-            container.innerHTML = `<div class="alert alert-info" style="text-align: center;">目前沒有公告</div>`;
-            return;
+    renderTrendWidget(data, mode, viewType) {
+        // 確保在傳入 null 觸發更新時能安全重用舊有資料
+        if (data !== null && data !== undefined) {
+            this._currentTrendData = data;
         }
+        if (!this._currentTrendData) return;
 
-        let html = '<div class="announcement-list">';
-        // 僅顯示最新的一則
-        announcements.slice(0, 1).forEach(item => {
-            const isPinnedIcon = item.isPinned ? '<span class="pinned-icon" title="置頂公告">📌</span>' : '';
-            html += `
-                <div class="announcement-item" data-announcement-id="${item.id}">
-                    <div class="announcement-header">
-                        <h4 class="announcement-title">${isPinnedIcon}${item.title}</h4>
-                        <span class="announcement-creator">👤 ${item.creator}</span>
-                    </div>
-                    <p class="announcement-content">${item.content}</p>
-                    <div class="announcement-footer">
-                        <span class="announcement-time">發佈於 ${formatDateTime(item.lastUpdateTime)}</span>
-                    </div>
-                </div>
-            `;
-        });
-        html += '</div>';
-        container.innerHTML = html;
+        const trendData = this._currentTrendData;
+        
+        // 模式解析：傳入 mode -> select value -> 預設 'ytd' / 'monthly'
+        const currentMode = mode || document.getElementById('trend-mode-select')?.value || 'ytd';
+        const currentView = viewType || document.getElementById('trend-view-select')?.value || 'monthly';
+        
+        let categories = [];
+        let oppData = [];
+        let eventData = [];
 
-        // 處理過長內容的展開收合
-        const announcementItem = container.querySelector('.announcement-item');
-        if (announcementItem) {
-            const contentP = announcementItem.querySelector('.announcement-content');
-            if (contentP.scrollHeight > contentP.clientHeight) {
-                const footer = announcementItem.querySelector('.announcement-footer');
-                const toggleBtn = document.createElement('button');
-                toggleBtn.textContent = '展開';
-                toggleBtn.className = 'action-btn small secondary announcement-toggle';
-                toggleBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    contentP.classList.toggle('expanded');
-                    toggleBtn.textContent = contentP.classList.contains('expanded') ? '收合' : '展開';
-                };
-                footer.prepend(toggleBtn);
+        let oppAcc = 0;
+        let eventAcc = 0;
+
+        if (currentMode === 'ytd') {
+            // YTD 模式：固定 1 到 12 月
+            const year = trendData.currentYear;
+            const currentMonth = trendData.currentMonth;
+
+            for (let i = 1; i <= 12; i++) {
+                const monthStr = String(i).padStart(2, '0');
+                const key = `${year}-${monthStr}`;
+                categories.push(`${i}月`);
+                
+                const oppVal = trendData.opportunities[key] || 0;
+                const eventVal = trendData.events[key] || 0;
+
+                if (currentView === 'cumulative') {
+                    if (i > currentMonth) {
+                        // 未來的月份維持 null
+                        oppData.push(null);
+                        eventData.push(null);
+                    } else {
+                        oppAcc += oppVal;
+                        eventAcc += eventVal;
+                        oppData.push(oppAcc);
+                        eventData.push(eventAcc);
+                    }
+                } else {
+                    oppData.push(oppVal);
+                    eventData.push(eventVal);
+                }
+            }
+        } else {
+            // 全資料模式：從最早資料的月份延伸至當前月份
+            let allKeys = new Set([...Object.keys(trendData.opportunities), ...Object.keys(trendData.events)]);
+            
+            // 修復排序：依據數值比較年份與月份，確保時間軸先後正確
+            let sortedKeys = Array.from(allKeys).sort((a, b) => {
+                const [yearA, monthA] = a.split('-').map(Number);
+                const [yearB, monthB] = b.split('-').map(Number);
+                return yearA !== yearB ? yearA - yearB : monthA - monthB;
+            });
+            
+            if (sortedKeys.length === 0) {
+                const currentMonthStr = String(trendData.currentMonth).padStart(2, '0');
+                sortedKeys.push(`${trendData.currentYear}-${currentMonthStr}`);
+            }
+            
+            const [startYear, startMonth] = sortedKeys[0].split('-').map(Number);
+            const endYear = trendData.currentYear;
+            const endMonth = trendData.currentMonth;
+            
+            let currY = startYear;
+            let currM = startMonth;
+            
+            while (currY < endYear || (currY === endYear && currM <= endMonth)) {
+                const key = `${currY}-${String(currM).padStart(2, '0')}`;
+                categories.push(key);
+                
+                const oppVal = trendData.opportunities[key] || 0;
+                const eventVal = trendData.events[key] || 0;
+
+                if (currentView === 'cumulative') {
+                    oppAcc += oppVal;
+                    eventAcc += eventVal;
+                    oppData.push(oppAcc);
+                    eventData.push(eventAcc);
+                } else {
+                    oppData.push(oppVal);
+                    eventData.push(eventVal);
+                }
+
+                currM++;
+                if (currM > 12) { currM = 1; currY++; }
             }
         }
+
+        if (typeof Highcharts === 'undefined') return;
+
+        const viewLabel = currentView === 'cumulative' ? '（累積）' : '（月新增）';
+
+        Highcharts.chart('trend-chart-container', {
+            chart: { type: 'areaspline', backgroundColor: 'transparent', style: { fontFamily: 'inherit' } },
+            title: { text: null },
+            xAxis: { categories: categories, crosshair: true },
+            yAxis: { title: { text: null }, min: 0, labels: { enabled: false } },
+            tooltip: { shared: true },
+            plotOptions: {
+                areaspline: { 
+                    fillOpacity: 0.2, 
+                    marker: { enabled: false, symbol: 'circle', radius: 3, states: { hover: { enabled: true } } } 
+                }
+            },
+            series: [
+                { name: `機會案件${viewLabel}`, data: oppData, color: '#10b981' },
+                { name: `事件紀錄${viewLabel}`, data: eventData, color: '#f59e0b' }
+            ],
+            credits: { enabled: false },
+            legend: { align: 'center', verticalAlign: 'top', borderWidth: 0 }
+        });
         
         // 注入樣式
         this._ensureStyles();
@@ -282,19 +345,6 @@ const DashboardWidgets = {
             const style = document.createElement('style');
             style.id = 'dashboard-widget-styles';
             style.innerHTML = `
-                /* 公告樣式 */
-                .announcement-item { padding: 1rem; border-radius: var(--rounded-lg); cursor: pointer; transition: background-color 0.2s ease; border: 1px solid var(--border-color); }
-                .announcement-item:hover { background-color: var(--glass-bg); }
-                .announcement-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; gap: 1rem; }
-                .announcement-title { font-weight: 600; color: var(--text-primary); margin: 0; }
-                .pinned-icon { margin-right: 0.5rem; }
-                .announcement-creator { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); background: var(--glass-bg); padding: 2px 8px; border-radius: 1rem; flex-shrink: 0; }
-                .announcement-content { font-size: 0.9rem; color: var(--text-secondary); line-height: 1.6; margin: 0; white-space: pre-wrap; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-                .announcement-content.expanded { -webkit-line-clamp: unset; max-height: none; }
-                .announcement-footer { margin-top: 0.75rem; display:flex; justify-content: space-between; align-items: center; }
-                .announcement-toggle { margin-right: auto; }
-                .announcement-time { font-size: 0.8rem; color: var(--text-muted); }
-
                 /* 浮動資訊卡片 Tooltip 樣式 */
                 .custom-tooltip {
                     display: none;
