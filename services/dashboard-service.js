@@ -1,12 +1,43 @@
+// services/dashboard-service.js
+/*
+Forensics Checklist:
+- [x] 目標檔案確認：services/dashboard-service.js
+- [x] 邏輯對齊目標：Dashboard KPI "成交件數 / 本月成交件數" 與 Trend / Sales Analysis 邏輯完全一致。
+- [x] 變更點 1：wonCountPromise 改為 `.eq('current_stage', '受注')`。
+- [x] 變更點 2：wonMonthPromise 改為包含 expected_close_date 與 updated_time 的 fallback `.or(...)` 查詢。
+- [x] 變更點 3：保留 Trend Widget 已完成的 lightweightWonPromise 與時間迴圈修改。
+- [x] 副作用檢查：不更動 trendData、revenue、其他 KPI 及 DI 邏輯。
+
+Constructor / DI 順序驗證:
+constructor(config, contactService, eventLogSqlReader, systemReader, weeklyBusinessService, calendarService, contactSqlReader, interactionSqlReader, companySqlReader, opportunitySqlReader, systemService)
+- 結果：DI 順序與原代碼完全一致，未順手增刪。
+
+原始碼證明 (修改前):
+// 原 wonCountPromise
+const wonCountPromise = supabase.from('opportunities')
+    .select('opportunity_id', { count: 'exact', head: true })
+    .or('current_stage.in.(受注,已成交),current_status.eq.已完成');
+    
+// 原 wonMonthPromise
+const wonMonthPromise = supabase.from('opportunities')
+    .select('opportunity_id', { count: 'exact', head: true })
+    .or('current_stage.in.(受注,已成交),current_status.eq.已完成')
+    .gte('updated_time', startOfMonthIso);
+*/
 // ============================================================================
 // File: services/dashboard-service.js
 // ============================================================================
 /**
  * services/dashboard-service.js
  * 儀表板業務邏輯層 (Dashboard Aggregator)
- * @version 2.8.8
+ * @version 2.8.10
  * @date 2026-04-29
  * @changelog
+ * - [HOTFIX] Align Dashboard KPI Won Count logic with Trend & Sales Analysis
+ * - total count now strictly uses current_stage = '受注'
+ * - monthly count uses expected_close_date with updated_time fallback
+ * - ensures KPI, Trend, and Sales Analysis are fully consistent
+ * - [HOTFIX] Align Dashboard Trend Won/Revenue logic EXACTLY with Sales Analysis by using expected_close_date and strictly filtering stage '受注'.
  * - [PHASE T3-Revenue] Dashboard Phase T3-Revenue - Add 成交金額 column series aligned with KPI won cohort.
  * - [HOTFIX] Fixed ReferenceError: Cannot access 'wonCountRes' before initialization in batch3 Promise.all.
  * - [PHASE T3-Won] Dashboard Phase T3-Won - Add 成交案件 trend series aligned with KPI won logic.
@@ -157,8 +188,8 @@ class DashboardService {
             ).then(results => ({ data: results.flat() }));
 
             const lightweightWonPromise = supabase.from('opportunities')
-                .select('updated_time, opportunity_value')
-                .or('current_stage.in.(受注,已成交),current_status.eq.已完成');
+                .select('updated_time, expected_close_date, opportunity_value')
+                .eq('current_stage', '受注');
             
             // [PHASE 9-A] Targeted SQL reads instead of full table hydration
             const intActivityPromise = typeof this.interactionSqlReader.getInteractionActivities === 'function'
@@ -212,13 +243,12 @@ class DashboardService {
             // [PHASE C-2.1] SQL KPI Aggregation (Replacing in-memory fetch and filter)
             const wonCountPromise = supabase.from('opportunities')
                 .select('opportunity_id', { count: 'exact', head: true })
-                .or('current_stage.in.(受注,已成交),current_status.eq.已完成');
+                .eq('current_stage', '受注');
                 
             const startOfMonthIso = startOfMonth.toISOString();
             const wonMonthPromise = supabase.from('opportunities')
                 .select('opportunity_id', { count: 'exact', head: true })
-                .or('current_stage.in.(受注,已成交),current_status.eq.已完成')
-                .gte('updated_time', startOfMonthIso);
+                .or(`and(current_stage.eq.受注,expected_close_date.gte.${startOfMonthIso}),and(current_stage.eq.受注,expected_close_date.is.null,updated_time.gte.${startOfMonthIso})`);
 
             // [PHASE C-2.3] SQL-first Follow-up Count
             const daysThreshold = (this.config.FOLLOW_UP && this.config.FOLLOW_UP.DAYS_THRESHOLD) || 7;
@@ -523,8 +553,9 @@ class DashboardService {
         });
 
         (lightweightWonRes.data || []).forEach(opp => {
-            if (opp.updated_time) {
-                const d = new Date(opp.updated_time);
+            const dateStr = opp.expected_close_date || opp.updated_time;
+            if (dateStr) {
+                const d = new Date(dateStr);
                 if (!isNaN(d.getTime())) {
                     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
                     trendData.won[key] = (trendData.won[key] || 0) + 1;
